@@ -3,6 +3,8 @@
 //#define LINUX
 //#define __KERNEL__
 
+#include "utility.h"
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/netfilter.h>
@@ -31,29 +33,30 @@ MODULE_VERSION("0.1");
 static struct nf_hook_ops net_ops;
 static struct nf_hook_ops net_ops_out;
 
-// Incoming handler
+// Handle packets coming from external network
 unsigned int inbound_handler(unsigned int hooknum, struct sk_buff *skb, 
 							const struct net_device *in,
 							const struct net_device *out, 
 							int (*okfn)(struct sk_buff *))
 {   
-	// Otherwise let the packet through
-	printk("ARG: Inbound: in: %s out: %s skb: len %i daddr %6x\n",
-			in->name, out->name,
-			skb->len, *(skb->head));
+	//printk("ARG: Inbound: in: %s out: %s\n", in->name, out->name);
+	//printAscii(skb->len, skb->data);
+	//printk("\n");
 	return NF_ACCEPT;
 }
 
-// Outgoing handler
+// Handles packets bound for outside network
 unsigned int outbound_handler(unsigned int hooknum, struct sk_buff *skb, 
 								const struct net_device *in,
 								const struct net_device *out,
 								int (*okfn)(struct sk_buff *))
-{   
-	// Otherwise let the packet through
-	printk("ARG: Outbound: in: %s out: %s skb: len %i daddr %6x\n",
-			in->name, out->name,
-			skb->len, *(skb->head));
+{
+	int headLen = skb_headlen(skb);
+
+	printk("ARG: Outbound: in: %s out: %s head: %i, data: %i", in->name, out->name, headLen, skb->data_len);
+	printRaw(headLen, skb->data);
+	printAscii(skb->data_len, skb->data + headLen);
+	printk("\n");
 	return NF_ACCEPT;
 }
 

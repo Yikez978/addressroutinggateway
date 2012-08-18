@@ -1,8 +1,11 @@
-c_files := $(wildcard *.c)
+c_files := $(filter-out $(wildcard *.mod.c),$(wildcard *.c))
 obj-m += arg.o
-arg-objs := $(patsubst %.o,%.c, $(c_files))
+#arg-objs := $(patsubst %.c,%.o,$(c_files))
+arg-objs := init.o utility.o director.o
  
 all :
+	echo $(arg-objs)
+	echo $(c_files)
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
  
 clean :
@@ -34,7 +37,10 @@ local-start : all local-stop
 	sudo insmod arg.ko
 
 local-stop : 
-	-lsmod | grep arg >/dev/null && sudo rmmod arg
+	-lsmod | grep arg >/dev/null && sudo rmmod -w arg
+
+local-monitor :
+	watch -n 10 'dmesg | grep ARG | tail -n 20'
 
 # Control ARG gateways
 start : all
