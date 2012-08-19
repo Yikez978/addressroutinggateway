@@ -46,6 +46,16 @@ char is_signature_valid(struct sk_buff const *skb)
 	return 1;
 }
 
+char do_arg_wrap(struct sk_buff *skb)
+{
+	return 1;
+}
+
+char do_arg_unwrap(struct sk_buff *skb)
+{
+	return 1;
+}
+
 int get_arg_id(uchar const *ip)
 {
 	// Pretend it's always someone

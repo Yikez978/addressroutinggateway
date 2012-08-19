@@ -27,11 +27,16 @@ unsigned int direct_inbound(struct sk_buff *skb)
 			// Correct IP. Is it signed correctly?
 			if(is_signature_valid(skb))
 			{
-				printk("ARG: Accept: Unwrap\n");
-
-				// TBD do unwrap
-
-				return NF_ACCEPT;
+				if(do_arg_unwrap(skb))
+				{
+					printk("ARG: Accept: Unwrap\n");
+					return NF_ACCEPT;
+				}
+				else
+				{
+					printk("ARG: Reject: Unable to unwrap\n");
+					return NF_DROP;
+				}
 			}
 			else
 			{
@@ -52,7 +57,7 @@ unsigned int direct_inbound(struct sk_buff *skb)
 	{
 		// From a non-ARG IP
 		// Pass off to the NAT handler
-		if(do_nat_rewrite(skb))
+		if(do_nat_inbound_rewrite(skb))
 		{
 			printk("ARG: Accept: Rewrite\n");
 			return NF_ACCEPT;
@@ -69,6 +74,39 @@ unsigned int direct_inbound(struct sk_buff *skb)
 
 unsigned int direct_outbound(struct sk_buff *skb)
 {
+	struct iphdr *iph = ip_hdr(skb);
+	
+	// Who should handle it?
+	if(is_arg_ip((uchar*)&iph->daddr))
+	{
+		// Destined for an ARG network
+		if(do_arg_wrap(skb))
+		{
+			printk("ARG: Outbound Accept: Wrap\n");
+			return NF_ACCEPT;
+		}
+		else
+		{
+			printk("ARG: Outbound Reject: Failed to wrap\n");
+			return NF_DROP;
+		}
+	}
+	else
+	{
+		// Unknown destination. Rewrite via NAT, creating an entry
+		// if needed
+		if(do_nat_outbound_rewrite(skb))
+		{
+			printk("ARG: Outbound: Accept: Rewrite\n");
+			return NF_ACCEPT;
+		}
+		else
+		{
+			printk("ARG: Outbound Reject: NAT\n");
+			return NF_DROP;
+		}
+	}
+
 	return NF_ACCEPT;
 }
 
