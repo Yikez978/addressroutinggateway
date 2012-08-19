@@ -1,6 +1,7 @@
 #include <linux/skbuff.h>
 #include <linux/ip.h>
 
+#include "nat.h"
 #include "director.h"
 #include "hopper.h"
 #include "utility.h"
@@ -51,8 +52,16 @@ unsigned int direct_inbound(struct sk_buff *skb)
 	{
 		// From a non-ARG IP
 		// Pass off to the NAT handler
-		printk("ARG: from external\n");
-		// TBD
+		if(do_nat_rewrite(skb))
+		{
+			printk("ARG: Accept: Rewrite\n");
+			return NF_ACCEPT;
+		}
+		else
+		{
+			printk("ARG: Reject: NAT\n");
+			return NF_DROP;
+		}
 	}
 
 	return NF_ACCEPT;
