@@ -5,9 +5,10 @@
 #include <linux/slab.h>
 
 // Show hex of all data in buf
-void printRaw(int len, uchar *buf)
+void printRaw(int len, void *buf)
 {
 	int i = 0;
+	uchar *bufC = (uchar*)buf;
 
 	for(i = 0; i < len; i++)
 	{
@@ -15,22 +16,24 @@ void printRaw(int len, uchar *buf)
 		if(i % 16 == 0)
 			printk("\nARG: [%4i]  ", i);
 		
-		printk("%2x ", buf[i]);
+		printk("%2x ", bufC[i]);
 	}
 
 	printk("\n");
 }
 
 // Display printable data in buf
-void printAscii(int len, uchar *buf)
+void printAscii(int len, void *buf)
 {
 	char c = 0;
 	int i = 0;
 	int shown = 0;
+	
+	uchar *bufC = (uchar*)buf;
 
 	for(i = 0; i < len; i++)
 	{
-		c = buf[i];
+		c = bufC[i];
 		if(c < 32 || c > 126)
 		{
 			// Break current string we're displaying

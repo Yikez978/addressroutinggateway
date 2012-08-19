@@ -1,7 +1,7 @@
 c_files := $(filter-out $(wildcard *.mod.c),$(wildcard *.c))
 obj-m += arg.o
 #arg-objs := $(patsubst %.c,%.o,$(c_files))
-arg-objs := init.o utility.o director.o
+arg-objs := init.o utility.o director.o hopper.o
  
 all :
 	echo $(arg-objs)
