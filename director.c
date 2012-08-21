@@ -10,6 +10,17 @@ unsigned int direct_inbound(struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
 
+	// Ignore all local traffic (accept it)
+	if(is_local_traffic(skb))
+		return NF_ACCEPT;
+
+	// We only support a few protocols
+	if(!is_supported_proto(skb))
+	{
+		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
+		return NF_DROP;
+	}
+
 	// Is it an admin packet? (could be coming from a
 	// not yet associated ARG network, hence we must check
 	// before the IP check)
@@ -76,6 +87,17 @@ unsigned int direct_outbound(struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
 	
+	// Ignore all local traffic (accept it)
+	if(is_local_traffic(skb))
+		return NF_ACCEPT;
+	
+	// We only support a few protocols
+	if(!is_supported_proto(skb))
+	{
+		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
+		return NF_DROP;
+	}
+	
 	// Who should handle it?
 	if(is_arg_ip((uchar*)&iph->daddr))
 	{
@@ -108,5 +130,27 @@ unsigned int direct_outbound(struct sk_buff *skb)
 	}
 
 	return NF_ACCEPT;
+}
+
+char is_local_traffic(const struct sk_buff *skb)
+{
+	struct iphdr *iph = ip_hdr(skb);
+	return iph->daddr == htonl(0x7F000001);
+}
+
+char is_supported_proto(const struct sk_buff *skb)
+{
+	struct iphdr *iph = ip_hdr(skb);
+	if(iph->version == 4)
+	{
+		return (iph->protocol == TCP_PROTO
+			|| iph->protocol == UDP_PROTO
+			|| iph->protocol == ICMP_PROTO);
+	}
+	else
+	{
+		printk("ARG: Non-ipv4 packet dropped\n");
+		return 0;
+	}
 }
 

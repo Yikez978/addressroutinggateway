@@ -10,5 +10,8 @@
 unsigned int direct_inbound(struct sk_buff *skb);
 unsigned int direct_outbound(struct sk_buff *skb);
 
+char is_local_traffic(const struct sk_buff *skb);
+char is_supported_proto(const struct sk_buff *skb);
+
 #endif
 
