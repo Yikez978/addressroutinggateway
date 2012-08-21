@@ -58,8 +58,7 @@ char do_arg_unwrap(struct sk_buff *skb)
 
 int get_arg_id(uchar const *ip)
 {
-	// Pretend it's always someone
-	return 1;
+	return -1;
 }
 
 char is_arg_ip(uchar const *ip)

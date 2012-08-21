@@ -52,3 +52,17 @@ void printAscii(int len, void *buf)
 	printk("\n");
 }
 
+void printIP(int len, void *buf)
+{
+	int i = 0;
+	uchar *bufC = (uchar*)buf;
+
+	for(i = 0; i < len; i++)
+	{
+		printk("%i", bufC[i]);
+
+		if(i < len - 1)
+			printk(".");
+	}
+}
+

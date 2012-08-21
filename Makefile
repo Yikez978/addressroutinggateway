@@ -40,7 +40,7 @@ local-stop :
 	-lsmod | grep arg >/dev/null && sudo rmmod -w arg
 
 local-monitor :
-	watch -n 10 'dmesg | grep ARG | tail -n 20'
+	tail -f /var/log/kern.log | grep ARG
 
 # Control ARG gateways
 start : all

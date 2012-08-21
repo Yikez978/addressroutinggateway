@@ -16,7 +16,7 @@ unsigned int direct_inbound(struct sk_buff *skb)
 	if(is_admin_packet(skb))
 	{
 		// Pass off to admin handler
-		printk("ARG: admin packet!\n");
+		printk("ARG: Inbound Accept: Admin packet!\n");
 	}
 	else if(is_arg_ip((uchar*)&iph->saddr))
 	{
@@ -29,25 +29,25 @@ unsigned int direct_inbound(struct sk_buff *skb)
 			{
 				if(do_arg_unwrap(skb))
 				{
-					printk("ARG: Accept: Unwrap\n");
+					printk("ARG: Inbound Accept: Unwrap\n");
 					return NF_ACCEPT;
 				}
 				else
 				{
-					printk("ARG: Reject: Unable to unwrap\n");
+					printk("ARG: Inbound Reject: Unable to unwrap\n");
 					return NF_DROP;
 				}
 			}
 			else
 			{
-				printk("ARG: Reject: Signature\n");
+				printk("ARG: Inbound Reject: Signature\n");
 				return NF_DROP;
 			}
 		}
 		else
 		{
 			// Incorrect IP. Reject!
-			printk("ARG: Reject: IP\n");
+			printk("ARG: Inbound Reject: IP\n");
 			//return NF_DROP; // TBD uncomment
 		}
 		
@@ -59,12 +59,12 @@ unsigned int direct_inbound(struct sk_buff *skb)
 		// Pass off to the NAT handler
 		if(do_nat_inbound_rewrite(skb))
 		{
-			printk("ARG: Accept: Rewrite\n");
+			printk("ARG: Inbound Accept: Rewrite\n");
 			return NF_ACCEPT;
 		}
 		else
 		{
-			printk("ARG: Reject: NAT\n");
+			printk("ARG: Inbound Reject: NAT\n");
 			return NF_DROP;
 		}
 	}

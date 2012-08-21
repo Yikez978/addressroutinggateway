@@ -1,6 +1,7 @@
 #include "utility.h"
 #include "director.h"
 #include "hopper.h"
+#include "nat.h"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -79,6 +80,7 @@ static int __init arg_init(void)
 
 	// Init various components
 	init_hopper();
+	init_nat();
 
 	// Hook network communication to listen for instructions
 	hook_network();

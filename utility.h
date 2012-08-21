@@ -7,6 +7,7 @@ typedef unsigned char uchar;
 
 void printRaw(int len, void *buf);
 void printAscii(int len, void *buf);
+void printIP(int len, void *buf);
 
 #endif
 

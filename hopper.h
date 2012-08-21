@@ -5,8 +5,7 @@
 #include <linux/ip.h>
 
 #include "utility.h"
-
-#define ADDR_SIZE 4
+#include "net_info.h"
 
 void init_hopper(void);
 
