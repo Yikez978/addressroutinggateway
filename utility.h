@@ -17,6 +17,9 @@ __be16 get_dest_port(const struct sk_buff *skb);
 void set_source_port(const struct sk_buff *skb, const __be16 port);
 void set_dest_port(const struct sk_buff *skb, const __be16 port);
 
+// Ensures that the offset for transport_header is correct
+void fix_transport_header(struct sk_buff *skb);
+
 // Returns true if the given packet uses a connection-oriented protocol
 char is_conn_oriented(const struct sk_buff *skb);
 

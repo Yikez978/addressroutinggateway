@@ -101,13 +101,10 @@ __be16 get_source_port(const struct sk_buff *skb)
 	
 	case TCP_PROTO:
 		tcph = tcp_hdr(skb);
-		printk("ARG: reading source port via tcp\n");
-		printRaw(4, &tcph->source);
 		return ntohs(tcph->source);
 
 	case UDP_PROTO:
 		udph = udp_hdr(skb);
-		printRaw(4, &udph->source);
 		return ntohs(udph->source);
 
 	default:
@@ -130,13 +127,10 @@ __be16 get_dest_port(const struct sk_buff *skb)
 	
 	case TCP_PROTO:
 		tcph = tcp_hdr(skb);
-		printk("ARG: reading dest port via tcp\n");
-		printRaw(4, &tcph->dest);
 		return ntohs(tcph->dest);
 
 	case UDP_PROTO:
 		udph = udp_hdr(skb);
-		printRaw(4, &udph->dest);
 		return ntohs(udph->dest);
 
 	default:
@@ -199,6 +193,12 @@ void set_dest_port(const struct sk_buff *skb, const __be16 port)
 		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
 		return;
 	}
+}
+
+void fix_transport_header(struct sk_buff *skb)
+{
+	struct iphdr *iph = ip_hdr(skb);
+	skb_set_transport_header(skb, iph->ihl * 4);
 }
 
 char is_conn_oriented(const struct sk_buff *skb)

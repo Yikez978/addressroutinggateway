@@ -8,6 +8,12 @@
 #include "uthash.h"
 #include "net_info.h"
 
+// Number of seconds between full checks of the NAT table for expired connections
+#define NAT_CLEAN_TIME 30
+
+// Number of seconds before an inactive connection is removed
+#define NAT_OLD_CONN_TIME 120
+
 // Struct of an entry in the NAT table
 struct nat_entry_bucket;
 
@@ -24,7 +30,7 @@ typedef struct nat_entry {
 	int proto;
 
 	// Walltime of the last time this connection was actively used
-	int lastUsed;
+	__kernel_time_t lastUsed;
 
 	// Traversal info for list
 	struct nat_entry_bucket *bucket;
@@ -49,6 +55,7 @@ typedef struct nat_entry_bucket {
 
 // Initializes anything needed by NAT
 void init_nat(void);
+void uninit_nat(void);
 
 // Re-writes the given packet based on data in
 // the NAT table and returns true. If it is unable
@@ -72,12 +79,21 @@ void print_nat_entry(const struct nat_entry *entry);
 struct nat_entry_bucket *create_nat_bucket(const struct sk_buff *skb, const int key);
 struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_bucket *bucket);
 
+void update_nat_entry_time(struct nat_entry *e);
+
 // Build bucket key based on the given IP and port (must be given directly,
 // not as an sk_buff because incoming/outgoing use different parts)
 int create_nat_bucket_key(const void *ip, const __be16 port); 
 
+// Helpers to remove NAT entries. Return references to the next element, where applicable
+// NOT synchronized. Callers MUST ensure they have the write lock
+struct nat_entry_bucket *remove_nat_bucket(struct nat_entry_bucket *bucket);
+struct nat_entry *remove_nat_entry(struct nat_entry *e);
 
-// Clears the NAT table of old functions
+// Clears the NAT table of old functions/provides
+// callback for timed cleanup. All functions work with the lock to ensure synchronization
+void empty_nat_table(void);
+void nat_timed_cleanup(unsigned long data);
 void clean_nat_table(void);
 
 #endif

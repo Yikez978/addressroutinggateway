@@ -4,8 +4,6 @@ obj-m += arg.o
 arg-objs := init.o utility.o director.o hopper.o nat.o
  
 all :
-	echo $(arg-objs)
-	echo $(c_files)
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
  
 clean :

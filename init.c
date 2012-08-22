@@ -36,7 +36,7 @@ unsigned int inbound_handler(unsigned int hooknum, struct sk_buff *skb,
 							const struct net_device *in,
 							const struct net_device *out, 
 							int (*okfn)(struct sk_buff *))
-{   
+{
 	return direct_inbound(skb);
 }
 
@@ -98,6 +98,9 @@ static void __exit arg_exit(void)
 	// Unregister our network hooks so the system doesn't crash
 	nf_unregister_hook(&net_ops);
 	nf_unregister_hook(&net_ops_out);	
+
+	// Cleanup any resources as needed
+	uninit_nat();
 
 	printk(KERN_INFO "ARG: finished\n");
 }

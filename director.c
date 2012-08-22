@@ -10,6 +10,9 @@ unsigned int direct_inbound(struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
 
+	// Ensure everything is working as intended
+	fix_transport_header(skb);
+
 	// Ignore all local traffic (accept it)
 	if(is_local_traffic(skb))
 		return NF_ACCEPT;
@@ -86,6 +89,9 @@ unsigned int direct_inbound(struct sk_buff *skb)
 unsigned int direct_outbound(struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
+	
+	// Ensure everything is working as intended
+	fix_transport_header(skb);
 	
 	// Ignore all local traffic (accept it)
 	if(is_local_traffic(skb))
