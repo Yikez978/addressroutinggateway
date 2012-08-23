@@ -28,8 +28,8 @@ MODULE_VERSION("0.1");
 #define NF_IP_NUMHOOKS          5
 
 // Netfilter hooking variables
-static struct nf_hook_ops net_ops;
-static struct nf_hook_ops net_ops_out;
+static struct nf_hook_ops *incomingTrafficHook = NULL;
+static struct nf_hook_ops *outgoingTrafficHook = NULL;
 
 // Handle packets coming from external network
 unsigned int inbound_handler(unsigned int hooknum, struct sk_buff *skb, 
@@ -50,25 +50,56 @@ unsigned int outbound_handler(unsigned int hooknum, struct sk_buff *skb,
 }
 
 // Hook the network call stack to intercept traffic
-int hook_network(void)
+char hook_network(void)
 {
 	// Hook the inboud traffic
-	net_ops.hook = inbound_handler;                       
-	net_ops.hooknum = NF_IP_PRE_ROUTING;
-	net_ops.pf = PF_INET;
-	net_ops.priority = NF_IP_PRI_FIRST;
+	incomingTrafficHook = (struct nf_hook_ops*)kmalloc(sizeof(struct nf_hook_ops), GFP_KERNEL);
+	if(incomingTrafficHook == NULL)
+	{
+		printk(KERN_ALERT "ARG: Unable to create hook for incoming traffic\n");
+		return 1;
+	}
+	
+	incomingTrafficHook->hook = inbound_handler;                       
+	incomingTrafficHook->hooknum = NF_IP_PRE_ROUTING;
+	incomingTrafficHook->pf = PF_INET;
+	incomingTrafficHook->priority = NF_IP_PRI_FIRST;
 
-	// Register the hook
-	nf_register_hook(&net_ops);
+	nf_register_hook(incomingTrafficHook);
 
 	// Hook the outbound local traffic
-	net_ops_out.hook = outbound_handler;
-	net_ops_out.hooknum = NF_IP_LOCAL_OUT; // change to IP_FORWARD later
-	net_ops_out.pf = PF_INET;
-	net_ops_out.priority = NF_IP_PRI_FIRST;
+	outgoingTrafficHook = (struct nf_hook_ops*)kmalloc(sizeof(struct nf_hook_ops), GFP_KERNEL);
+	if(outgoingTrafficHook == NULL)
+	{
+		printk(KERN_ALERT "ARG: Unable to create hook for outgoing traffic\n");
+		return 1;
+	}
 
-	// Register the hook
-	nf_register_hook(&net_ops_out);
+	outgoingTrafficHook->hook = outbound_handler;                       
+	outgoingTrafficHook->hooknum = NF_IP_LOCAL_OUT; // TBD IP_FORWARD later
+	outgoingTrafficHook->pf = PF_INET;
+	outgoingTrafficHook->priority = NF_IP_PRI_FIRST;
+
+	nf_register_hook(outgoingTrafficHook);
+
+	return 0;
+}
+
+char unhook_network(void)
+{
+	if(incomingTrafficHook != NULL)
+	{
+		nf_unregister_hook(incomingTrafficHook);
+		kfree(incomingTrafficHook);
+		incomingTrafficHook = NULL;
+	}
+	
+	if(outgoingTrafficHook != NULL)
+	{
+		nf_unregister_hook(outgoingTrafficHook);
+		kfree(outgoingTrafficHook);
+		outgoingTrafficHook = NULL;
+	}
 
 	return 0;
 }
@@ -79,7 +110,9 @@ static int __init arg_init(void)
 	printk(KERN_INFO "ARG: initializing\n");
 
 	// Init various components
-	init_hopper();
+	if(!init_hopper())
+		printk(KERN_ALERT "ARG: Unable to initialize hopper\n");
+
 	init_nat();
 
 	// Hook network communication to listen for instructions
@@ -96,11 +129,11 @@ static void __exit arg_exit(void)
 	printk(KERN_INFO "ARG: unhooking\n");
 
 	// Unregister our network hooks so the system doesn't crash
-	nf_unregister_hook(&net_ops);
-	nf_unregister_hook(&net_ops_out);	
+	unhook_network();	
 
 	// Cleanup any resources as needed
 	uninit_nat();
+	//uninit_hopper();
 
 	printk(KERN_INFO "ARG: finished\n");
 }

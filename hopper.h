@@ -7,7 +7,16 @@
 #include "utility.h"
 #include "net_info.h"
 
-void init_hopper(void);
+#define INT_DEV_NAME "eth0"
+#define EXT_DEV_NAME "eth1"
+
+// Take care of resources
+char init_hopper(void);
+void uninit_hopper(void);
+
+// Enable and disable hopping
+void enable_hopping(void);
+void disable_hopping(void);
 
 // Returns the current IP address for the gateway
 // NOTE: the previous IP is also valid for receiving,
