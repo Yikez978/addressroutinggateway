@@ -8,6 +8,7 @@ all :
  
 clean :
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	rm -f arg.mod.c
 	rm -f *.o *.ko
 	rm -f modules.order
 
