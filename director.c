@@ -24,6 +24,10 @@ unsigned int direct_inbound(struct sk_buff *skb)
 		return NF_DROP;
 	}
 
+	printk("ARG: destination IP: ");
+	printIP(ADDR_SIZE, &iph->daddr);
+	printk("\n");
+
 	// Is it an admin packet? (could be coming from a
 	// not yet associated ARG network, hence we must check
 	// before the IP check)
@@ -32,7 +36,7 @@ unsigned int direct_inbound(struct sk_buff *skb)
 		// Pass off to admin handler
 		printk("ARG: Inbound Accept: Admin packet!\n");
 	}
-	else if(is_arg_ip((uchar*)&iph->saddr))
+	else if(is_arg_ip(&iph->saddr))
 	{
 		// From an ARG network
 		// Is it to the correct IP?

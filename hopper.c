@@ -1,6 +1,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
+#include <linux/inetdevice.h>
+#include <linux/spinlock.h>
 
 #include "hopper.h"
 #include "utility.h"
@@ -8,8 +10,12 @@
 /**************************
 IP Hopping data
 **************************/
+static rwlock_t ipLock;
+
 static char hoppingEnabled = 0;
 
+static uchar ipPrefixLen = 0;
+static uchar ipMask[ADDR_SIZE];
 static uchar currIP[ADDR_SIZE];
 static uchar prevIP[ADDR_SIZE];
 
@@ -18,12 +24,23 @@ static struct net_device *extDev = NULL;
 
 char init_hopper(void)
 {
-	printk("ARG: hopper init");
+	printk("ARG: hopper init\n");
+
+	// Prepare lock
+	ipLock = __RW_LOCK_UNLOCKED(ipLock);
+	
+	write_lock(&ipLock);
+
+	// No matter what happens, make sure these are valid
+	memset(currIP, 0, ADDR_SIZE);
+	memset(prevIP, 0, ADDR_SIZE);
 
 	// Grab devices 
 	extDev = dev_get_by_name(&init_net, EXT_DEV_NAME);
 	if(extDev == NULL)
 	{
+		write_unlock(&ipLock);
+
 		uninit_hopper();
 
 		printk(KERN_ALERT "ARG: Unable to find external network device %s\n", EXT_DEV_NAME);
@@ -33,15 +50,30 @@ char init_hopper(void)
 	intDev = dev_get_by_name(&init_net, INT_DEV_NAME);
 	if(intDev == NULL)
 	{
+		write_unlock(&ipLock);
+		
 		uninit_hopper();
 
 		printk(KERN_ALERT "ARG: Unable to find internal network device %s\n", INT_DEV_NAME);
 		return 0;
 	}
 
-	
-	memmove(currIP, "abcd", ADDR_SIZE);
-	memmove(prevIP, "\xC0\xA8\x01\x83", ADDR_SIZE);
+	// Pull data off external card (don't really care about the internal device)
+	memmove(currIP, &extDev->ip_ptr->ifa_list->ifa_address, ADDR_SIZE);
+	memmove(prevIP, currIP, ADDR_SIZE);
+	memmove(ipMask, &extDev->ip_ptr->ifa_list->ifa_mask, ADDR_SIZE);
+	ipPrefixLen = extDev->ip_ptr->ifa_list->ifa_prefixlen;
+
+	printk("ARG: External IP: ");
+	printIP(ADDR_SIZE, currIP);
+	printk("/%i\n", ipPrefixLen);
+
+	// Enable promisc and/or forwarding?
+	rtnl_lock();
+	dev_set_promiscuity(extDev, 1);
+	rtnl_unlock();
+
+	write_unlock(&ipLock);
 	
 	// And allow hopping now
 	enable_hopping();
@@ -53,6 +85,16 @@ void uninit_hopper(void)
 {
 	// Disable hopping
 	disable_hopping();
+	
+	write_lock(&ipLock);
+	
+	// Turn off promiscuity
+	if(extDev != NULL)
+	{
+		rtnl_lock();
+		dev_set_promiscuity(extDev, -1);
+		rtnl_unlock();
+	}
 
 	// Remove references to devices
 	if(extDev != NULL)
@@ -61,31 +103,73 @@ void uninit_hopper(void)
 		dev_put(intDev);
 	extDev = NULL;
 	intDev = NULL;
+	
+	write_unlock(&ipLock);
 }
 
 void enable_hopping(void)
 {
+	printk("ARG: Hopping enabled\n");
 	hoppingEnabled = 1;
 }
 
 void disable_hopping(void)
 {
+	printk("ARG: Hopping disabled\n");
 	hoppingEnabled = 0;
 }
 
-uchar const *current_ip(void)
+uchar *current_ip(void)
 {
-	return currIP;
+	uchar *ipCopy = NULL;
+
+	ipCopy = (uchar*)kmalloc(ADDR_SIZE, GFP_ATOMIC);
+	if(ipCopy == NULL)
+	{
+		printk("ARG: Unable to allocate space for saving off IP address.\n");
+		return NULL;
+	}
+
+	read_lock(&ipLock);
+	memmove(ipCopy, currIP, ADDR_SIZE);
+	read_unlock(&ipLock);
+
+	return ipCopy;
 }
 
 char is_current_ip(uchar const *ip)
 {
+	char ret = 0;
+
+	read_lock(&ipLock);
+	
 	if(memcmp(ip, currIP, ADDR_SIZE) == 0)
-		return 1;
+		ret = 1;
 	else if(memcmp(ip, prevIP, ADDR_SIZE) == 0)
-		return 1;
+		ret = 1;
 	else
-		return 0;
+		ret = 0;
+	
+	read_unlock(&ipLock);
+
+	return ret;
+}
+
+void set_external_ip(uchar *addr)
+{
+	struct in_ifaddr *ifa = extDev->ip_ptr->ifa_list;
+	
+	// Rotate internal IPs
+	write_lock(&ipLock);
+	memmove(prevIP, currIP, ADDR_SIZE);
+	memmove(currIP, addr, ADDR_SIZE);
+	write_unlock(&ipLock);
+
+	// Set physical card
+	rtnl_lock();
+	memmove(&ifa->ifa_address, addr, ADDR_SIZE);
+	ifa->ifa_local = ifa->ifa_address;
+	rtnl_unlock();
 }
 
 char is_admin_packet(struct sk_buff const *skb)
@@ -108,12 +192,12 @@ char do_arg_unwrap(struct sk_buff *skb)
 	return 1;
 }
 
-int get_arg_id(uchar const *ip)
+int get_arg_id(void const *ip)
 {
 	return -1;
 }
 
-char is_arg_ip(uchar const *ip)
+char is_arg_ip(void const *ip)
 {
 	return get_arg_id(ip) >= 0;
 }

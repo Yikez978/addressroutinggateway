@@ -136,7 +136,7 @@ char do_nat_outbound_rewrite(struct sk_buff *skb)
 	// Safety check. For now we're only going ipv4
 	if(iph->version != 4)
 	{
-		printk("ARG: IPv6 packet found, not allowed current\n");
+		printk("ARG: IPv6 packet found, not allowed currently\n");
 		return 0;
 	}
 
@@ -287,6 +287,8 @@ struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_b
 	struct nat_entry *e = NULL;
 	struct nat_entry *oldHead = NULL;
 
+	uchar *currIP = NULL;
+
 	e = (struct nat_entry*)kmalloc(sizeof(struct nat_entry), GFP_KERNEL);
 	if(e == NULL)
 	{
@@ -295,8 +297,18 @@ struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_b
 	}
 
 	// Fill in data
-	memcpy(e->intIP, (void*)&iph->saddr, ADDR_SIZE);
-	memcpy(e->gateIP, (void*)&iph->saddr, ADDR_SIZE); // TBD real gateway IP
+	memcpy(e->intIP, &iph->saddr, ADDR_SIZE);
+
+	currIP = current_ip();
+	if(currIP == NULL)
+	{
+		printk("ARG: Unable to complete creation of new NAT entry, out of memory\n");
+		kfree(e);
+		return NULL;
+	}
+	memcpy(e->gateIP, currIP, ADDR_SIZE);
+	kfree(currIP);
+
 	e->intPort = get_source_port(skb);
 	e->gatePort = e->intPort; // TBD random port
 	e->proto = iph->protocol;
