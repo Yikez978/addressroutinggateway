@@ -1,12 +1,103 @@
 #include <linux/skbuff.h>
 #include <linux/ip.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
+#include <linux/netdevice.h>
+
+/* After promisc drops, checksum checks. */
+#define NF_IP_PRE_ROUTING       0
+/* If the packet is destined for this box. */
+#define NF_IP_LOCAL_IN          1
+/* If the packet is destined for another interface. */
+#define NF_IP_FORWARD           2
+/* Packets coming from a local process. */
+#define NF_IP_LOCAL_OUT         3
+/* Packets about to hit the wire. */
+#define NF_IP_POST_ROUTING      4
+#define NF_IP_NUMHOOKS          5
 
 #include "nat.h"
 #include "director.h"
 #include "hopper.h"
 #include "utility.h"
 
-unsigned int direct_inbound(struct sk_buff *skb)
+/***************************
+Netfilter hooking variables
+***************************/
+static struct nf_hook_ops *incomingTrafficHook = NULL;
+static struct nf_hook_ops *outgoingTrafficHook = NULL;
+
+char init_director(void)
+{
+	printk("ARG: Director init\n");
+
+	// Hook the inboud traffic
+	incomingTrafficHook = (struct nf_hook_ops*)kmalloc(sizeof(struct nf_hook_ops), GFP_KERNEL);
+	if(incomingTrafficHook == NULL)
+	{
+		printk(KERN_ALERT "ARG: Unable to create hook for incoming traffic\n");
+		return 0;
+	}
+	
+	incomingTrafficHook->hook = direct_inbound;                       
+	incomingTrafficHook->hooknum = NF_IP_PRE_ROUTING;
+	incomingTrafficHook->pf = PF_INET;
+	incomingTrafficHook->priority = NF_IP_PRI_FIRST;
+
+	// Hook the outbound local traffic
+	outgoingTrafficHook = (struct nf_hook_ops*)kmalloc(sizeof(struct nf_hook_ops), GFP_KERNEL);
+	if(outgoingTrafficHook == NULL)
+	{
+		printk(KERN_ALERT "ARG: Unable to create hook for outgoing traffic\n");
+
+		// Free the incoming hook
+		kfree(incomingTrafficHook);
+		incomingTrafficHook = NULL;
+
+		return 0;
+	}
+
+	outgoingTrafficHook->hook = direct_outbound;               
+	outgoingTrafficHook->hooknum = NF_IP_LOCAL_OUT; // TBD IP_FORWARD later
+	outgoingTrafficHook->pf = PF_INET;
+	outgoingTrafficHook->priority = NF_IP_PRI_FIRST;
+
+	// Register hooks
+	nf_register_hook(incomingTrafficHook);
+	nf_register_hook(outgoingTrafficHook);
+
+	printk("ARG: Director initialized\n");
+
+	return 1;
+}
+
+char uninit_director(void)
+{
+	printk("ARG: Director uninit\n");
+
+	if(incomingTrafficHook != NULL)
+	{
+		nf_unregister_hook(incomingTrafficHook);
+		kfree(incomingTrafficHook);
+		incomingTrafficHook = NULL;
+	}
+	
+	if(outgoingTrafficHook != NULL)
+	{
+		nf_unregister_hook(outgoingTrafficHook);
+		kfree(outgoingTrafficHook);
+		outgoingTrafficHook = NULL;
+	}
+
+	printk("ARG: Director finished\n");
+
+	return 1;
+}
+
+unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb, 
+							const struct net_device *in,
+							const struct net_device *out,
+							int (*okfn)(struct sk_buff *))
 {
 	struct iphdr *iph = ip_hdr(skb);
 
@@ -90,7 +181,10 @@ unsigned int direct_inbound(struct sk_buff *skb)
 	return NF_ACCEPT;
 }
 
-unsigned int direct_outbound(struct sk_buff *skb)
+unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb, 
+							const struct net_device *in,
+							const struct net_device *out,
+							int (*okfn)(struct sk_buff *))
 {
 	struct iphdr *iph = ip_hdr(skb);
 	

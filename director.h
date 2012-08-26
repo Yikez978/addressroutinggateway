@@ -7,8 +7,17 @@
 #include <linux/netfilter_ipv4.h>
 #include <linux/netdevice.h>
 
-unsigned int direct_inbound(struct sk_buff *skb);
-unsigned int direct_outbound(struct sk_buff *skb);
+char init_director(void);
+char uninit_director(void);
+
+unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb, 
+							const struct net_device *in,
+							const struct net_device *out, 
+							int (*okfn)(struct sk_buff *));
+unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb, 
+							const struct net_device *in,
+							const struct net_device *out,
+							int (*okfn)(struct sk_buff *));
 
 char is_local_traffic(const struct sk_buff *skb);
 char is_supported_proto(const struct sk_buff *skb);

@@ -20,23 +20,36 @@ static rwlock_t natTableLock;
 
 static struct timer_list natCleanupTimer;
 
-void init_nat(void)
+void init_nat_locks(void)
 {
-	// Lock for NAT table
 	natTableLock = __RW_LOCK_UNLOCKED(natTableLock);
+}
+
+char init_nat(void)
+{
+	printk("ARG: NAT init\n");
+
 
 	// Periodic cleanup of table
 	init_timer(&natCleanupTimer);
 	natCleanupTimer.expires = jiffies + NAT_CLEAN_TIME * HZ;
 	natCleanupTimer.function = &nat_timed_cleanup;
 	add_timer(&natCleanupTimer);
+	
+	printk("ARG: NAT initialized\n");
+
+	return 1;
 }
 
 void uninit_nat(void)
 {
+	printk("ARG: NAT uninit\n");
+
 	del_timer(&natCleanupTimer);
 
 	empty_nat_table();
+	
+	printk("ARG: NAT finished\n");
 }
 
 char do_nat_inbound_rewrite(struct sk_buff *skb)

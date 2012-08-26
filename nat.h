@@ -54,7 +54,8 @@ typedef struct nat_entry_bucket {
 } nat_entry_bucket;
 
 // Initializes anything needed by NAT
-void init_nat(void);
+void init_nat_locks(void);
+char init_nat(void);
 void uninit_nat(void);
 
 // Re-writes the given packet based on data in

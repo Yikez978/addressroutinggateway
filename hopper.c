@@ -22,12 +22,14 @@ static uchar prevIP[ADDR_SIZE];
 static struct net_device *intDev = NULL;
 static struct net_device *extDev = NULL;
 
+void init_hopper_locks(void)
+{
+	ipLock = __RW_LOCK_UNLOCKED(ipLock);
+}
+
 char init_hopper(void)
 {
-	printk("ARG: hopper init\n");
-
-	// Prepare lock
-	ipLock = __RW_LOCK_UNLOCKED(ipLock);
+	printk("ARG: Hopper init\n");
 	
 	write_lock(&ipLock);
 
@@ -39,22 +41,22 @@ char init_hopper(void)
 	extDev = dev_get_by_name(&init_net, EXT_DEV_NAME);
 	if(extDev == NULL)
 	{
+		printk(KERN_ALERT "ARG: Unable to find external network device %s\n", EXT_DEV_NAME);
+		
 		write_unlock(&ipLock);
-
 		uninit_hopper();
 
-		printk(KERN_ALERT "ARG: Unable to find external network device %s\n", EXT_DEV_NAME);
 		return 0;
 	}
 
 	intDev = dev_get_by_name(&init_net, INT_DEV_NAME);
 	if(intDev == NULL)
 	{
-		write_unlock(&ipLock);
+		printk(KERN_ALERT "ARG: Unable to find internal network device %s\n", INT_DEV_NAME);
 		
+		write_unlock(&ipLock);
 		uninit_hopper();
 
-		printk(KERN_ALERT "ARG: Unable to find internal network device %s\n", INT_DEV_NAME);
 		return 0;
 	}
 
@@ -69,6 +71,7 @@ char init_hopper(void)
 	printk("/%i\n", ipPrefixLen);
 
 	// Enable promisc and/or forwarding?
+	printk("ARG: Enabling promiscuous mode\n");
 	rtnl_lock();
 	dev_set_promiscuity(extDev, 1);
 	rtnl_unlock();
@@ -78,11 +81,15 @@ char init_hopper(void)
 	// And allow hopping now
 	enable_hopping();
 
+	printk("ARG: Hopper initialized\n");
+
 	return 1;
 }
 
 void uninit_hopper(void)
 {
+	printk("ARG: Hopper uninit\n");
+
 	// Disable hopping
 	disable_hopping();
 	
@@ -91,6 +98,7 @@ void uninit_hopper(void)
 	// Turn off promiscuity
 	if(extDev != NULL)
 	{
+		printk("ARG: Dropping promiscuous mode\n");
 		rtnl_lock();
 		dev_set_promiscuity(extDev, -1);
 		rtnl_unlock();
@@ -98,13 +106,19 @@ void uninit_hopper(void)
 
 	// Remove references to devices
 	if(extDev != NULL)
+	{
 		dev_put(extDev);
+		extDev = NULL;
+	}
 	if(intDev != NULL)
+	{
 		dev_put(intDev);
-	extDev = NULL;
-	intDev = NULL;
-	
+		intDev = NULL;
+	}
+
 	write_unlock(&ipLock);
+
+	printk("ARG: Hopper finished\n");
 }
 
 void enable_hopping(void)

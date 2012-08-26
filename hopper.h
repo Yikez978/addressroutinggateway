@@ -11,6 +11,7 @@
 #define EXT_DEV_NAME "eth0"
 
 // Take care of resources
+void init_hopper_locks(void);
 char init_hopper(void);
 void uninit_hopper(void);
 
