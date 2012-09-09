@@ -12,6 +12,9 @@ clean :
 	rm -f *.o *.ko
 	rm -f modules.order
 
+clean-swp : 
+	rm -f .*.swp
+
 # Make on dev machine from OSX
 push : 
 	./scripts/run-on-all.sh -t dev scripts/helper/false.sh .
