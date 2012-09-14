@@ -10,8 +10,5 @@
 // Number of seconds before an inactive connection is removed
 #define NAT_OLD_CONN_TIME 120
 
-// HMAC block size (bytes)
-#define HMAC_BLOCK_SIZE 64
-
 #endif
 
