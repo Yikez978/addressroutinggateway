@@ -59,6 +59,9 @@ char init_hopper(void)
 		return 0;
 	}
 
+	// Set up IP addresses proactively
+	update_ips();
+
 	printk("ARG: External IP: ");
 	printIP(ADDR_SIZE, gateInfo->currIP);
 	printk("\n");
@@ -143,8 +146,8 @@ char get_hopper_conf(void)
 
 	strncpy(currNet->name, "GateA", sizeof(currNet->name));
 	currNet->baseIP[0] = 10;
-	currNet->baseIP[1] = 2;
-	currNet->baseIP[2] = 0;
+	currNet->baseIP[1] = 1;
+	currNet->baseIP[2] = 1;
 	currNet->baseIP[3] = 0;
 	currNet->mask[0] = 0xFF;
 	currNet->mask[1] = 0xFF;
@@ -159,8 +162,8 @@ char get_hopper_conf(void)
 
 	strncpy(currNet->name, "GateB", sizeof(currNet->name));
 	currNet->baseIP[0] = 10;
-	currNet->baseIP[1] = 1;
-	currNet->baseIP[2] = 0;
+	currNet->baseIP[1] = 2;
+	currNet->baseIP[2] = 1;
 	currNet->baseIP[3] = 0;
 	currNet->mask[0] = 0xFF;
 	currNet->mask[1] = 0xFF;
@@ -328,17 +331,20 @@ void remove_all_associated_arg_networks(void)
 void update_ips(void)
 {
 	char hmac[HMAC_SIZE];
-	char pass[] = "22";
+	char pass[] = "abc";
 	char key[] = "passphrase";
 
 	// Backup old address and generate a new one
 	memmove(gateInfo->prevIP, gateInfo->currIP, sizeof(gateInfo->prevIP));
+
+	// TBD generate. For now just copy the current one in
+	memmove(gateInfo->currIP, &extDev->ip_ptr->ifa_list->ifa_address, sizeof(gateInfo->currIP));
 	
 	printk("ARG: generating new address\n");
-	hmac_sha1(key, strlen(key), pass, strlen(pass), hmac);
+	//hmac_sha1(key, strlen(key), pass, strlen(pass), hmac);
 
 	// Apply to the network card
-	memmove(&extDev->ip_ptr->ifa_list->ifa_address, gateInfo->currIP, sizeof(gateInfo->currIP));
+	//memmove(&extDev->ip_ptr->ifa_list->ifa_address, gateInfo->currIP, sizeof(gateInfo->currIP));
 }
 
 uchar *current_ip(void)

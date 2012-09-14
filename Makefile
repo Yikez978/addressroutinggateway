@@ -45,11 +45,11 @@ local-monitor :
 	tail -f /var/log/kern.log | grep ARG
 
 # Control ARG gateways
-start : all
-	./scripts/start-arg-servers.sh
+start : all local-start
 
-stop : 
-	./scripts/stop-arg-servers.sh
+stop : local-stop
+
+monitor : local-monitor
 
 # Start tests with/without ARG running
 test-arg-on : start
