@@ -115,9 +115,9 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 		return NF_DROP;
 	}
 
-	printk("ARG: destination IP: ");
+	/*printk("ARG: destination IP: ");
 	printIP(ADDR_SIZE, &iph->daddr);
-	printk("\n");
+	printk("\n");*/
 
 	// Is it an admin packet? (could be coming from a
 	// not yet associated ARG network, hence we must check
@@ -125,7 +125,9 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	if(is_admin_packet(skb))
 	{
 		// Pass off to admin handler
+		#ifdef DISP_RESULTS
 		printk("ARG: Inbound Accept: Admin packet!\n");
+		#endif
 	}
 	else if(is_arg_ip(&iph->saddr))
 	{
@@ -138,25 +140,33 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 			{
 				if(do_arg_unwrap(skb))
 				{
+					#ifdef DISP_RESULTS
 					printk("ARG: Inbound Accept: Unwrap\n");
+					#endif
 					return NF_ACCEPT;
 				}
 				else
 				{
+					#ifdef DISP_RESULTS
 					printk("ARG: Inbound Reject: Unable to unwrap\n");
+					#endif
 					return NF_DROP;
 				}
 			}
 			else
 			{
+				#ifdef DISP_RESULTS
 				printk("ARG: Inbound Reject: Signature\n");
+				#endif
 				return NF_DROP;
 			}
 		}
 		else
 		{
 			// Incorrect IP. Reject!
+			#ifdef DISP_RESULTS
 			printk("ARG: Inbound Reject: IP\n");
+			#endif
 			//return NF_DROP; // TBD uncomment
 		}
 		
@@ -168,12 +178,16 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 		// Pass off to the NAT handler
 		if(do_nat_inbound_rewrite(skb))
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Inbound Accept: Rewrite\n");
+			#endif
 			return NF_ACCEPT;
 		}
 		else
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Inbound Reject: NAT\n");
+			#endif
 			return NF_DROP;
 		}
 	}
@@ -198,7 +212,7 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 	// We only support a few protocols
 	if(!is_supported_proto(skb))
 	{
-		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
+		printk(KERN_INFO "ARG: Unsupported protocol (%i) seen\n", iph->protocol);
 		return NF_DROP;
 	}
 	
@@ -208,12 +222,16 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 		// Destined for an ARG network
 		if(do_arg_wrap(skb))
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Outbound Accept: Wrap\n");
+			#endif
 			return NF_ACCEPT;
 		}
 		else
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Outbound Reject: Failed to wrap\n");
+			#endif
 			return NF_DROP;
 		}
 	}
@@ -223,12 +241,16 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 		// if needed
 		if(do_nat_outbound_rewrite(skb))
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Outbound: Accept: Rewrite\n");
+			#endif
 			return NF_ACCEPT;
 		}
 		else
 		{
+			#ifdef DISP_RESULTS
 			printk("ARG: Outbound Reject: NAT\n");
+			#endif
 			return NF_DROP;
 		}
 	}

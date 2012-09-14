@@ -207,4 +207,35 @@ char is_conn_oriented(const struct sk_buff *skb)
 	return iph->protocol == TCP_PROTO;
 }
 
+void mask_array(int len, void *orig, void *mask, void *result)
+{
+	int i = 0;
+	uchar *oCast = (uchar*)orig;
+	uchar *mCast = (uchar*)mask;
+	uchar *rCast = (uchar*)result;
+
+	for(i = 0; i < len; i++, oCast++, rCast++, mCast++)
+		*rCast = *oCast & *mCast;
+}
+
+char mask_array_cmp(int len, void *mask, void *left, void *right)
+{
+	int i = 0;
+	uchar *mCast = (uchar*)mask;
+	uchar *lCast = (uchar*)left;
+	uchar *rCast = (uchar*)right;
+
+	printk("ARG: doing mask compare with:\n");
+	printRaw(len, mask);
+	printRaw(len, left);
+	printRaw(len, right);
+
+	for(i = 0; i < len; i++, lCast++, rCast++, mCast++)
+	{
+		if((*lCast & *mCast) != (*rCast & *mCast))
+			return 1;
+	}
+
+	return 0;
+}
 

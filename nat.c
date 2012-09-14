@@ -29,13 +29,10 @@ char init_nat(void)
 {
 	printk("ARG: NAT init\n");
 
+	// Ensure the NAT table is empty and allow it to start its
+	// periodic cleanup timer
+	nat_timed_cleanup(0);
 
-	// Periodic cleanup of table
-	init_timer(&natCleanupTimer);
-	natCleanupTimer.expires = jiffies + NAT_CLEAN_TIME * HZ;
-	natCleanupTimer.function = &nat_timed_cleanup;
-	add_timer(&natCleanupTimer);
-	
 	printk("ARG: NAT initialized\n");
 
 	return 1;

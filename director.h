@@ -7,6 +7,8 @@
 #include <linux/netfilter_ipv4.h>
 #include <linux/netdevice.h>
 
+//#define DISP_RESULTS
+
 char init_director(void);
 char uninit_director(void);
 

@@ -4,15 +4,10 @@
 #include <linux/skbuff.h>
 #include <linux/types.h>
 
+#include "settings.h"
 #include "utility.h"
 #include "uthash.h"
 #include "net_info.h"
-
-// Number of seconds between full checks of the NAT table for expired connections
-#define NAT_CLEAN_TIME 30
-
-// Number of seconds before an inactive connection is removed
-#define NAT_OLD_CONN_TIME 120
 
 // Struct of an entry in the NAT table
 struct nat_entry_bucket;

@@ -1,7 +1,7 @@
 c_files := $(filter-out $(wildcard *.mod.c),$(wildcard *.c))
 obj-m += arg.o
 #arg-objs := $(patsubst %.c,%.o,$(c_files))
-arg-objs := init.o utility.o director.o hopper.o nat.o
+arg-objs := init.o utility.o director.o hopper.o nat.o crypto.o sha1.o
  
 all :
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

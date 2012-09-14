@@ -23,5 +23,13 @@ void fix_transport_header(struct sk_buff *skb);
 // Returns true if the given packet uses a connection-oriented protocol
 char is_conn_oriented(const struct sk_buff *skb);
 
+// Mask an arbitrarilly long number of bytes. Eh, whatever. It's a hack
+// orig, mask, and result must all be the same length
+void mask_array(int len, void *orig, void *mask, void *result);
+
+// Compares two arrays (left and right) based on the mask given
+// If equal, 0 is returned. Otherwise, non-0 (undefined beyond that)
+char mask_array_cmp(int len, void *mask, void *left, void *right);
+
 #endif
 
