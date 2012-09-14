@@ -91,6 +91,9 @@ void uninit_hopper(void)
 	// Disable hopping
 	disable_hopping();
 	
+	// No more need
+	del_timer(&hopTimer);
+	
 	write_lock(&networksLock);
 	write_lock(&ipLock);
 	
