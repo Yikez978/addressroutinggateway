@@ -14,9 +14,6 @@
 
 #define MAX_NAME_SIZE 20
 
-#define INT_DEV_NAME "eth2"
-#define EXT_DEV_NAME "eth1"
-
 #define RSA_KEY_SIZE 16
 #define AES_KEY_SIZE 16
 #define HOP_KEY_SIZE 16

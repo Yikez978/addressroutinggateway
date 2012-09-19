@@ -20,6 +20,7 @@
 #include "director.h"
 #include "hopper.h"
 #include "utility.h"
+#include "settings.h"
 
 /***************************
 Netfilter hooking variables
@@ -58,7 +59,8 @@ char init_director(void)
 	}
 
 	outgoingTrafficHook->hook = direct_outbound;               
-	outgoingTrafficHook->hooknum = NF_IP_LOCAL_OUT; // TBD IP_FORWARD later
+	//outgoingTrafficHook->hooknum = NF_IP_LOCAL_OUT;
+	outgoingTrafficHook->hooknum = NF_IP_FORWARD;
 	outgoingTrafficHook->pf = PF_INET;
 	outgoingTrafficHook->priority = NF_IP_PRI_FIRST;
 
@@ -105,7 +107,11 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	fix_transport_header(skb);
 
 	// Ignore all local traffic (accept it)
-	if(is_local_traffic(skb) || is_control_traffic(in))
+	//if(is_local_traffic(skb) || is_control_traffic(in))
+	//	return NF_ACCEPT;
+
+	// Ignore traffic not inbound on the EXTERNAL device
+	if(strcmp(EXT_DEV_NAME, in->name))	
 		return NF_ACCEPT;
 
 	// We only support a few protocols
@@ -125,7 +131,6 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	if(is_arg_ip(&iph->saddr))
 	{
 		printk("ARG: ARG packet inbound!\n");
-		printRaw(ADDR_SIZE, &iph->daddr);
 	}
 	else
 	{
@@ -162,9 +167,13 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 	fix_transport_header(skb);
 	
 	// Ignore all local and control (10.x) traffic (accept it)
-	if(is_local_traffic(skb) || is_control_traffic(out))
-		return NF_ACCEPT;
+	//if(is_local_traffic(skb) || is_control_traffic(out))
+	//	return NF_ACCEPT;
 	
+	// Ignoral all traffic not actually leaving by the external device
+	if(strcmp(EXT_DEV_NAME, out->name))
+		return NF_ACCEPT;
+
 	
 	// We only support a few protocols
 	if(!is_supported_proto(skb))
@@ -177,6 +186,8 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 	gate = get_arg_network(&iph->daddr);
 	if(gate != NULL)
 	{
+		printk("ARG: ARG packet outbound!\n");
+
 		// Destined for an ARG network
 		if(do_arg_wrap(skb, gate))
 		{
