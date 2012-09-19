@@ -414,9 +414,9 @@ void nat_timed_cleanup(unsigned long data)
 {
 	clean_nat_table();
 	
-	read_lock(&natTableLock);
+	/*read_lock(&natTableLock);
 	print_nat_table();
-	read_unlock(&natTableLock);
+	read_unlock(&natTableLock);*/
 
 	// Put ourselves back in the queue
 	init_timer(&natCleanupTimer);

@@ -3,27 +3,36 @@
 
 #include <linux/skbuff.h>
 #include <linux/ip.h>
+#include <linux/types.h>
+#include <linux/spinlock.h>
 
 #include "utility.h"
 #include "net_info.h"
 #include "uthash.h"
+#include "crypto.h"
+#include "protocol.h"
 
 #define MAX_NAME_SIZE 20
 
-#define INT_DEV_NAME "eth1"
-#define EXT_DEV_NAME "eth0"
+#define INT_DEV_NAME "eth2"
+#define EXT_DEV_NAME "eth1"
 
 #define RSA_KEY_SIZE 16
 #define AES_KEY_SIZE 16
 #define HOP_KEY_SIZE 16
 
 // Structure to hold data on associated ARG networks
+// All times here are given in jiffies for the current system, unless
+// otherwise specified
 typedef struct arg_network_info {
-	// Connected to this network?
+	// Basic info
 	char connected;
-
-	// Name
 	uchar name[MAX_NAME_SIZE];
+	
+	long timeBase; // All other times here are relative to this
+
+	// Lock
+	rwlock_t lock;
 
 	// Encryption keys
 	uchar privKey[RSA_KEY_SIZE];
@@ -32,6 +41,7 @@ typedef struct arg_network_info {
 
 	// Hopping information
 	uchar hopKey[HOP_KEY_SIZE];
+	long hopInterval;
 
 	// IP range information
 	uchar baseIP[ADDR_SIZE];
@@ -39,6 +49,7 @@ typedef struct arg_network_info {
 
 	uchar currIP[ADDR_SIZE];
 	uchar prevIP[ADDR_SIZE];
+	long ipCacheExpiration;
 
 	// Linked-list links
 	struct arg_network_info *next;
@@ -68,10 +79,6 @@ void remove_all_associated_arg_networks(void);
 // Adds a network to the table
 void add_network(void);
 
-// Ensures the current and previous IPs are correct,
-// based on the current time and hop key
-void update_ips(void);
-
 // Returns the current IP address for the gateway
 // NOTE: the previous IP is also valid for receiving,
 // so checks from that perspective should use is_current_ip(uchar *ip);
@@ -80,9 +87,11 @@ uchar *current_ip(void);
 // Returns true if the given IP is valid, false otherwise
 char is_current_ip(uchar const *ip);
 
-// Sets the current external IP address of the physical card and rotates
-// the internal addresses
+// Sets the current external IP address of the physical card
 void set_external_ip(uchar *ip);
+
+// Generates the IP address for a given gate, based on the mask, hop key, and time
+void update_ips(struct arg_network_info *gate);
 
 // Checks if the given packet is an administrative 
 // packet or not. Returns true if it is, false otherwise
@@ -96,12 +105,12 @@ char is_signature_valid(struct sk_buff const *skb);
 // and signs it. The new packet is left in skb
 // Returns false if the packet is not destined for a known
 // ARG network or another error occurs during processing
-char do_arg_wrap(struct sk_buff *skb);
+char do_arg_wrap(struct sk_buff *skb, struct arg_network_info *gate);
 
 // Unwraps the given packet, leaving the inner packet in skb.
 // Returns false if the signature fails to match or another error
 // occurs during processing
-char do_arg_unwrap(struct sk_buff *skb);
+//char do_arg_unwrap(struct sk_buff *skb, struct arg_network_info *gate);
 
 // Returns pointer to the ARG network the give IP belongs to
 struct arg_network_info *get_arg_network(void const *ip);

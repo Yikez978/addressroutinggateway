@@ -22,6 +22,7 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 							int (*okfn)(struct sk_buff *));
 
 char is_local_traffic(const struct sk_buff *skb);
+char is_control_traffic(const struct net_device *dev);
 char is_supported_proto(const struct sk_buff *skb);
 
 #endif

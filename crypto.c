@@ -105,7 +105,7 @@ uint32_t hotp(const uchar *key, size_t klen, unsigned long count)
 	return result;
 }
 
-uint32_t totp(uchar *key, size_t klen, unsigned long step, unsigned long time)
+uint32_t totp(const uchar *key, size_t klen, unsigned long step, unsigned long time)
 {
 	return hotp(key, klen, time / step);	
 }

@@ -4,7 +4,9 @@
 #include <linux/inetdevice.h>
 #include <linux/spinlock.h>
 #include <linux/random.h>
-#include <linux/crypto.h>
+#include <linux/ip.h>
+#include <linux/udp.h>
+#include <linux/tcp.h>
 
 #include "settings.h"
 #include "hopper.h"
@@ -14,8 +16,8 @@
 /**************************
 IP Hopping data
 **************************/
+static arg_network_info *gateInfo = NULL;
 static rwlock_t networksLock;
-static arg_network_info *gateInfo = NULL; 
 
 // In a full implementation, we would use public and private keys for authentication
 // and initial connection to other gateways. For the test implementation, we used a
@@ -43,7 +45,9 @@ void init_hopper_locks(void)
 char init_hopper(void)
 {
 	printk("ARG: Hopper init\n");
-	
+
+	printk("ARG: Current jiffies: %li, jiffies/second: %i\n", jiffies, HZ);
+
 	write_lock(&networksLock);
 	write_lock(&ipLock);
 	
@@ -58,13 +62,6 @@ char init_hopper(void)
 
 		return 0;
 	}
-
-	// Set up IP addresses proactively
-	update_ips();
-
-	printk("ARG: External IP: ");
-	printIP(ADDR_SIZE, gateInfo->currIP);
-	printk("\n");
 
 	// Enable promisc and/or forwarding?
 	printk("ARG: Enabling promiscuous mode\n");
@@ -148,13 +145,13 @@ char get_hopper_conf(void)
 		return 0;
 
 	strncpy(currNet->name, "GateA", sizeof(currNet->name));
-	currNet->baseIP[0] = 10;
+	currNet->baseIP[0] = 172;
 	currNet->baseIP[1] = 1;
-	currNet->baseIP[2] = 1;
-	currNet->baseIP[3] = 0;
+	currNet->baseIP[2] = 0;
+	currNet->baseIP[3] = 1;
 	currNet->mask[0] = 0xFF;
 	currNet->mask[1] = 0xFF;
-	currNet->mask[2] = 0xFF;
+	currNet->mask[2] = 0x00;
 	currNet->mask[3] = 0x00;
 
 	// Gate B
@@ -164,13 +161,13 @@ char get_hopper_conf(void)
 		return 0;
 
 	strncpy(currNet->name, "GateB", sizeof(currNet->name));
-	currNet->baseIP[0] = 10;
+	currNet->baseIP[0] = 172;
 	currNet->baseIP[1] = 2;
-	currNet->baseIP[2] = 1;
-	currNet->baseIP[3] = 0;
+	currNet->baseIP[2] = 0;
+	currNet->baseIP[3] = 1;
 	currNet->mask[0] = 0xFF;
 	currNet->mask[1] = 0xFF;
-	currNet->mask[2] = 0xFF;
+	currNet->mask[2] = 0x00;
 	currNet->mask[3] = 0x00;
 
 	prevNet->next = currNet;
@@ -245,11 +242,14 @@ char get_hopper_conf(void)
 	printk("ARG: Generating hop and symmetric encryption keys\n");
 	get_random_bytes(gateInfo->hopKey, sizeof(gateInfo->hopKey));
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
-	
+
+	// Rest of hop data
+	gateInfo->timeBase = jiffies;
+	gateInfo->hopInterval = (HOP_TIME * HZ) / 1000;
+
 	// Set IP based on configuration
 	printk("ARG: Setting initial IP\n");
-	memmove(gateInfo->mask, &extDev->ip_ptr->ifa_list->ifa_mask, sizeof(gateInfo->mask));
-	update_ips();
+	update_ips(gateInfo);
 
 	return 1;
 }
@@ -270,14 +270,21 @@ void timed_hop(unsigned long data)
 {
 	if(hoppingEnabled)
 	{
-		update_ips();
+		printk("ARG: Updating local IPs\n");
+
+		write_lock(&gateInfo->lock);
+		update_ips(gateInfo);
+		write_unlock(&gateInfo->lock);
+	
+		// Apply to the network card
+		set_external_ip(gateInfo->currIP);
 	}
 
 	// Regardless, reset timer. We choose to always have the hop timer running
 	// to eliminate the overhead of having it happen from being a difference in
 	// hopping verses not. TBD: Maybe that's a bad choice.
 	init_timer(&hopTimer);
-	hopTimer.expires = jiffies + HOP_TIME * HZ / 1000;
+	hopTimer.expires = jiffies + gateInfo->hopInterval;
 	hopTimer.function = &timed_hop;
 	add_timer(&hopTimer);
 }
@@ -295,6 +302,10 @@ struct arg_network_info *create_arg_network_info(void)
 
 	// Clear it all out
 	memset(newInfo, 0, sizeof(struct arg_network_info));
+	
+	// Init lock
+	newInfo->lock = __RW_LOCK_UNLOCKED(newInfo->lock);
+	
 	return newInfo;
 }
 
@@ -331,25 +342,6 @@ void remove_all_associated_arg_networks(void)
 		remove_arg_network(gateInfo->next);
 }
 
-void update_ips(void)
-{
-	char hmac[HMAC_SIZE];
-	char pass[] = "abc";
-	char key[] = "passphrase";
-
-	// Backup old address and generate a new one
-	memmove(gateInfo->prevIP, gateInfo->currIP, sizeof(gateInfo->prevIP));
-
-	// TBD generate. For now just copy the current one in
-	memmove(gateInfo->currIP, &extDev->ip_ptr->ifa_list->ifa_address, sizeof(gateInfo->currIP));
-	
-	printk("ARG: generating new address\n");
-	//hmac_sha1(key, strlen(key), pass, strlen(pass), hmac);
-
-	// Apply to the network card
-	//memmove(&extDev->ip_ptr->ifa_list->ifa_address, gateInfo->currIP, sizeof(gateInfo->currIP));
-}
-
 uchar *current_ip(void)
 {
 	uchar *ipCopy = NULL;
@@ -372,7 +364,7 @@ char is_current_ip(uchar const *ip)
 {
 	char ret = 0;
 
-	read_lock(&ipLock);
+	read_lock(&gateInfo->lock);
 	
 	if(memcmp(ip, gateInfo->currIP, ADDR_SIZE) == 0)
 		ret = 1;
@@ -381,20 +373,56 @@ char is_current_ip(uchar const *ip)
 	else
 		ret = 0;
 	
-	read_unlock(&ipLock);
+	read_unlock(&gateInfo->lock);
 
 	return ret;
+}
+
+void update_ips(struct arg_network_info *gate)
+{
+	int i = 0;
+	uint32_t bits = 0;
+	uchar *bitIndex = (uchar*)&bits;
+	int minLen = 0;
+	uchar ip[sizeof(gate->currIP)];
+
+	// Is the cache out of date? If not, do nothing
+	if(gate->timeBase + gate->ipCacheExpiration > jiffies)
+		return;
+
+	// Copy in top part of address. baseIP has already been masked to
+	// ensure it is zeros for the portion that changes, so we only have
+	// to copy it in
+	memmove(ip, gate->baseIP, sizeof(gate->baseIP));
+
+	// Apply random bits to remainder of IP. If we have fewer bits than
+	// needed for the mask, the extra remain 0. Sorry
+	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, jiffies - gate->timeBase); 
+
+	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
+	for(i = 0; i < minLen; i++)
+	{
+		ip[sizeof(gate->baseIP) - i - 1] |=
+							~gate->mask[sizeof(gate->mask) - i - 1] &
+							bitIndex[sizeof(bits) - i - 1];
+	}
+
+	// Is this an actual change? If so, copy the old address back and the new one in
+	// If we always blindly rotated, spurious updates would cause us to lose our prevIP
+	if(memcmp(ip, gate->currIP, sizeof(gate->currIP)) != 0)
+	{
+		memmove(gate->prevIP, gate->currIP, sizeof(gate->currIP));
+		memmove(gate->currIP, ip, sizeof(gate->currIP));
+
+		// Update cache time. TBD this should probably technically be moved to update on a precise
+		// time, not just hopInterval in the future
+		gate->ipCacheExpiration = jiffies - gate->timeBase + gate->hopInterval;
+	}
 }
 
 void set_external_ip(uchar *addr)
 {
 	struct in_ifaddr *ifa = extDev->ip_ptr->ifa_list;
-	
-	// Rotate internal IPs
-	write_lock(&ipLock);
-	memmove(gateInfo->prevIP, gateInfo->currIP, ADDR_SIZE);
-	memmove(gateInfo->currIP, addr, ADDR_SIZE);
-	write_unlock(&ipLock);
 
 	// Set physical card
 	rtnl_lock();
@@ -413,19 +441,36 @@ char is_signature_valid(struct sk_buff const *skb)
 	return 1;
 }
 
-char do_arg_wrap(struct sk_buff *skb)
+char do_arg_wrap(struct sk_buff *skb, struct arg_network_info *gate)
 {
+	printk("ARG: Wrapping packet for transmission\n");
+
+	printRaw(skb->data_len, skb->data);
+
+	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_TYPE, skb->data, skb->data_len);
+
 	return 1;
 }
 
-char do_arg_unwrap(struct sk_buff *skb)
+char do_arg_unwrap(const struct sk_buff *skb, struct arghdr *argh)
 {
 	return 1;
 }
 
 struct arg_network_info *get_arg_network(void const *ip)
 {
-	return 0;
+	struct arg_network_info *curr = gateInfo;
+
+	while(curr != NULL)
+	{
+		if(mask_array_cmp(sizeof(curr->baseIP), curr->mask, curr->baseIP, ip) == 0)
+			return curr;
+
+		curr = curr->next;
+	}
+
+	// Not found
+	return NULL;
 }
 
 char is_arg_ip(void const *ip)

@@ -7,7 +7,7 @@
 #include <linux/kernel.h>
 
 // General information about this module
-MODULE_LICENSE("Proprietary");
+MODULE_LICENSE("GPL"); // proprietary
 MODULE_AUTHOR("Ryan Morehart");
 MODULE_DESCRIPTION("Address Routing Gateway (ARG)") ;
 MODULE_VERSION("0.1");

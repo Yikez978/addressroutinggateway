@@ -105,7 +105,7 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	fix_transport_header(skb);
 
 	// Ignore all local traffic (accept it)
-	if(is_local_traffic(skb))
+	if(is_local_traffic(skb) || is_control_traffic(in))
 		return NF_ACCEPT;
 
 	// We only support a few protocols
@@ -122,54 +122,9 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	// Is it an admin packet? (could be coming from a
 	// not yet associated ARG network, hence we must check
 	// before the IP check)
-	if(is_admin_packet(skb))
+	if(is_arg_ip(&iph->saddr))
 	{
-		// Pass off to admin handler
-		#ifdef DISP_RESULTS
-		printk("ARG: Inbound Accept: Admin packet!\n");
-		#endif
-	}
-	else if(is_arg_ip(&iph->saddr))
-	{
-		// From an ARG network
-		// Is it to the correct IP?
-		if(is_current_ip((uchar*)&iph->daddr))
-		{
-			// Correct IP. Is it signed correctly?
-			if(is_signature_valid(skb))
-			{
-				if(do_arg_unwrap(skb))
-				{
-					#ifdef DISP_RESULTS
-					printk("ARG: Inbound Accept: Unwrap\n");
-					#endif
-					return NF_ACCEPT;
-				}
-				else
-				{
-					#ifdef DISP_RESULTS
-					printk("ARG: Inbound Reject: Unable to unwrap\n");
-					#endif
-					return NF_DROP;
-				}
-			}
-			else
-			{
-				#ifdef DISP_RESULTS
-				printk("ARG: Inbound Reject: Signature\n");
-				#endif
-				return NF_DROP;
-			}
-		}
-		else
-		{
-			// Incorrect IP. Reject!
-			#ifdef DISP_RESULTS
-			printk("ARG: Inbound Reject: IP\n");
-			#endif
-			//return NF_DROP; // TBD uncomment
-		}
-		
+		printk("ARG: ARG packet inbound!\n");
 		printRaw(ADDR_SIZE, &iph->daddr);
 	}
 	else
@@ -201,13 +156,15 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 							int (*okfn)(struct sk_buff *))
 {
 	struct iphdr *iph = ip_hdr(skb);
-	
+	struct arg_network_info *gate = NULL;
+
 	// Ensure everything is working as intended
 	fix_transport_header(skb);
 	
-	// Ignore all local traffic (accept it)
-	if(is_local_traffic(skb))
+	// Ignore all local and control (10.x) traffic (accept it)
+	if(is_local_traffic(skb) || is_control_traffic(out))
 		return NF_ACCEPT;
+	
 	
 	// We only support a few protocols
 	if(!is_supported_proto(skb))
@@ -217,10 +174,11 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 	}
 	
 	// Who should handle it?
-	if(is_arg_ip((uchar*)&iph->daddr))
+	gate = get_arg_network(&iph->daddr);
+	if(gate != NULL)
 	{
 		// Destined for an ARG network
-		if(do_arg_wrap(skb))
+		if(do_arg_wrap(skb, gate))
 		{
 			#ifdef DISP_RESULTS
 			printk("ARG: Outbound Accept: Wrap\n");
@@ -262,6 +220,12 @@ char is_local_traffic(const struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
 	return iph->daddr == htonl(0x7F000001);
+}
+
+char is_control_traffic(const struct net_device *dev)
+{
+	// eth0 is always our control device for our test network
+	return (dev->name[3] == '0');
 }
 
 char is_supported_proto(const struct sk_buff *skb)
