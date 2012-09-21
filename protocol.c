@@ -12,14 +12,23 @@ char send_arg_ping(struct arg_network_info *srcGate,
 				   struct arg_network_info *destGate)
 {
 	char *hi = "hifromping";
-	send_arg_packet(srcGate, destGate, ARG_PING_MSG, NULL, hi, strlen(hi));
-	return 1;
+	char r = send_arg_packet(srcGate, destGate, ARG_PING_MSG, NULL, hi, strlen(hi));
+	srcGate->pingSentTime = jiffies;
+	srcGate->state &= HOP_STATE_PING_SENT;
+	return r;
 }
 
 char send_arg_pong(struct arg_network_info *srcGate,
 				   struct arg_network_info *destGate)
 {
 	send_arg_packet(srcGate, destGate, ARG_PONG_MSG, NULL, NULL, 0);
+	return 1;
+}
+
+char process_arg_pong(struct arg_network_info *srcGate)
+{
+	srcGate->latency = (jiffies - srcGate->pingSentTime) / 2;
+	srcGate->state &= ~HOP_STATE_PING_SENT;
 	return 1;
 }
 
@@ -34,9 +43,6 @@ char send_arg_auth(struct arg_network_info *srcGate,
 char send_arg_connect(struct arg_network_info *srcGate,
 					  struct arg_network_info *destGate)
 {
-	int dlen;
-	uchar *data = NULL;
-
 	return 1;
 	//return send_arg_packet(srcGate, destGate, data, dlen);
 }
@@ -179,5 +185,12 @@ char is_wrapped_msg(uchar *data, int dlen)
 char is_admin_msg(uchar *data, int dlen)
 {
 	return get_msg_type(data, dlen) != ARG_WRAPPED_MSG;
+}
+
+char skbuff_to_msg(struct sk_buff *skb, uchar **data, int *dlen)
+{
+	*data = skb_transport_header(skb);
+	*dlen = skb->len - skb_network_header_len(skb);
+	return 1;	
 }
 

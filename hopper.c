@@ -311,8 +311,14 @@ int connect_thread(void *data)
 				printIP(sizeof(gate->baseIP), gate->baseIP);
 				printk("\n");
 			
-				if(send_arg_ping(gateInfo, gate))
-					gate->state &= HOP_STATE_CONN_ATTEMPT;
+				printk("ARG: Sending ping to gateway at ");
+				printIP(sizeof(gate->baseIP), gate->baseIP);
+				printk("\n");
+
+				send_arg_ping(gateInfo, gate);
+
+				//if(send_arg_ping(gateInfo, gate))
+				//	gate->state &= HOP_STATE_CONN_ATTEMPT;
 				
 				write_unlock(&gate->lock);
 			}	
@@ -495,13 +501,6 @@ void set_external_ip(uchar *addr)
 	memmove(&ifa->ifa_address, addr, ADDR_SIZE);
 	ifa->ifa_local = ifa->ifa_address;
 	rtnl_unlock();
-}
-
-char is_admin_packet(struct sk_buff const *skb)
-{
-	printk("ARG: is_admin_packet data. Does this start at end of transport?");
-	printRaw(skb->data_len, skb->data);
-	return is_admin_msg(skb->data, skb->data_len);
 }
 
 char is_signature_valid(struct sk_buff const *skb)

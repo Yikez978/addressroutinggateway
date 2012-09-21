@@ -35,6 +35,12 @@ typedef struct arg_network_info {
 	uchar name[MAX_NAME_SIZE];
 	long timeBase; // All other times here are relative to this
 
+	long latency; // 1-directional latency in jiffies
+
+	// Misc utility values for various protocol things to use.
+	// IE, start times for a ping, how long it's been since the last auth, etc
+	long pingSentTime;
+
 	// Lock
 	rwlock_t lock;
 

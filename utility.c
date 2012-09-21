@@ -23,7 +23,7 @@ void printRaw(int len, const void *buf)
 		if(i % 16 == 0)
 			printk("\nARG: [%4i]  ", i);
 		
-		printk("%2x ", bufC[i]);
+		printk("%02x ", bufC[i]);
 	}
 
 	printk("\n");
@@ -203,7 +203,7 @@ void set_dest_port(const struct sk_buff *skb, const __be16 port)
 
 void fix_transport_header(struct sk_buff *skb)
 {
-	struct iphdr *iph = ip_hdr(skb);
+	struct iphdr *iph  = ip_hdr(skb);
 	skb_set_transport_header(skb, iph->ihl * 4);
 }
 

@@ -107,6 +107,7 @@ char send_arg_ping(struct arg_network_info *srcGate,
 				   struct arg_network_info *destGate);
 char send_arg_pong(struct arg_network_info *srcGate,
 				   struct arg_network_info *destGate);
+char process_arg_pong(struct arg_network_info *srcGate);
 
 char send_arg_connect(struct arg_network_info *srcGate,
 					  struct arg_network_info *destGate);
@@ -124,6 +125,8 @@ char send_packet(uchar *srcIP, uchar *destIP, uchar *data, int dlen);
 char get_msg_type(uchar *data, int dlen);
 char is_wrapped_msg(uchar *data, int dlen);
 char is_admin_msg(uchar *data, int dlen);
+
+char skbuff_to_msg(struct sk_buff *skb, uchar **data, int *dlen);
 
 #endif
 

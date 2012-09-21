@@ -103,6 +103,8 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 							int (*okfn)(struct sk_buff *))
 {
 	struct iphdr *iph = ip_hdr(skb);
+	uchar *data = NULL;
+	int dlen;
 
 	// Ensure everything is working as intended
 	fix_transport_header(skb);
@@ -125,9 +127,20 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	{
 		printk("ARG: ARG packet inbound!\n");
 
-		if(is_admin_packet(skb))
+		skbuff_to_msg(skb, &data, &dlen);
+
+		if(is_admin_msg(data, dlen))
 		{
 			// TBD do admin processing
+			switch(get_msg_type(data, dlen))
+			{
+			case ARG_PING_MSG:
+				send_arg_pong();
+				break;
+
+			default:
+				printk(KERN_ALERT "ARG: Unhandled message type seen (%i)\n", get_msg_type(data, dlen));
+			}
 
 			// We never forward admin packets into the network
 			return NF_DROP;
