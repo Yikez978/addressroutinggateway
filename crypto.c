@@ -107,6 +107,10 @@ uint32_t hotp(const uchar *key, size_t klen, unsigned long count)
 
 uint32_t totp(const uchar *key, size_t klen, unsigned long step, unsigned long time)
 {
+	// Protect us from ourselves
+	if(step == 0)
+		step = 1;
+
 	return hotp(key, klen, time / step);	
 }
 

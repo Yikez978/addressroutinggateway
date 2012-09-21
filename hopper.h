@@ -12,6 +12,13 @@
 #include "crypto.h"
 #include "protocol.h"
 
+// For states, the low bit always indicates connected status
+// IE, state & HOP_STATE_CONNECTED == 1 for ANY state that is connected
+#define HOP_STATE_UNCONNECTED 0x00
+#define HOP_STATE_CONN_ATTEMPT 0x80
+#define HOP_STATE_CONNECTED 0x01
+#define HOP_STATE_PING_SENT 0x04
+
 #define MAX_NAME_SIZE 20
 
 #define RSA_KEY_SIZE 16
@@ -23,9 +30,9 @@
 // otherwise specified
 typedef struct arg_network_info {
 	// Basic info
-	char connected;
+	char state; // Connection/admin state
+
 	uchar name[MAX_NAME_SIZE];
-	
 	long timeBase; // All other times here are relative to this
 
 	// Lock
@@ -64,6 +71,9 @@ char get_hopper_conf(void);
 // Enable and disable hopping
 void enable_hopping(void);
 void disable_hopping(void);
+
+// Does the initial connect to all of the gateways we know of
+void attempt_initial_connection(unsigned long data);
 
 // Perform actual periodic hop
 void timed_hop(unsigned long data);

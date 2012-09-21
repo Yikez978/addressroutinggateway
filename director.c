@@ -21,6 +21,7 @@
 #include "hopper.h"
 #include "utility.h"
 #include "settings.h"
+#include "protocol.h"
 
 /***************************
 Netfilter hooking variables
@@ -106,10 +107,6 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 	// Ensure everything is working as intended
 	fix_transport_header(skb);
 
-	// Ignore all local traffic (accept it)
-	//if(is_local_traffic(skb) || is_control_traffic(in))
-	//	return NF_ACCEPT;
-
 	// Ignore traffic not inbound on the EXTERNAL device
 	if(strcmp(EXT_DEV_NAME, in->name))	
 		return NF_ACCEPT;
@@ -121,16 +118,25 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 		return NF_DROP;
 	}
 
-	/*printk("ARG: destination IP: ");
-	printIP(ADDR_SIZE, &iph->daddr);
-	printk("\n");*/
-
-	// Is it an admin packet? (could be coming from a
+	// TBD: Is it an admin packet? (could be coming from a
 	// not yet associated ARG network, hence we must check
 	// before the IP check)
 	if(is_arg_ip(&iph->saddr))
 	{
 		printk("ARG: ARG packet inbound!\n");
+
+		if(is_admin_packet(skb))
+		{
+			// TBD do admin processing
+
+			// We never forward admin packets into the network
+			return NF_DROP;
+		}
+		else
+		{
+			// Unwrap and drop into network, assuming everything checks out
+			return NF_ACCEPT;
+		}
 	}
 	else
 	{
@@ -166,14 +172,9 @@ unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb,
 	// Ensure everything is working as intended
 	fix_transport_header(skb);
 	
-	// Ignore all local and control (10.x) traffic (accept it)
-	//if(is_local_traffic(skb) || is_control_traffic(out))
-	//	return NF_ACCEPT;
-	
 	// Ignoral all traffic not actually leaving by the external device
 	if(strcmp(EXT_DEV_NAME, out->name))
 		return NF_ACCEPT;
-
 	
 	// We only support a few protocols
 	if(!is_supported_proto(skb))
@@ -244,7 +245,8 @@ char is_supported_proto(const struct sk_buff *skb)
 	struct iphdr *iph = ip_hdr(skb);
 	if(iph->version == 4)
 	{
-		return (iph->protocol == TCP_PROTO
+		return (iph->protocol == ARG_PROTO
+			|| iph->protocol == TCP_PROTO
 			|| iph->protocol == UDP_PROTO
 			|| iph->protocol == ICMP_PROTO);
 	}

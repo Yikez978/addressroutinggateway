@@ -54,7 +54,10 @@ static int __init arg_init(void)
 	}
 
 	printk(KERN_INFO "ARG: Running\n");
-    
+   
+	// Do first attempt to connect to the gateways we know of
+	attempt_initial_connection(0);
+
 	return 0;
 }
 

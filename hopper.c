@@ -7,6 +7,7 @@
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/sched.h>
 
 #include "settings.h"
 #include "hopper.h"
@@ -34,6 +35,7 @@ static rwlock_t ipLock;
 static struct net_device *intDev = NULL;
 static struct net_device *extDev = NULL;
 
+static struct timer_list connectTimer;
 static struct timer_list hopTimer;
 
 void init_hopper_locks(void)
@@ -72,7 +74,7 @@ char init_hopper(void)
 	write_unlock(&ipLock);
 	write_unlock(&networksLock);
 	
-	// And allow hopping now
+	// Allow hopping now
 	timed_hop(0);
 	enable_hopping();
 	
@@ -88,8 +90,11 @@ void uninit_hopper(void)
 	// Disable hopping
 	disable_hopping();
 	
-	// No more need
+	// No more need to hop and connect
+	// TBD isnt't there a possibility of something bad happening if we del_timer while in
+	// the timer? IE, it will reregister and then everything will die
 	del_timer(&hopTimer);
+	del_timer(&connectTimer);
 	
 	write_lock(&networksLock);
 	write_lock(&ipLock);
@@ -266,6 +271,39 @@ void disable_hopping(void)
 	hoppingEnabled = 0;
 }
 
+void attempt_initial_connection(unsigned long data)
+{
+	struct arg_network_info *gate = NULL;
+	return;
+
+	gate = gateInfo->next;
+	while(gate != NULL)
+	{
+		if((gate->state & HOP_STATE_CONNECTED) == 0)
+		{
+			write_lock(&gate->lock);
+
+			printk("ARG: Attempting to connect to gateway at ");
+			printIP(sizeof(gate->baseIP), gate->baseIP);
+			printk("\n");
+		
+			if(send_arg_ping(gateInfo, gate))
+				gate->state &= HOP_STATE_CONN_ATTEMPT;
+			
+			write_unlock(&gate->lock);
+		}	
+
+		// Next
+		gate = gate->next;
+	}
+
+	// Do it again in a bit
+	init_timer(&connectTimer);
+	connectTimer.expires = jiffies + CONNECT_WAIT_TIME * HZ;
+	connectTimer.function = &attempt_initial_connection;
+	add_timer(&connectTimer);
+}
+
 void timed_hop(unsigned long data)
 {
 	if(hoppingEnabled)
@@ -433,7 +471,9 @@ void set_external_ip(uchar *addr)
 
 char is_admin_packet(struct sk_buff const *skb)
 {
-	return 0;
+	printk("ARG: is_admin_packet data. Does this start at end of transport?");
+	printRaw(skb->data_len, skb->data);
+	return is_admin_msg(skb->data, skb->data_len);
 }
 
 char is_signature_valid(struct sk_buff const *skb)
@@ -447,7 +487,7 @@ char do_arg_wrap(struct sk_buff *skb, struct arg_network_info *gate)
 
 	printRaw(skb->data_len, skb->data);
 
-	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_TYPE, skb->data, skb->data_len);
+	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_MSG, skb->data, skb->data_len);
 
 	return 1;
 }

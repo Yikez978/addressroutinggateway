@@ -9,6 +9,7 @@
 #include <linux/net.h>
 
 #include "net_info.h"
+#include "protocol.h"
 
 // Show hex of all data in buf
 void printRaw(int len, const void *buf)
@@ -98,6 +99,7 @@ __be16 get_source_port(const struct sk_buff *skb)
 	switch(iph->protocol)
 	{
 	case ICMP_PROTO:
+	case ARG_PROTO:
 		return 0;
 	
 	case TCP_PROTO:
@@ -124,6 +126,7 @@ __be16 get_dest_port(const struct sk_buff *skb)
 	switch(iph->protocol)
 	{
 	case ICMP_PROTO:
+	case ARG_PROTO:
 		return 0;
 	
 	case TCP_PROTO:
@@ -150,6 +153,7 @@ void set_source_port(const struct sk_buff *skb, const __be16 port)
 	switch(iph->protocol)
 	{
 	case ICMP_PROTO:
+	case ARG_PROTO:
 		break;
 	
 	case TCP_PROTO:
@@ -178,6 +182,7 @@ void set_dest_port(const struct sk_buff *skb, const __be16 port)
 	switch(iph->protocol)
 	{
 	case ICMP_PROTO:
+	case ARG_PROTO:
 		break;
 	
 	case TCP_PROTO:
