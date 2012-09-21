@@ -1,10 +1,10 @@
+#include <linux/module.h>
+#include <linux/kernel.h>
+
 #include "utility.h"
 #include "director.h"
 #include "hopper.h"
 #include "nat.h"
-
-#include <linux/module.h>
-#include <linux/kernel.h>
 
 // General information about this module
 MODULE_LICENSE("GPL"); // proprietary
@@ -56,7 +56,7 @@ static int __init arg_init(void)
 	printk(KERN_INFO "ARG: Running\n");
    
 	// Do first attempt to connect to the gateways we know of
-	attempt_initial_connection(0);
+	init_hopper_finish();
 
 	return 0;
 }

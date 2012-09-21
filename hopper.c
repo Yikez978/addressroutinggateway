@@ -7,7 +7,9 @@
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/delay.h>
 
 #include "settings.h"
 #include "hopper.h"
@@ -35,8 +37,8 @@ static rwlock_t ipLock;
 static struct net_device *intDev = NULL;
 static struct net_device *extDev = NULL;
 
-static struct timer_list connectTimer;
-static struct timer_list hopTimer;
+static struct task_struct *connectThread = NULL;
+static struct task_struct *hopThread = NULL;
 
 void init_hopper_locks(void)
 {
@@ -75,12 +77,19 @@ char init_hopper(void)
 	write_unlock(&networksLock);
 	
 	// Allow hopping now
-	timed_hop(0);
+	printk("ARG: Starting hop thread\n");
+	hopThread = kthread_run(timed_hop_thread, NULL, "hop thread");
 	enable_hopping();
 	
 	printk("ARG: Hopper initialized\n");
 
 	return 1;
+}
+
+void init_hopper_finish(void)
+{
+	printk("ARG: Starting connection/gateway auth thread\n");
+	connectThread = kthread_run(connect_thread, NULL, "connect thread");
 }
 
 void uninit_hopper(void)
@@ -93,8 +102,20 @@ void uninit_hopper(void)
 	// No more need to hop and connect
 	// TBD isnt't there a possibility of something bad happening if we del_timer while in
 	// the timer? IE, it will reregister and then everything will die
-	del_timer(&hopTimer);
-	del_timer(&connectTimer);
+	if(hopThread != NULL)
+	{
+		printk("ARG: Asking hop thread to stop...");
+		kthread_stop(hopThread);
+		hopThread = NULL;
+		printk("done\n");
+	}
+	if(connectThread != NULL)
+	{
+		printk("ARG: Asking connect thread to stop...");
+		kthread_stop(connectThread);
+		connectThread = NULL;
+		printk("done\n");
+	}
 	
 	write_lock(&networksLock);
 	write_lock(&ipLock);
@@ -271,60 +292,67 @@ void disable_hopping(void)
 	hoppingEnabled = 0;
 }
 
-void attempt_initial_connection(unsigned long data)
+int connect_thread(void *data)
 {
 	struct arg_network_info *gate = NULL;
-	return;
 
-	gate = gateInfo->next;
-	while(gate != NULL)
+	printk("ARG: Connect thread running\n");
+
+	while(!kthread_should_stop())
 	{
-		if((gate->state & HOP_STATE_CONNECTED) == 0)
+		gate = gateInfo->next;
+		while(gate != NULL)
 		{
-			write_lock(&gate->lock);
+			if((gate->state & HOP_STATE_CONNECTED) == 0)
+			{
+				write_lock(&gate->lock);
 
-			printk("ARG: Attempting to connect to gateway at ");
-			printIP(sizeof(gate->baseIP), gate->baseIP);
-			printk("\n");
-		
-			if(send_arg_ping(gateInfo, gate))
-				gate->state &= HOP_STATE_CONN_ATTEMPT;
+				printk("ARG: Attempting to connect to gateway at ");
+				printIP(sizeof(gate->baseIP), gate->baseIP);
+				printk("\n");
 			
-			write_unlock(&gate->lock);
-		}	
+				if(send_arg_ping(gateInfo, gate))
+					gate->state &= HOP_STATE_CONN_ATTEMPT;
+				
+				write_unlock(&gate->lock);
+			}	
 
-		// Next
-		gate = gate->next;
+			// Next
+			gate = gate->next;
+		}
+
+		schedule_timeout_interruptible(CONNECT_WAIT_TIME * HZ);
 	}
+	
+	printk("ARG: Connect thread dying\n");
 
-	// Do it again in a bit
-	init_timer(&connectTimer);
-	connectTimer.expires = jiffies + CONNECT_WAIT_TIME * HZ;
-	connectTimer.function = &attempt_initial_connection;
-	add_timer(&connectTimer);
+	return 0;
 }
 
-void timed_hop(unsigned long data)
+int timed_hop_thread(void *data)
 {
-	if(hoppingEnabled)
+	printk("ARG: Hop thread running\n");
+
+	while(!kthread_should_stop())
 	{
-		printk("ARG: Updating local IPs\n");
+		if(hoppingEnabled)
+		{
+			printk("ARG: Updating local IPs\n");
 
-		write_lock(&gateInfo->lock);
-		update_ips(gateInfo);
-		write_unlock(&gateInfo->lock);
-	
-		// Apply to the network card
-		set_external_ip(gateInfo->currIP);
+			write_lock(&gateInfo->lock);
+			update_ips(gateInfo);
+			write_unlock(&gateInfo->lock);
+		
+			// Apply to the network card
+			set_external_ip(gateInfo->currIP);
+		}
+		
+		schedule_timeout_interruptible(gateInfo->hopInterval);
 	}
+	
+	printk("ARG: Hop thread dying\n");
 
-	// Regardless, reset timer. We choose to always have the hop timer running
-	// to eliminate the overhead of having it happen from being a difference in
-	// hopping verses not. TBD: Maybe that's a bad choice.
-	init_timer(&hopTimer);
-	hopTimer.expires = jiffies + gateInfo->hopInterval;
-	hopTimer.function = &timed_hop;
-	add_timer(&hopTimer);
+	return 0;
 }
 
 struct arg_network_info *create_arg_network_info(void)

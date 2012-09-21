@@ -22,7 +22,7 @@ int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uch
 	
 	// Allocate enough space for the max we need, which is
 	// the key padded to block size + either the data length or the hash length
-	scratchSpace = kcalloc(maxLen, 1, GFP_KERNEL);
+	scratchSpace = kcalloc(maxLen, 1, GFP_ATOMIC);
 	if(scratchSpace == NULL)
 	{
 		printk(KERN_ALERT "ARG: Unable to allocate scratch space for HMAC\n");
