@@ -25,26 +25,20 @@ struct arg_network_info;
  * that local is the initiator, although obviously it goes both ways.
  *
  * Auth process, to verify that a valid gateway is sitting an a give IP range
+ *			Also allows round-trip latency detection
  * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
  *	1. Local sends AUTH_REQ containing random 4-byte unsigned int and
  *		4 bytes of randomness, all encrypted by the global key. (IRL, would
- *		be encrypted by remote public key)
+ *		be encrypted by remote public key.) Time of send is recorded
  *	2. Remote sends AUTH_RESP with same int and different random bytes,
  *		encrypted (IRL, would be encrypted by remote private key)
  *  3. Local ensures received int matches sent int. If so, remote is 
- *		marked as authenticated
- *
- * Lag detection
- * 	- HMACs are all done with global symmetric key (IRL, sign with private key of sender)
- *	1. Local sends PING and records time it sent (no data in packet)
- *	2. Remote sends PONG in response (no data)
- *	3. Local receives and stops the stop watch. Divide by 2 to get
- *		the latency one direction. Record. And probably do again to average
+ *		marked as authenticated. Time for auth is determined and recorded by
+ *		dividing the start and end times, giving the one-way latency in jiffies
  *
  * Time sync, to ensure both gateways know when they are changing IPs
  * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
  *	1. Ensure auth (do process if needed)
- *	2. Do lag detection (every time)
  *	3. Local sends TIME_REQ containing its time in jiffies (4 bytes) and
  *		its jiffies per second (4 bytes). This packet is _NOT_ encrypted
  *	4. Remote receives packet and does the calculation:
@@ -58,8 +52,7 @@ struct arg_network_info;
  *
  * Connect process
  * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
- *	1. Ensure auth
- *	2. Ensure time sync
+ *	1. Ensure time sync
  *	2. Local sends CONN_DATA_REQ containing its hop key, hop interval, and
  *		symmetric key, all encrypted with global key. (Remote MAY save this data,
  *		or it could simply do its own request next.)
@@ -83,11 +76,11 @@ struct arg_network_info;
 #define ARG_PING_MSG 1
 #define ARG_PONG_MSG 2
 
-#define ARG_AUTH_REQ_MSG 3
-#define ARG_AUTH_RESP_MSG 4
+#define ARG_AUTH_REQ_MSG ARG_PING_MSG
+#define ARG_AUTH_RESP_MSG ARG_PONG_MSG
 
-#define ARG_CONN_DATA_REQ_MSG 5
-#define ARG_CONN_DATA_MSG 6
+#define ARG_CONN_REQ_MSG 5
+#define ARG_CONN_RESP_MSG 6
 
 #define ARG_TIME_REQ_MSG 7
 #define ARG_TIME_RESP_MSG 8
@@ -102,22 +95,67 @@ typedef struct arghdr {
 
 #define ARG_HDR_LEN sizeof(struct arghdr)
 
-// Lag detection
-char send_arg_ping(struct arg_network_info *srcGate,
-				   struct arg_network_info *destGate);
-char send_arg_pong(struct arg_network_info *srcGate,
-				   struct arg_network_info *destGate);
-char process_arg_pong(struct arg_network_info *srcGate);
+#define ARG_DO_AUTH 0x01
+#define ARG_DO_PING ARG_DO_AUTH
+#define ARG_DO_TIME 0x04
+#define ARG_DO_CONN 0x08
 
-char send_arg_connect(struct arg_network_info *srcGate,
-					  struct arg_network_info *destGate);
+typedef struct proto_data {
+	char state; // Records actions that need to occur
+
+	long latency; // One-way latency in jiffies
+	
+	long pingSentTime;
+	__be32 pingID;
+} proto_data;
+
+// Protocol flow control
+char start_auth(struct arg_network_info *local, struct arg_network_info *remote);
+char start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
+char start_connection(struct arg_network_info *local, struct arg_network_info *remote);
+
+char do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
+
+// Lag detection
+char send_arg_ping(struct arg_network_info *local,
+				   struct arg_network_info *remote);
+char process_arg_ping(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const uchar *packet, int plen);
+char process_arg_pong(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const uchar *packet, int plen);
+
+// Time
+char send_arg_time_req(struct arg_network_info *local,
+					   struct arg_network_info *remote);
+char process_arg_time_req(struct arg_network_info *local,
+						  struct arg_network_info *remote,
+						  const uchar *packet, int plen);
+char process_arg_time_resp(struct arg_network_info *remote, const uchar *packet, int plen);
+
+// Connect
+char send_arg_conn_req(struct arg_network_info *local,
+					   struct arg_network_info *remote);
+char process_arg_conn_req(struct arg_network_info *local,
+						  struct arg_network_info *remote,
+						  const uchar *packet, int plen);
+char process_arg_conn_resp(struct arg_network_info *remote, const uchar *packet, int plen);
 
 // Creates the ARG header for the given data and sends it
 char send_arg_packet(struct arg_network_info *srcGate,
 					 struct arg_network_info *destGate,
 					 int type,
-					 uchar *hmacKey,
-					 uchar *data, int dlen);
+					 const uchar *hmacKey,
+					 const uchar *encKey,
+					 const uchar *data, int dlen);
+
+// Validates the packet data (from ARG header on) and decrypts it.
+// New space is allocated and placed into out, which must be freed via free_arg_packet()
+char process_arg_packet(const uchar *hmacKey, const uchar *encKey,
+						const uchar *data, const int dlen,
+						uchar **out, int *outLen);
+void free_arg_data(uchar *data);
 
 // Creates and sends a packet with the given data. Only works between ARG gateways currently
 char send_packet(uchar *srcIP, uchar *destIP, uchar *data, int dlen);

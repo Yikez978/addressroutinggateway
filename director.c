@@ -103,6 +103,7 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 							int (*okfn)(struct sk_buff *))
 {
 	struct iphdr *iph = ip_hdr(skb);
+	struct arg_network_info *gate = NULL;
 	uchar *data = NULL;
 	int dlen;
 
@@ -120,10 +121,9 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 		return NF_DROP;
 	}
 
-	// TBD: Is it an admin packet? (could be coming from a
-	// not yet associated ARG network, hence we must check
-	// before the IP check)
-	if(is_arg_ip(&iph->saddr))
+	// Is this an ARG packet?
+	gate = get_arg_network(&iph->saddr);
+	if(gate != NULL)
 	{
 		printk("ARG: ARG packet inbound!\n");
 
@@ -131,16 +131,7 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 
 		if(is_admin_msg(data, dlen))
 		{
-			// TBD do admin processing
-			switch(get_msg_type(data, dlen))
-			{
-			case ARG_PING_MSG:
-				send_arg_pong();
-				break;
-
-			default:
-				printk(KERN_ALERT "ARG: Unhandled message type seen (%i)\n", get_msg_type(data, dlen));
-			}
+			process_admin_msg(skb, gate, data, dlen);
 
 			// We never forward admin packets into the network
 			return NF_DROP;
@@ -148,6 +139,7 @@ unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb,
 		else
 		{
 			// Unwrap and drop into network, assuming everything checks out
+			// TBD, call unwrapper
 			return NF_ACCEPT;
 		}
 	}

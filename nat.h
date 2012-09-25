@@ -89,7 +89,7 @@ struct nat_entry *remove_nat_entry(struct nat_entry *e);
 // Clears the NAT table of old functions/provides
 // callback for timed cleanup. All functions work with the lock to ensure synchronization
 void empty_nat_table(void);
-void nat_timed_cleanup(unsigned long data);
+int nat_cleanup_thread(void *data);
 void clean_nat_table(void);
 
 #endif

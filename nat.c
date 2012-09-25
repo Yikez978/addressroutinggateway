@@ -7,6 +7,8 @@
 #include <linux/time.h>
 #include <linux/timer.h>
 #include <linux/delay.h>
+#include <linux/kthread.h>
+#include <linux/sched.h>
 
 #include "nat.h"
 #include "hopper.h"
@@ -18,7 +20,7 @@ NAT table data
 static struct nat_entry_bucket *natTable = NULL;
 static rwlock_t natTableLock;
 
-static struct timer_list natCleanupTimer;
+static struct task_struct *natCleanupThread = NULL;
 
 void init_nat_locks(void)
 {
@@ -29,9 +31,7 @@ char init_nat(void)
 {
 	printk("ARG: NAT init\n");
 
-	// Ensure the NAT table is empty and allow it to start its
-	// periodic cleanup timer
-	nat_timed_cleanup(0);
+	natCleanupThread = kthread_run(nat_cleanup_thread, NULL, "nat thread");
 
 	printk("ARG: NAT initialized\n");
 
@@ -41,8 +41,14 @@ char init_nat(void)
 void uninit_nat(void)
 {
 	printk("ARG: NAT uninit\n");
-
-	del_timer(&natCleanupTimer);
+	
+	if(natCleanupThread != NULL)
+	{
+		printk("ARG: Asking NAT cleanup thread to stop...");
+		kthread_stop(natCleanupThread);
+		natCleanupThread = NULL;
+		printk("done\n");
+	}
 
 	empty_nat_table();
 	
@@ -410,19 +416,24 @@ struct nat_entry *remove_nat_entry(struct nat_entry *e)
 	return next;
 }
 
-void nat_timed_cleanup(unsigned long data)
+int nat_cleanup_thread(void *data)
 {
-	clean_nat_table();
-	
-	read_lock(&natTableLock);
-	print_nat_table();
-	read_unlock(&natTableLock);
+	printk("ARG: NAT cleanup thread running\n");
 
-	// Put ourselves back in the queue
-	init_timer(&natCleanupTimer);
-	natCleanupTimer.expires = jiffies + NAT_CLEAN_TIME * HZ;
-	natCleanupTimer.function = &nat_timed_cleanup;
-	add_timer(&natCleanupTimer);
+	while(!kthread_should_stop())
+	{
+		clean_nat_table();
+	
+		read_lock(&natTableLock);
+		print_nat_table();
+		read_unlock(&natTableLock);
+		
+		schedule_timeout_interruptible(NAT_CLEAN_TIME * HZ);
+	}
+
+	printk("ARG: NAT cleanup thread dying\n");
+
+	return 0;
 }
 
 void clean_nat_table(void)

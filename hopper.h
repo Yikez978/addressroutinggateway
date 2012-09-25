@@ -12,12 +12,9 @@
 #include "crypto.h"
 #include "protocol.h"
 
-// For states, the low bit always indicates connected status
-// IE, state & HOP_STATE_CONNECTED == 1 for ANY state that is connected
-#define HOP_STATE_UNCONNECTED 0x00
-#define HOP_STATE_CONN_ATTEMPT 0x80
-#define HOP_STATE_CONNECTED 0x01
-#define HOP_STATE_PING_SENT 0x04
+// State bits used in arg_network_info
+#define HOP_STATE_AUTH      0x01
+#define HOP_STATE_CONNECTED 0x02
 
 #define MAX_NAME_SIZE 20
 
@@ -30,16 +27,12 @@
 // otherwise specified
 typedef struct arg_network_info {
 	// Basic info
-	char state; // Connection/admin state
-
 	uchar name[MAX_NAME_SIZE];
-	long timeBase; // All other times here are relative to this
-
-	long latency; // 1-directional latency in jiffies
-
-	// Misc utility values for various protocol things to use.
-	// IE, start times for a ping, how long it's been since the last auth, etc
-	long pingSentTime;
+	
+	char authenticated:1,
+		 connected:1; // Connection/admin state
+	long lastAuthTime;
+	struct proto_data proto;
 
 	// Lock
 	rwlock_t lock;
@@ -51,6 +44,7 @@ typedef struct arg_network_info {
 
 	// Hopping information
 	uchar hopKey[HOP_KEY_SIZE];
+	long timeBase;
 	long hopInterval;
 
 	// IP range information
@@ -100,6 +94,9 @@ uchar *current_ip(void);
 
 // Returns true if the given IP is valid, false otherwise
 char is_current_ip(uchar const *ip);
+
+// Processes incoming admin messages by handing them off to the correct protocol handler
+char process_admin_msg(struct sk_buff *skb, struct arg_network_info *srcGate, uchar *data, int dlen);
 
 // Sets the current external IP address of the physical card
 void set_external_ip(uchar *ip);

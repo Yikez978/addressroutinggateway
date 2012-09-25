@@ -42,7 +42,7 @@ local-stop :
 	-lsmod | grep arg >/dev/null && sudo rmmod -w arg
 
 local-monitor :
-	tail -f /var/log/kern.log
+	tail -f /var/log/kern.log | sed -r 's/.* ARG://'
 
 local-network-fix :
 	sudo /etc/init.d/networking restart

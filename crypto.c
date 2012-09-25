@@ -1,7 +1,9 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-
+#include <linux/crypto.h>
+#include <crypto/aes.h>
+ 
 #include "crypto.h"
 #include "sha1.h"
 #include "settings.h"
@@ -112,5 +114,29 @@ uint32_t totp(const uchar *key, size_t klen, unsigned long step, unsigned long t
 		step = 1;
 
 	return hotp(key, klen, time / step);	
+}
+
+void aes_encrypt(const uchar *key, int klen, const uchar *data, int dlen, uchar *out, int *outlen)
+{
+	/*struct cryto_cipher *tfm;
+
+	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
+	if(IS_ERR(tfm))
+	{
+		printk("ARG: Unable to allocate cipher for AES encryption\n");
+		return;
+	}
+
+	crypto_cipher_setkey(tfm, key, klen);
+
+	crypto_cipher_encrypt_one(tfm, b, b_0);
+ 
+
+	crypto_free_cipher(tfm);*/
+}
+
+void aes_decrypt(uchar *data, int dlen, uchar *out, int *outlen)
+{
+
 }
 

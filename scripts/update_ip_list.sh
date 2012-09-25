@@ -31,3 +31,5 @@ do
 	echo '' >> "$SSHCONFIG"
 done < "$OUT"
 
+rm "$OUT"
+

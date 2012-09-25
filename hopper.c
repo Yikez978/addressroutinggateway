@@ -22,14 +22,6 @@ IP Hopping data
 static arg_network_info *gateInfo = NULL;
 static rwlock_t networksLock;
 
-// In a full implementation, we would use public and private keys for authentication
-// and initial connection to other gateways. For the test implementation, we used a
-// globally shared key for HMACs, rather than digital signatures
-static const uchar argGlobalKey[AES_KEY_SIZE] = {25, -18, -127, -10,
-												 67, 30, 7, -49,
-												 68, -70, 19, 106,
-												 -100, -11, 72, 18};
-
 static char hoppingEnabled = 0;
 
 static rwlock_t ipLock;
@@ -303,24 +295,13 @@ int connect_thread(void *data)
 		gate = gateInfo->next;
 		while(gate != NULL)
 		{
-			if((gate->state & HOP_STATE_CONNECTED) == 0)
+			if(!gate->connected)
 			{
-				write_lock(&gate->lock);
-
 				printk("ARG: Attempting to connect to gateway at ");
 				printIP(sizeof(gate->baseIP), gate->baseIP);
 				printk("\n");
-			
-				printk("ARG: Sending ping to gateway at ");
-				printIP(sizeof(gate->baseIP), gate->baseIP);
-				printk("\n");
 
-				send_arg_ping(gateInfo, gate);
-
-				//if(send_arg_ping(gateInfo, gate))
-				//	gate->state &= HOP_STATE_CONN_ATTEMPT;
-				
-				write_unlock(&gate->lock);
+				start_connection(gateInfo, gate);
 			}	
 
 			// Next
@@ -450,6 +431,42 @@ char is_current_ip(uchar const *ip)
 	return ret;
 }
 
+char process_admin_msg(struct sk_buff *skb, struct arg_network_info *srcGate, uchar *data, int dlen)
+{
+	switch(get_msg_type(data, dlen))
+	{
+	case ARG_PING_MSG:
+		process_arg_ping(gateInfo, srcGate, data, dlen);
+		break;
+
+	case ARG_PONG_MSG:
+		process_arg_pong(gateInfo, srcGate, data, dlen);
+		break;
+	
+	case ARG_CONN_REQ_MSG:
+		process_arg_conn_req(gateInfo, srcGate, data, dlen);
+		break;
+
+	case ARG_CONN_RESP_MSG:
+		process_arg_conn_resp(gateInfo, data, dlen);
+		break;
+	
+	case ARG_TIME_REQ_MSG:
+		process_arg_time_req(gateInfo, srcGate, data, dlen);
+		break;
+
+	case ARG_TIME_RESP_MSG:
+		process_arg_time_resp(gateInfo, data, dlen);
+		break;
+
+	default:
+		printk(KERN_ALERT "ARG: Unhandled message type seen (%i)\n", get_msg_type(data, dlen));
+		return 0;	
+	}
+
+	return 1;
+}
+
 void update_ips(struct arg_network_info *gate)
 {
 	int i = 0;
@@ -459,7 +476,7 @@ void update_ips(struct arg_network_info *gate)
 	uchar ip[sizeof(gate->currIP)];
 
 	// Is the cache out of date? If not, do nothing
-	if(gate->timeBase + gate->ipCacheExpiration > jiffies)
+	if(gate->ipCacheExpiration > jiffies)
 		return;
 
 	// Copy in top part of address. baseIP has already been masked to
@@ -488,7 +505,7 @@ void update_ips(struct arg_network_info *gate)
 
 		// Update cache time. TBD this should probably technically be moved to update on a precise
 		// time, not just hopInterval in the future
-		gate->ipCacheExpiration = jiffies - gate->timeBase + gate->hopInterval;
+		gate->ipCacheExpiration = jiffies + gate->hopInterval;
 	}
 }
 
