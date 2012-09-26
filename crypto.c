@@ -24,7 +24,7 @@ int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uch
 	
 	// Allocate enough space for the max we need, which is
 	// the key padded to block size + either the data length or the hash length
-	scratchSpace = kcalloc(maxLen, 1, GFP_ATOMIC);
+	scratchSpace = kcalloc(maxLen, 1, GFP_KERNEL);
 	if(scratchSpace == NULL)
 	{
 		printk(KERN_ALERT "ARG: Unable to allocate scratch space for HMAC\n");
@@ -94,11 +94,11 @@ uint32_t hotp(const uchar *key, size_t klen, unsigned long count)
 	}
 
 	// Truncate, code directly from HOTP RFC
-	offset =  hmac_result[19] & 0xf ;
+	offset =  hmac_result[HMAC_SIZE - 1] & 0xf;
     result = (hmac_result[offset] & 0x7f) << 24
 			| (hmac_result[offset+1] & 0xff) << 16
 			| (hmac_result[offset+2] & 0xff) <<  8
-			| (hmac_result[offset+3] & 0xff) ;
+			| (hmac_result[offset+3] & 0xff);
 
 	// We skip the "string to number" step of the full HOTP algorithm
 	// The security analysis in the RFC seems to indicate that this is perfectly

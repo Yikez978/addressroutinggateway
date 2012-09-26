@@ -53,10 +53,10 @@ struct arg_network_info;
  * Connect process
  * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
  *	1. Ensure time sync
- *	2. Local sends CONN_DATA_REQ containing its hop key, hop interval, and
+ *	2. Local sends CONN_REQ containing its hop key, hop interval, and
  *		symmetric key, all encrypted with global key. (Remote MAY save this data,
  *		or it could simply do its own request next.)
- *	3. Remote sends CONN_DATA_RESP acknowledgement back, containing the remote
+ *	3. Remote sends CONN_RESP acknowledgement back, containing the remote
  *		hop key, hop interval, and symmetric key. Again, encrypted with global key
  *	4. Local saves data and marks gateway as connected
  *
@@ -108,6 +108,8 @@ typedef struct proto_data {
 	long pingSentTime;
 	__be32 pingID;
 } proto_data;
+
+void init_protocol_locks(void);
 
 // Protocol flow control
 char start_auth(struct arg_network_info *local, struct arg_network_info *remote);

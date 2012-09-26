@@ -17,6 +17,13 @@ static const uchar argGlobalKey[AES_KEY_SIZE] = {25, -18, -127, -10,
 												 68, -70, 19, 106,
 												 -100, -11, 72, 18};
 
+static rwlock_t sendLock;
+
+void init_protocol_locks(void)
+{
+	sendLock = __RW_LOCK_UNLOCKED(sendLock);
+}
+
 char start_auth(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	remote->proto.state |= ARG_DO_AUTH;
@@ -57,14 +64,14 @@ char send_arg_ping(struct arg_network_info *local,
 	printIP(sizeof(remote->baseIP), remote->baseIP);
 	printk("\n");
 	
-	write_lock(&local->lock);
+	write_lock(&remote->lock);
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
 
 	r = send_arg_packet(local, remote, ARG_PING_MSG, argGlobalKey, argGlobalKey, (uchar*)&remote->proto.pingID, sizeof(remote->proto.pingID));
 	if(r)
 		remote->proto.pingSentTime = jiffies;
 	
-	write_unlock(&local->lock);
+	write_unlock(&remote->lock);
 	
 	return r;
 }
@@ -77,9 +84,7 @@ char process_arg_ping(struct arg_network_info *local,
 	uchar *data = NULL;
 	int dlen = 0;
 	
-	printk("ARG: Received ping from ");
-	printIP(sizeof(remote->baseIP), remote->baseIP);
-	printk("\n");
+	printk("ARG: Received ping from %s\n", remote->name);
 	
 	if(!process_arg_packet(argGlobalKey, argGlobalKey, packet, plen, &data, &dlen))
 	{
@@ -106,10 +111,9 @@ char process_arg_pong(struct arg_network_info *local,
 	char status = 0;
 	uchar *data = NULL;
 	int dlen = 0;
+	__be32 *id = 0;
 	
-	printk("ARG: Received pong from ");
-	printIP(sizeof(remote->baseIP), remote->baseIP);
-	printk("\n");
+	printk("ARG: Received pong from %s\n", remote->name);
 	
 	if(!process_arg_packet(argGlobalKey, argGlobalKey, packet, plen, &data, &dlen))
 	{
@@ -117,7 +121,7 @@ char process_arg_pong(struct arg_network_info *local,
 		return 0;
 	}
 
-	if(dlen != sizeof(remote->proto.pingID))
+	if(data == NULL || dlen != sizeof(remote->proto.pingID))
 	{
 		printk("ARG: Not accepting pong, data not a proper ping ID\n");
 		free_arg_data(data);
@@ -128,19 +132,24 @@ char process_arg_pong(struct arg_network_info *local,
 
 	if(remote->proto.pingSentTime != 0)
 	{
-		if(remote->proto.pingID == (__be32)*data)
+		id = (__be32*)data;
+
+		if(remote->proto.pingID == *id)
 		{
 			remote->proto.latency = (jiffies - remote->proto.pingSentTime) / 2;
 			remote->proto.pingSentTime = 0;
 			remote->authenticated = 1;
 			status = 1;
+			printk("ARG: Latency to %s: %li jiffies\n", remote->name, remote->proto.latency);
 		}
 		else
 		{
 			// We sent one, but the ID was incorrect. The remote gateway
 			// had the wrong ID or it did not have the correct global key
 			// Either way, we don't trust them now
+			printk("ARG: The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
 			remote->authenticated = 0;
+			remote->proto.pingSentTime = 0;
 			status = 1;
 		}
 	}
@@ -150,11 +159,11 @@ char process_arg_pong(struct arg_network_info *local,
 		status = 0;
 	}
 	
+	write_unlock(&remote->lock);
+	
 	// All done with a ping/auth
 	remote->proto.state &= ~ARG_DO_AUTH;
 	do_next_action(local, remote);
-	
-	write_unlock(&remote->lock);
 	
 	free_arg_data(data);
 	
@@ -165,18 +174,39 @@ char process_arg_pong(struct arg_network_info *local,
 char send_arg_time_req(struct arg_network_info *local,
 					   struct arg_network_info *remote)
 {
-	return 0;
+	int status = 0;
+	uint32_t hertz = HZ;
+	long jifRightNow = jiffies;
+	uchar data[sizeof(jifRightNow) + sizeof(hertz)];
+
+	// We can only sync with someone we trust
+	if(!remote->authenticated)
+	{
+		start_time_sync(local, remote);
+		return 0;
+	}
+
+	printk("ARG: Sending time sync request to %s\n", remote->name);
+	
+	memmove(data, &jifRightNow, sizeof(jiffies));
+	memmove(data + sizeof(jiffies), &hertz, sizeof(hertz));
+
+	status = send_arg_packet(local, remote, ARG_TIME_REQ_MSG, argGlobalKey, NULL, data, sizeof(data));
+	
+	return status;
 }
 
 char process_arg_time_req(struct arg_network_info *local,
 						  struct arg_network_info *remote,
 						  const uchar *packet, int plen)
 {
+	printk("ARG: Received time sync request from %s\n", remote->name);
 	return 0;
 }
 
 char process_arg_time_resp(struct arg_network_info *remote, const uchar *packet, int plen)
 {
+	printk("ARG: Received time sync response from %s\n", remote->name);
 	return 0;
 }
 
@@ -375,6 +405,7 @@ char send_packet(uchar *srcIP, uchar *destIP, uchar *data, int dlen)
 	iov.iov_base = fullData;
 
 	// Send
+	read_lock(&sendLock);
 	r = sock_create(PF_INET, SOCK_RAW, IPPROTO_RAW, &s);
 	if(r < 0)
 	{
@@ -389,7 +420,10 @@ char send_packet(uchar *srcIP, uchar *destIP, uchar *data, int dlen)
 	set_fs(oldfs);
 
 	kernel_sock_shutdown(s, SHUT_RDWR);
+	
+	read_unlock(&sendLock);
 	kfree(fullData);
+	
 	if(r < 0)
 	{
 		printk(KERN_ALERT "ARG: Error in sendmsg: %i\n", r);
@@ -417,7 +451,6 @@ char is_admin_msg(uchar *data, int dlen)
 
 char skbuff_to_msg(struct sk_buff *skb, uchar **data, int *dlen)
 {
-	struct iphdr *iph = (struct iphdr*)ip_hdr(skb);
 	*data = skb_transport_header(skb);
 	*dlen = skb->len - skb_network_header_len(skb);
 	return 1;	

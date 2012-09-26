@@ -1,6 +1,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 
+#include "protocol.h"
 #include "utility.h"
 #include "director.h"
 #include "hopper.h"
@@ -20,6 +21,7 @@ static int __init arg_init(void)
 	// Take care of locks first so that we know they're ALWAYS safe to use
 	init_nat_locks();
 	init_hopper_locks();
+	init_protocol_locks();
 
 	// Init various components
 	if(!init_hopper())

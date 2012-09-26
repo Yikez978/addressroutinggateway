@@ -8,13 +8,13 @@
 #define DISP_RESULTS
 
 // Number of MILLIseconds between hops
-#define HOP_TIME 1000
+#define HOP_TIME 5000
 
 // Number of seconds before an auth request times out and must be initiated again
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 10
+#define CONNECT_WAIT_TIME 30
 
 // Number of seconds between full checks of the NAT table for expired connections
 #define NAT_CLEAN_TIME 20
