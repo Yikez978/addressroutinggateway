@@ -10,4 +10,18 @@ modules.order
 *.mod.c
 .tmp_versions
 *~
+config.h
+config.log
+config.status
+configure
+depcomp
+install-sh
+missing
+stamp-h1
+.deps
+Makefile.in
+aclocal.m4
+arg
+autom4te.cache
+compile
 

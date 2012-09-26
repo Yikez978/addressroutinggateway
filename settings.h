@@ -22,5 +22,7 @@
 // Number of seconds before an inactive connection is removed
 #define NAT_OLD_CONN_TIME 120
 
+#define MAX_PACKET_SIZE 65536
+
 #endif
 
