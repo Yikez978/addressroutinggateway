@@ -3,7 +3,7 @@ AC_INIT([prober], [0.9])
 AC_CONFIG_SRCDIR([init.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([-Wall foreign])
-AM_SILENT_RULES() # Not available for 2.61, the default on OSX Lion
+AM_SILENT_RULES([yes]) # Not available for 2.61, the default on OSX Lion
 AC_CONFIG_FILES([Makefile])
 
 AC_PROG_CC
@@ -11,9 +11,12 @@ AM_PROG_CC_C_O
 
 # Basic stuff we always need
 AC_CHECK_HEADERS([inttypes.h stdint.h], [break;])
-AC_CHECK_HEADERS([stdlib.h strings.h  sys/time.h unistd.h])
+AC_CHECK_HEADERS([stdlib.h strings.h  sys/time.h unistd.h arpa/inet.h])
 
 # Required dependencies
+# real-time library
+AC_CHECK_LIB([rt], [main])
+
 # Pcap
 AC_CHECK_LIB([pcap], [main], [], [AC_MSG_ERROR([Cannot find required library pcap])])
 AC_CHECK_HEADERS([pcap.h])

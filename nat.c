@@ -1,14 +1,8 @@
-#include <linux/skbuff.h>
-#include <linux/ip.h>
-#include <net/ip.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
-#include <linux/spinlock.h>
-#include <linux/time.h>
-#include <linux/timer.h>
-#include <linux/delay.h>
-#include <linux/kthread.h>
-#include <linux/sched.h>
+#include <stdio.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <pthread.h>
 
 #include "nat.h"
 #include "hopper.h"
@@ -18,81 +12,74 @@
 NAT table data
 **********************/
 static struct nat_entry_bucket *natTable = NULL;
-static rwlock_t natTableLock;
+static pthread_spinlock_t natTableLock;
 
-static struct task_struct *natCleanupThread = NULL;
+static pthread_t natCleanupThread;
 
 void init_nat_locks(void)
 {
-	natTableLock = __RW_LOCK_UNLOCKED(natTableLock);
+	pthread_spin_init(&natTableLock, 0);
 }
 
 char init_nat(void)
 {
-	printk("ARG: NAT init\n");
+	printf("ARG: NAT init\n");
 
-	natCleanupThread = kthread_run(nat_cleanup_thread, NULL, "nat thread");
+	pthread_create(&natCleanupThread, NULL, nat_cleanup_thread, NULL);
 
-	printk("ARG: NAT initialized\n");
+	printf("ARG: NAT initialized\n");
 
 	return 1;
 }
 
 void uninit_nat(void)
 {
-	printk("ARG: NAT uninit\n");
+	printf("ARG: NAT uninit\n");
 	
-	if(natCleanupThread != NULL)
+	if(natCleanupThread != 0)
 	{
-		printk("ARG: Asking NAT cleanup thread to stop...");
-		kthread_stop(natCleanupThread);
-		natCleanupThread = NULL;
-		printk("done\n");
+		printf("ARG: Asking NAT cleanup thread to stop...");
+		pthread_cancel(natCleanupThread);
+		pthread_join(natCleanupThread, NULL);
+		natCleanupThread = 0;
+		printf("done\n");
 	}
 
 	empty_nat_table();
-	
-	printk("ARG: NAT finished\n");
+
+	pthread_spin_destroy(&natTableLock);
+
+	printf("ARG: NAT finished\n");
 }
 
-char do_nat_inbound_rewrite(struct sk_buff *skb)
+char do_nat_inbound_rewrite(const struct packet_data *packet)
 {
-	struct iphdr *iph = ip_hdr(skb);
-	__be16 port = 0;
+	struct packet_data *newPacket = NULL;
+	const struct iphdr *iph = packet->ipv4;
+	
+	uint16_t port = 0;
 	
 	struct nat_entry_bucket *bucket = NULL;
 	struct nat_entry *e = NULL;
 	int key = 0;
 
-	//printk("ARG: inbound\n");
-	
-	if((void*)iph == (void*)tcp_hdr(skb))
-		printk("ARG: BROKEN indeed\n");
-
-	// Safety check. For now we're only going ipv4
-	if(iph->version != 4)
-	{
-		printk("ARG: IPv6 packet found, not allowed current\n");
-		return 0;
-	}
-
 	// Read lock!
-	read_lock(&natTableLock);
+	pthread_spin_lock(&natTableLock);
 
 	// Find entry in table by finding the bucket then
 	// searching through the associated list
-	key = create_nat_bucket_key(&iph->saddr, get_source_port(skb));
+	key = create_nat_bucket_key(&iph->saddr, get_source_port(packet));
 	HASH_FIND_INT(natTable, &key, bucket);
 
 	if(bucket == NULL)
 	{
-		read_unlock(&natTableLock);
-		return 0;
+		pthread_spin_unlock(&natTableLock);
+		return -1;
 	}
 
 	// Have the correct bucket, now find the entry in the attached list 
 	// that has the correct gateway IP address
-	port = get_dest_port(skb);
+	port = get_dest_port(packet);
 	e = bucket->first;
 	while(e != NULL
 		&& (iph->protocol != e->proto
@@ -104,84 +91,64 @@ char do_nat_inbound_rewrite(struct sk_buff *skb)
 
 	if(e == NULL)
 	{
-		read_unlock(&natTableLock);
-		return 0;
-	}
-
-	// Sanity check
-	if(e->gatePort != get_dest_port(skb))
-	{
-		printk("ARG: DEST PORT DOES NOT MATCH\n");
-	}
-	if(e->proto != iph->protocol)
-	{
-		printk("ARG: PROTOCOL DOES NOT MATCH\n");
-	}
-	if(memcmp((void*)&iph->daddr, e->gateIP, ADDR_SIZE) != 0)
-	{
-		printk("ARG: ADDR DOES NOT MATCH\n");
+		pthread_spin_unlock(&natTableLock);
+		return -2;
 	}
 	
-	// Change destination addr to the correct internal IP and port
-	memcpy((void*)&iph->daddr, e->intIP, ADDR_SIZE);
-	set_dest_port(skb, e->intPort);
-
-	// Re-checksum
-	ip_send_check(iph);
-
 	// Note that the entry has been used
 	update_nat_entry_time(e);
 
-	// Unlock
-	read_unlock(&natTableLock);
+	pthread_spin_unlock(&natTableLock);
 
-	return 1;
+	// Change destination addr to the correct internal IP and port
+	newPacket = copy_packet(packet);
+	if(newPacket == NULL)
+	{
+		printf("Unable to rewrite packet\n");
+		return -3;
+	}
+
+	memcpy((void*)&newPacket->ipv4->daddr, e->intIP, ADDR_SIZE);
+	set_dest_port(newPacket, e->intPort);
+
+	compute_packet_checksums(newPacket);
+
+	// Send
+
+	return 0;
 }
 
-char do_nat_outbound_rewrite(struct sk_buff *skb)
+char do_nat_outbound_rewrite(const struct packet_data *packet)
 {
-	struct iphdr *iph = ip_hdr(skb);
-	__be16 port = 0;
+	struct packet_data *newPacket = NULL;
+	const struct iphdr *iph = packet->ipv4;
+	
+	uint16_t port = 0;
 
 	struct nat_entry_bucket *bucket = NULL;
 	struct nat_entry *e = NULL;
 	int key = 0;
 
-	//printk("ARG: outbound\n");
-
-	// Safety check. For now we're only going ipv4
-	if(iph->version != 4)
-	{
-		printk("ARG: IPv6 packet found, not allowed currently\n");
-		return 0;
-	}
-
-	// Write lock for now, just to be fully safe.
-	// TBD it may be possible to read lock and only write lock
-	// when creating new entries. Just have to ensure all readers
-	// are out of that bucket/entry list. However, straight reader
-	// locks won't work for this, you can't aquire the writer lock from
-	// a reader
-	write_lock(&natTableLock);
+	pthread_spin_lock(&natTableLock);
 	
 	// Find entry in table by finding the bucket then
 	// searching through the associated list
-	key = create_nat_bucket_key(&iph->daddr, get_dest_port(skb));
+	key = create_nat_bucket_key(&iph->daddr, get_dest_port(packet));
 	HASH_FIND_INT(natTable, &key, bucket);
 
 	if(bucket == NULL)
 	{
-		bucket = create_nat_bucket(skb, key);
+		bucket = create_nat_bucket(packet, key);
 		if(bucket == NULL)
 		{
-			write_unlock(&natTableLock);
-			return 0;
+			pthread_spin_unlock(&natTableLock);
+			return -1;
 		}
 	}
 
 	// Have the correct bucket, now find the entry in the attached list 
 	// that has the correct internal IP address
-	port = get_source_port(skb);
+	port = get_source_port(packet);
 	e = bucket->first;
 	while(e != NULL
 		&& (iph->protocol != e->proto
@@ -193,42 +160,34 @@ char do_nat_outbound_rewrite(struct sk_buff *skb)
 
 	if(e == NULL)
 	{
-		e = create_nat_entry(skb, bucket);
+		e = create_nat_entry(packet, bucket);
 		if(e == NULL)
 		{
-			write_unlock(&natTableLock);
-			return 0;
+			pthread_spin_unlock(&natTableLock);
+			return -2;
 		}
 	}
-	
-	// Sanity check
-	if(e->intPort != get_source_port(skb))
-	{
-		printk("ARG: SOURCE PORT DOES NOT MATCH\n");
-	}
-	if(e->proto != iph->protocol)
-	{
-		printk("ARG: PROTOCOL DOES NOT MATCH\n");
-	}
-	if(memcmp((void*)&iph->saddr, e->intIP, ADDR_SIZE) != 0)
-	{
-		printk("ARG: ADDR DOES NOT MATCH\n");
-	}
-	
-	// Change source addr to the correct external IP and port
-	memcpy((void*)&iph->saddr, e->gateIP, ADDR_SIZE);
-	set_source_port(skb, e->gatePort);
-
-	// Re-checksum
-	ip_send_check(iph);
 
 	// Note that the entry has been used
 	update_nat_entry_time(e);
 
-	// Unlock
-	write_unlock(&natTableLock);
+	pthread_spin_unlock(&natTableLock);
+	
+	// Change source addr to the correct external IP and port
+	newPacket = copy_packet(packet);
+	if(newPacket == NULL)
+	{
+		printf("Unable to rewrite packet\n");
+		return -3;
+	}
+	
+	memcpy((void*)&newPacket->ipv4->saddr, e->gateIP, ADDR_SIZE);
+	set_source_port(newPacket, e->gatePort);
 
-	return 1;
+	// Re-checksum
+	compute_packet_checksums(newPacket);
+
+	return 0;
 }
 
 void print_nat_table(void)
@@ -236,19 +195,19 @@ void print_nat_table(void)
 	struct nat_entry_bucket *b = natTable;
 	struct nat_entry *e = NULL;
 
-	printk("ARG: NAT Table:\n");
+	printf("ARG: NAT Table:\n");
 	while(b != NULL)
 	{
-		printk("ARG:  Bucket: ");
+		printf("ARG:  Bucket: ");
 		print_nat_bucket(b);
-		printk("\n");
+		printf("\n");
 
 		e = b->first;
 		while(e != NULL)
 		{
-			printk("ARG:   Entry: ");
+			printf("ARG:   Entry: ");
 			print_nat_entry(e);
-			printk("\n");
+			printf("\n");
 
 			e = e->next;
 		}
@@ -259,37 +218,37 @@ void print_nat_table(void)
 
 void print_nat_bucket(const struct nat_entry_bucket *bucket)
 {
-	printk("k:%i e:", bucket->key);
+	printf("k:%i e:", bucket->key);
 	printIP(ADDR_SIZE, bucket->extIP);
-	printk(":%i", bucket->extPort);
+	printf(":%i", bucket->extPort);
 }
 
 void print_nat_entry(const struct nat_entry *entry)
 {
-	printk("i:");
+	printf("i:");
 	printIP(ADDR_SIZE, entry->intIP);
-	printk(":%i g:", entry->intPort);
+	printf(":%i g:", entry->intPort);
 	printIP(ADDR_SIZE, entry->gateIP);
-	printk(":%i (lu %li)", entry->gatePort, (long)entry->lastUsed);
+	printf(":%i (lu %li ms ago)", entry->gatePort, current_time_offset(&entry->lastUsed));
 }
 
-struct nat_entry_bucket *create_nat_bucket(const struct sk_buff *skb, const int key)
+struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, const int key)
 {
-	struct iphdr *iph = ip_hdr(skb);
+	const struct iphdr *iph = packet->ipv4;
 	struct nat_entry_bucket *bucket = NULL;
 
 	// Create new bucket
-	bucket = (nat_entry_bucket*)kmalloc(sizeof(struct nat_entry_bucket), GFP_KERNEL);
+	bucket = (nat_entry_bucket*)malloc(sizeof(struct nat_entry_bucket));
 	if(bucket == NULL)
 	{
-		printk("ARG: Unable to allocate space for new NAT bucket\n");
+		printf("ARG: Unable to allocate space for new NAT bucket\n");
 		return NULL;
 	}
 
 	bucket->key = key;
 	memcpy(bucket->extIP, (void*)&iph->daddr, ADDR_SIZE);
 	bucket->first = NULL;
-	bucket->extPort = get_dest_port(skb);
+	bucket->extPort = get_dest_port(packet);
 
 	// Add new bucket
 	HASH_ADD_INT(natTable, key, bucket);
@@ -297,18 +256,18 @@ struct nat_entry_bucket *create_nat_bucket(const struct sk_buff *skb, const int 
 	return bucket;
 }
 
-struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_bucket *bucket)
+struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_entry_bucket *bucket)
 {
-	struct iphdr *iph = ip_hdr(skb);
+	const struct iphdr *iph = packet->ipv4;
 	struct nat_entry *e = NULL;
 	struct nat_entry *oldHead = NULL;
 
-	uchar *currIP = NULL;
+	uint8_t *currIP = NULL;
 
-	e = (struct nat_entry*)kmalloc(sizeof(struct nat_entry), GFP_KERNEL);
+	e = (struct nat_entry*)malloc(sizeof(struct nat_entry));
 	if(e == NULL)
 	{
-		printk("ARG: Unable to allocate space for new NAT entry\n");
+		printf("ARG: Unable to allocate space for new NAT entry\n");
 		return NULL;
 	}
 
@@ -318,14 +277,14 @@ struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_b
 	currIP = current_ip();
 	if(currIP == NULL)
 	{
-		printk("ARG: Unable to complete creation of new NAT entry, out of memory\n");
-		kfree(e);
+		printf("ARG: Unable to complete creation of new NAT entry, out of memory\n");
+		free(e);
 		return NULL;
 	}
 	memcpy(e->gateIP, currIP, ADDR_SIZE);
-	kfree(currIP);
+	free(currIP);
 
-	e->intPort = get_source_port(skb);
+	e->intPort = get_source_port(packet);
 	e->gatePort = e->intPort; // TBD random port
 	e->proto = iph->protocol;
 
@@ -345,12 +304,10 @@ struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_b
 
 void update_nat_entry_time(struct nat_entry *e)
 {
-	struct timespec ts;
-	getnstimeofday(&ts);
-	e->lastUsed = ts.tv_sec;
+	current_time(&e->lastUsed);
 }
 
-int create_nat_bucket_key(const void *ip, const __be16 port)
+int create_nat_bucket_key(const void *ip, const uint16_t port)
 {
 	int key;
 	memcpy(&key, ip, ADDR_SIZE);
@@ -363,12 +320,12 @@ void empty_nat_table(void)
 {
 	struct nat_entry_bucket *b = natTable;
 	
-	write_lock(&natTableLock);
+	pthread_spin_lock(&natTableLock);
 	
 	while(b != NULL)
 		b = remove_nat_bucket(b);
 	
-	write_unlock(&natTableLock);
+	pthread_spin_unlock(&natTableLock);
 }
 
 struct nat_entry_bucket *remove_nat_bucket(struct nat_entry_bucket *bucket)
@@ -385,7 +342,7 @@ struct nat_entry_bucket *remove_nat_bucket(struct nat_entry_bucket *bucket)
 
 	// And kill the bucket
 	HASH_DEL(natTable, bucket);
-	kfree(bucket);
+	free(bucket);
 
 	return next;
 }
@@ -411,43 +368,41 @@ struct nat_entry *remove_nat_entry(struct nat_entry *e)
 	}
 	
 	// And kill us off
-	kfree(e);
+	free(e);
 
 	return next;
 }
 
-int nat_cleanup_thread(void *data)
+void *nat_cleanup_thread(void *data)
 {
-	printk("ARG: NAT cleanup thread running\n");
+	printf("ARG: NAT cleanup thread running\n");
 
-	while(!kthread_should_stop())
+	for(;;)
 	{
 		clean_nat_table();
 	
-		read_lock(&natTableLock);
+		pthread_spin_lock(&natTableLock);
 		print_nat_table();
-		read_unlock(&natTableLock);
-		
-		schedule_timeout_interruptible(NAT_CLEAN_TIME * HZ);
+		pthread_spin_unlock(&natTableLock);
+	
+		sleep(NAT_CLEAN_TIME);
 	}
 
-	printk("ARG: NAT cleanup thread dying\n");
+	printf("ARG: NAT cleanup thread dying\n");
 
 	return 0;
 }
 
 void clean_nat_table(void)
 {
-	struct timespec ts;
+	struct timespec now;
 
 	struct nat_entry_bucket *b = natTable;
 	struct nat_entry *e = NULL;
 
-	// Get current time and give connections 120 seconds with no activity
-	getnstimeofday(&ts);
-	ts.tv_sec -= NAT_OLD_CONN_TIME;
+	current_time(&now);
 
-	write_lock(&natTableLock);
+	pthread_spin_lock(&natTableLock);
 
 	while(b != NULL)
 	{
@@ -455,7 +410,7 @@ void clean_nat_table(void)
 		while(e != NULL)
 		{
 			// Is this connection too old?
-			if(e->lastUsed < ts.tv_sec)
+			if(time_offset(&now, &e->lastUsed) > NAT_CLEAN_TIME * 1000)
 				e = remove_nat_entry(e);
 			else
 				e = e->next;
@@ -469,6 +424,6 @@ void clean_nat_table(void)
 			b = (struct nat_entry_bucket*)b->hh.next;
 	}
 
-	write_unlock(&natTableLock);
+	pthread_spin_unlock(&natTableLock);
 }
 

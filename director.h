@@ -1,27 +1,29 @@
 #ifndef DIRECTOR_H
 #define DIRECTOR_H
 
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/netfilter.h>
-#include <linux/netfilter_ipv4.h>
-#include <linux/netdevice.h>
+#include <pcap.h>
+#include <pthread.h>
+
+#include "protocol.h"
+
+struct packet_data;
+
+typedef struct receive_thread_data
+{
+	char dev[10];
+	void (*handler)(const struct packet_data*);
+	pthread_t thread;
+} receive_thread_data;
 
 char init_director(void);
 char uninit_director(void);
 
-unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb, 
-							const struct net_device *in,
-							const struct net_device *out, 
-							int (*okfn)(struct sk_buff *));
-unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb, 
-							const struct net_device *in,
-							const struct net_device *out,
-							int (*okfn)(struct sk_buff *));
+void join_director(void);
 
-char is_local_traffic(const struct sk_buff *skb);
-char is_control_traffic(const struct net_device *dev);
-char is_supported_proto(const struct sk_buff *skb);
+void *receive_thread(void *tData);
+
+void direct_inbound(const struct packet_data *packet);
+void direct_outbound(const struct packet_data *packet);
 
 #endif
 

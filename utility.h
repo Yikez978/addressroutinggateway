@@ -1,27 +1,28 @@
 #ifndef UTILITY_H
 #define UTILITY_H
 
-#include <linux/types.h>
-#include <linux/skbuff.h>
+#include <stdint.h>
+#include <time.h>
 
 typedef unsigned char uchar;
 
 void printRaw(int len, const void *buf);
 void printAscii(int len, const void *buf);
 void printIP(int len, const void *buf);
-void printPacket(const struct sk_buff *skb);
-void printPacketInfo(const struct sk_buff *skb);
 
-__be16 get_source_port(const struct sk_buff *skb);
-__be16 get_dest_port(const struct sk_buff *skb);
-void set_source_port(const struct sk_buff *skb, const __be16 port);
-void set_dest_port(const struct sk_buff *skb, const __be16 port);
+// Returns the current monotonic time (not real-world time)
+void current_time(struct timespec *out);
 
-// Ensures that the offset for transport_header is correct
-void fix_transport_header(struct sk_buff *skb);
+// Computes the offset from the beginning time to now. See time_offset
+long current_time_offset(const struct timespec *begin);
 
-// Returns true if the given packet uses a connection-oriented protocol
-char is_conn_oriented(const struct sk_buff *skb);
+// Computes the offset from the beginning time to end and returns 
+// the number of milliseconds. Positive values indicate begin is before end
+long time_offset(const struct timespec *begin, const struct timespec *end);
+
+// Returns the current time + the given number of milliseconds.
+// ms may be negative
+void time_plus(struct timespec *ts, int ms);
 
 // Mask an arbitrarilly long number of bytes. Eh, whatever. It's a hack
 // orig, mask, and result must all be the same length

@@ -7,7 +7,7 @@
 // Whether or not to show accept/reject messages (and why)
 #define DISP_RESULTS
 
-// Number of MILLIseconds between hops
+// Number of milliseconds between hops
 #define HOP_TIME 5000
 
 // Number of seconds before an auth request times out and must be initiated again
@@ -23,6 +23,7 @@
 #define NAT_OLD_CONN_TIME 120
 
 #define MAX_PACKET_SIZE 65536
+#define MAX_CONF_LINE 200
 
 #endif
 

@@ -4,7 +4,24 @@ AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -ggdb
 
 # Everything will get built into here
 bin_PROGRAMS = arg
-arg_SOURCES = init.c
+arg_SOURCES = uthash.h \
+	packet.h \
+	packet.c \
+	sha1.h \
+	sha1.c \
+	utility.h \
+	utility.c \
+	crypto.h \
+	crypto.c \
+	protocol.h \
+	protocol.c \
+	hopper.h \
+	hopper.c \
+	nat.h \
+	nat.c \
+	director.h \
+	director.c \
+	init.c
 
 # Default test to do whatever it is we want to do most often
 # for now, just do local test

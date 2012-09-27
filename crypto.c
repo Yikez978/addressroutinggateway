@@ -1,33 +1,31 @@
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/crypto.h>
-#include <crypto/aes.h>
- 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "crypto.h"
 #include "sha1.h"
 #include "settings.h"
 
-int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uchar *out)
+int hmac_sha1(const uint8_t *key, unsigned int klen, const uint8_t *data, unsigned int dlen, uint8_t *out)
 {
 	int i = 0;
-	uchar *scratchSpace = NULL;
+	uint8_t *scratchSpace = NULL;
 	SHA1Context sha;
 	int maxLen = HMAC_BLOCK_SIZE + (HMAC_SIZE < dlen ? dlen : HMAC_SIZE);
 
 	// Safety check
 	if(klen > HMAC_BLOCK_SIZE)
 	{
-		printk(KERN_ALERT "ARG: Key must be shorter than HMAC_BLOCK_SIZE (%i)\n", HMAC_BLOCK_SIZE);
+		printf("ARG: Key must be shorter than HMAC_BLOCK_SIZE (%i)\n", HMAC_BLOCK_SIZE);
 		return 0;
 	}
 	
 	// Allocate enough space for the max we need, which is
 	// the key padded to block size + either the data length or the hash length
-	scratchSpace = kcalloc(maxLen, 1, GFP_KERNEL);
+	scratchSpace = calloc(maxLen, 1);
 	if(scratchSpace == NULL)
 	{
-		printk(KERN_ALERT "ARG: Unable to allocate scratch space for HMAC\n");
+		printf("ARG: Unable to allocate scratch space for HMAC\n");
 		return 0;
 	}
 
@@ -48,7 +46,7 @@ int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uch
 	SHA1Input(&sha, scratchSpace, HMAC_BLOCK_SIZE + dlen);
 	if(!SHA1Result(&sha))
 	{
-		printk(KERN_ALERT "ARG: HMAC unable to create inner SHA\n");
+		printf("ARG: HMAC unable to create inner SHA\n");
 		return 0;
 	}
 
@@ -68,7 +66,7 @@ int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uch
 	SHA1Input(&sha, scratchSpace, HMAC_BLOCK_SIZE + HMAC_SIZE);
 	if(!SHA1Result(&sha))
 	{
-		printk(KERN_ALERT "ARG: HMAC unable to create outer SHA\n");
+		printf("ARG: HMAC unable to create outer SHA\n");
 		return 0;
 	}
 
@@ -76,20 +74,20 @@ int hmac_sha1(const uchar *key, size_t klen, const uchar *data, size_t dlen, uch
 	memmove(out, sha.Message_Digest, HMAC_SIZE);
 
 	// All done!
-	kfree(scratchSpace);
+	free(scratchSpace);
 
 	return 1;
 }
 
-uint32_t hotp(const uchar *key, size_t klen, unsigned long count)
+uint32_t hotp(const uint8_t *key, unsigned int klen, unsigned long count)
 {
 	int offset = 0;
 	uint32_t result = 0;
-	uchar hmac_result[HMAC_SIZE] = {0};
+	uint8_t hmac_result[HMAC_SIZE] = {0};
 	
-	if(!hmac_sha1(key, klen, (uchar*)&count, sizeof(count), hmac_result))
+	if(!hmac_sha1(key, klen, (uint8_t*)&count, sizeof(count), hmac_result))
 	{
-		printk(KERN_ALERT "ARG: Unable to perform HOTP\n");
+		printf("ARG: Unable to perform HOTP\n");
 		return 0;
 	}
 
@@ -107,7 +105,7 @@ uint32_t hotp(const uchar *key, size_t klen, unsigned long count)
 	return result;
 }
 
-uint32_t totp(const uchar *key, size_t klen, unsigned long step, unsigned long time)
+uint32_t totp(const uint8_t *key, unsigned int klen, unsigned long step, unsigned long time)
 {
 	// Protect us from ourselves
 	if(step == 0)
@@ -116,14 +114,14 @@ uint32_t totp(const uchar *key, size_t klen, unsigned long step, unsigned long t
 	return hotp(key, klen, time / step);	
 }
 
-void aes_encrypt(const uchar *key, int klen, const uchar *data, int dlen, uchar *out, int *outlen)
+void aes_encrypt(const uint8_t *key, int klen, const uint8_t *data, int dlen, uint8_t *out, int *outlen)
 {
 	/*struct cryto_cipher *tfm;
 
 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
 	if(IS_ERR(tfm))
 	{
-		printk("ARG: Unable to allocate cipher for AES encryption\n");
+		printf("ARG: Unable to allocate cipher for AES encryption\n");
 		return;
 	}
 
@@ -135,8 +133,21 @@ void aes_encrypt(const uchar *key, int klen, const uchar *data, int dlen, uchar 
 	crypto_free_cipher(tfm);*/
 }
 
-void aes_decrypt(uchar *data, int dlen, uchar *out, int *outlen)
+void aes_decrypt(uint8_t *data, int dlen, uint8_t *out, int *outlen)
 {
 
+}
+
+void get_random_bytes(void *buf, int nbytes)
+{
+	uint8_t *curr = (uint8_t*)buf;
+	int i = 0;
+
+	for(i = 0; i < nbytes; i++)
+	{
+		// TBD real random
+		*curr = 5;
+		curr++;
+	}
 }
 

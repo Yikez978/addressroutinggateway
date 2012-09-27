@@ -1,15 +1,9 @@
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/netdevice.h>
-#include <linux/inetdevice.h>
-#include <linux/spinlock.h>
-#include <linux/random.h>
-#include <linux/ip.h>
-#include <linux/udp.h>
-#include <linux/tcp.h>
-#include <linux/kthread.h>
-#include <linux/sched.h>
-#include <linux/delay.h>
+#include <stdio.h>
+#include <time.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#include <pthread.h>
 
 #include "settings.h"
 #include "hopper.h"
@@ -20,73 +14,62 @@
 IP Hopping data
 **************************/
 static arg_network_info *gateInfo = NULL;
-static rwlock_t networksLock;
+static pthread_spinlock_t networksLock;
 
 static char hoppingEnabled = 0;
 
-static rwlock_t ipLock;
+static pthread_spinlock_t ipLock;
 
-static struct net_device *intDev = NULL;
-static struct net_device *extDev = NULL;
-
-static struct task_struct *connectThread = NULL;
-static struct task_struct *hopThread = NULL;
+static pthread_t connectThread;
+static pthread_t hopThread;
 
 void init_hopper_locks(void)
 {
-	ipLock = __RW_LOCK_UNLOCKED(ipLock);
-	networksLock = __RW_LOCK_UNLOCKED(networksLock);
+	pthread_spin_init(&ipLock, PTHREAD_PROCESS_SHARED);
+	pthread_spin_init(&networksLock, PTHREAD_PROCESS_SHARED);
 }
 
-char init_hopper(void)
+char init_hopper(char *conf, char *name)
 {
-	printk("ARG: Hopper init\n");
+	printf("ARG: Hopper init\n");
 
-	printk("ARG: Current jiffies: %li, jiffies/second: %i\n", jiffies, HZ);
-
-	write_lock(&networksLock);
-	write_lock(&ipLock);
+	pthread_spin_lock(&networksLock);
+	pthread_spin_lock(&ipLock);
 	
 	// "Read in" settings
-	if(!get_hopper_conf())
+	if(get_hopper_conf(conf, name))
 	{
-		printk(KERN_ALERT "ARG: Unable to configure hopper\n");
+		printf("ARG: Unable to configure hopper\n");
 		
-		write_unlock(&ipLock);
-		write_unlock(&networksLock);
+		pthread_spin_unlock(&ipLock);
+		pthread_spin_unlock(&networksLock);
 		uninit_hopper();
 
-		return 0;
+		return -1;
 	}
 
-	// Enable promisc and/or forwarding?
-	printk("ARG: Enabling promiscuous mode\n");
-	rtnl_lock();
-	dev_set_promiscuity(extDev, 1);
-	rtnl_unlock();
-	
-	write_unlock(&ipLock);
-	write_unlock(&networksLock);
+	pthread_spin_unlock(&ipLock);
+	pthread_spin_unlock(&networksLock);
 	
 	// Allow hopping now
-	printk("ARG: Starting hop thread\n");
-	hopThread = kthread_run(timed_hop_thread, NULL, "hop thread");
+	printf("ARG: Starting hop thread\n");
+	pthread_create(&hopThread, NULL, timed_hop_thread, NULL);
 	enable_hopping();
 	
-	printk("ARG: Hopper initialized\n");
+	printf("ARG: Hopper initialized\n");
 
-	return 1;
+	return 0;
 }
 
 void init_hopper_finish(void)
 {
-	printk("ARG: Starting connection/gateway auth thread\n");
-	connectThread = kthread_run(connect_thread, NULL, "connect thread");
+	printf("ARG: Starting connection/gateway auth thread\n");
+	pthread_create(&connectThread, NULL, connect_thread, NULL);
 }
 
 void uninit_hopper(void)
 {
-	printk("ARG: Hopper uninit\n");
+	printf("ARG: Hopper uninit\n");
 
 	// Disable hopping
 	disable_hopping();
@@ -94,138 +77,127 @@ void uninit_hopper(void)
 	// No more need to hop and connect
 	// TBD isnt't there a possibility of something bad happening if we del_timer while in
 	// the timer? IE, it will reregister and then everything will die
-	if(hopThread != NULL)
+	if(hopThread != 0)
 	{
-		printk("ARG: Asking hop thread to stop...");
-		kthread_stop(hopThread);
-		hopThread = NULL;
-		printk("done\n");
+		printf("ARG: Asking hop thread to stop...");
+		pthread_cancel(hopThread);
+		pthread_join(hopThread, NULL);
+		hopThread = 0;
+		printf("done\n");
 	}
-	if(connectThread != NULL)
+	if(connectThread != 0)
 	{
-		printk("ARG: Asking connect thread to stop...");
-		kthread_stop(connectThread);
-		connectThread = NULL;
-		printk("done\n");
+		printf("ARG: Asking connect thread to stop...");
+		pthread_cancel(connectThread);
+		pthread_join(connectThread, NULL);
+		connectThread = 0;
+		printf("done\n");
 	}
 	
-	write_lock(&networksLock);
-	write_lock(&ipLock);
+	pthread_spin_lock(&networksLock);
+	pthread_spin_lock(&ipLock);
 	
-	// Turn off promiscuity
-	if(extDev != NULL)
-	{
-		printk("ARG: Dropping promiscuous mode\n");
-		rtnl_lock();
-		dev_set_promiscuity(extDev, -1);
-		rtnl_unlock();
-	}
-
-	// Remove references to devices
-	if(extDev != NULL)
-	{
-		dev_put(extDev);
-		extDev = NULL;
-	}
-	if(intDev != NULL)
-	{
-		dev_put(intDev);
-		intDev = NULL;
-	}
-
 	// Remove our own information
 	if(gateInfo != NULL)
 	{
 		remove_all_associated_arg_networks();
 
-		kfree(gateInfo);
+		free(gateInfo);
 		gateInfo = NULL;
 	}
 	
-	write_unlock(&ipLock);
-	write_unlock(&networksLock);
+	pthread_spin_unlock(&ipLock);
+	pthread_spin_unlock(&networksLock);
+	
+	pthread_spin_destroy(&ipLock);
+	pthread_spin_destroy(&networksLock);
 
-	printk("ARG: Hopper finished\n");
+	printf("ARG: Hopper finished\n");
 }
 
-char get_hopper_conf(void)
+char get_hopper_conf(char *confPath, char *gateName)
 {
+	FILE *confFile = NULL;
+	char line[MAX_CONF_LINE];
+
 	struct arg_network_info *currNet = NULL;
 	struct arg_network_info *prevNet = NULL;
 
-	// TBD this is all hardcoded. Ideally this comes from a conf file or something
-	// Create ARG gateway info for each gateway in the network, then select
-	// the correct one to be the head for the current gateway
-	// Gate A
-	currNet = create_arg_network_info();
-	gateInfo = currNet;
-	if(currNet == NULL)
-		return 0;
-
-	strncpy(currNet->name, "GateA", sizeof(currNet->name));
-	currNet->baseIP[0] = 172;
-	currNet->baseIP[1] = 1;
-	currNet->baseIP[2] = 0;
-	currNet->baseIP[3] = 1;
-	currNet->mask[0] = 0xFF;
-	currNet->mask[1] = 0xFF;
-	currNet->mask[2] = 0x00;
-	currNet->mask[3] = 0x00;
-
-	// Gate B
-	prevNet = currNet;
-	currNet = create_arg_network_info();
-	if(currNet == NULL)
-		return 0;
-
-	strncpy(currNet->name, "GateB", sizeof(currNet->name));
-	currNet->baseIP[0] = 172;
-	currNet->baseIP[1] = 2;
-	currNet->baseIP[2] = 0;
-	currNet->baseIP[3] = 1;
-	currNet->mask[0] = 0xFF;
-	currNet->mask[1] = 0xFF;
-	currNet->mask[2] = 0x00;
-	currNet->mask[3] = 0x00;
-
-	prevNet->next = currNet;
-	currNet->prev = prevNet;
-
-	// Grab devices 
-	extDev = dev_get_by_name(&init_net, EXT_DEV_NAME);
-	if(extDev == NULL)
+	confFile = fopen(confPath, "r");
+	if(confFile == NULL)
 	{
-		printk(KERN_ALERT "ARG: Unable to find external network device %s\n", EXT_DEV_NAME);
-		return 0;
+		printf("Unable to open config file at %s\n", confPath);
+		return -1;
 	}
 
-	intDev = dev_get_by_name(&init_net, INT_DEV_NAME);
-	if(intDev == NULL)
+	while(!feof(confFile))
 	{
-		printk(KERN_ALERT "ARG: Unable to find internal network device %s\n", INT_DEV_NAME);
-		return 0;
+		prevNet = currNet;
+		currNet = create_arg_network_info();
+		if(currNet == NULL)
+		{
+			printf("Unable to create arg network info during configuration\n");
+			return -2;
+		}
+
+		// First gate is "us" for now, we rearrange later
+		if(gateInfo == NULL)
+			gateInfo = currNet;
+
+		// Connect new node to list
+		if(prevNet != NULL)
+		{
+			prevNet->next = currNet;
+			currNet->prev = prevNet;
+		}
+
+		// Conf file format is:
+		// name
+		// base ip in dot-notation
+		// mask in dot-notation
+		// --1 blank line--
+		// repeat for next gate
+		// TBD very fragile right now
+		if(!fgets(line, MAX_CONF_LINE, confFile))
+		{
+			printf("Configuration file is bad, no name\n");
+			return -3;
+		}
+		strncpy(currNet->name, line, sizeof(currNet->name));
+		
+		if(!fgets(line, MAX_CONF_LINE, confFile))
+		{
+			printf("Configuration file is bad, no name\n");
+			return -3;
+		}
+		inet_pton(AF_INET, line, currNet->baseIP);
+		
+		if(!fgets(line, MAX_CONF_LINE, confFile))
+		{
+			printf("Configuration file is bad, no name\n");
+			return -3;
+		}
+		inet_pton(AF_INET, line, currNet->mask);
+		
+		// Blank line
+		fgets(line, MAX_CONF_LINE, confFile);
 	}
+
+	fclose(confFile);
 
 	// Which one is our head? Find it, move to beginning, and rearrange
-	// all relevant pointers. We find based on which masked IP in the list matches
-	// our masked external IP
+	// all relevant pointers.
+	printf("Locating configuration for %s\n", gateName);
+
 	currNet = gateInfo;
 	while(currNet != NULL)
 	{
-		printk("ARG: Checking if %s (base IP ", currNet->name);
-		printIP(sizeof(currNet->baseIP), currNet->baseIP);
-		printk(")\n");
-	
-		if(mask_array_cmp(ADDR_SIZE, currNet->mask,
-			currNet->baseIP,
-			&extDev->ip_ptr->ifa_list->ifa_address) == 0)
+		if(strncmp(gateName, currNet->name, sizeof(currNet->name)))
 		{
-			printk("ARG: We are %s!\n", currNet->name);
-			
 			// Found, make currNet the head of list (if not already)
 			if(currNet != gateInfo)
 			{
-				printk("ARG: Rearranging ARG network list\n");
+				printf("ARG: Rearranging ARG network list\n");
 
 				if(currNet->next != NULL)
 					currNet->next->prev = currNet->prev;
@@ -250,56 +222,56 @@ char get_hopper_conf(void)
 	if(currNet == NULL)
 	{
 		// Didn't find a match
-		printk(KERN_ALERT "ARG: Misconfiguration, unable to find which gate we are\n");
-		return 0;
+		printf("ARG: Misconfiguration, unable to find which gate we are\n");
+		return -3;
 	}
 
-	printk("ARG: Configured as %s\n", gateInfo->name);
+	printf("ARG: Configured as %s\n", gateInfo->name);
 
 	// Hop and symmetric key
-	printk("ARG: Generating hop and symmetric encryption keys\n");
+	printf("ARG: Generating hop and symmetric encryption keys\n");
 	get_random_bytes(gateInfo->hopKey, sizeof(gateInfo->hopKey));
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
 
 	// Rest of hop data
-	gateInfo->timeBase = jiffies;
-	gateInfo->hopInterval = (HOP_TIME * HZ) / 1000;
+	current_time(&gateInfo->timeBase);
+	gateInfo->hopInterval = HOP_TIME;
 
 	// Set IP based on configuration
-	printk("ARG: Setting initial IP\n");
+	printf("ARG: Setting initial IP\n");
 	update_ips(gateInfo);
 
-	return 1;
+	return 0;
 }
 
 void enable_hopping(void)
 {
-	printk("ARG: Hopping enabled\n");
+	printf("ARG: Hopping enabled\n");
 	hoppingEnabled = 1;
 }
 
 void disable_hopping(void)
 {
-	printk("ARG: Hopping disabled\n");
+	printf("ARG: Hopping disabled\n");
 	hoppingEnabled = 0;
 }
 
-int connect_thread(void *data)
+void *connect_thread(void *data)
 {
 	struct arg_network_info *gate = NULL;
 
-	printk("ARG: Connect thread running\n");
+	printf("ARG: Connect thread running\n");
 
-	while(!kthread_should_stop())
+	for(;;)
 	{
 		gate = gateInfo->next;
 		while(gate != NULL)
 		{
 			if(!gate->connected)
 			{
-				printk("ARG: Attempting to connect to gateway at ");
+				printf("ARG: Attempting to connect to gateway at ");
 				printIP(sizeof(gate->baseIP), gate->baseIP);
-				printk("\n");
+				printf("\n");
 
 				start_connection(gateInfo, gate);
 			}	
@@ -308,36 +280,36 @@ int connect_thread(void *data)
 			gate = gate->next;
 		}
 
-		schedule_timeout_interruptible(CONNECT_WAIT_TIME * HZ);
+		sleep(CONNECT_WAIT_TIME);
 	}
 	
-	printk("ARG: Connect thread dying\n");
+	printf("ARG: Connect thread dying\n");
 
 	return 0;
 }
 
-int timed_hop_thread(void *data)
+void *timed_hop_thread(void *data)
 {
-	printk("ARG: Hop thread running\n");
+	printf("ARG: Hop thread running\n");
 
-	while(!kthread_should_stop())
+	for(;;)
 	{
 		if(hoppingEnabled)
 		{
-			printk("ARG: Updating local IPs\n");
+			printf("ARG: Updating local IPs\n");
 
-			write_lock(&gateInfo->lock);
+			pthread_spin_lock(&gateInfo->lock);
 			update_ips(gateInfo);
-			write_unlock(&gateInfo->lock);
+			pthread_spin_unlock(&gateInfo->lock);
 		
 			// Apply to the network card
 			set_external_ip(gateInfo->currIP);
 		}
 		
-		schedule_timeout_interruptible(gateInfo->hopInterval);
+		usleep(1000 * gateInfo->hopInterval);
 	}
 	
-	printk("ARG: Hop thread dying\n");
+	printf("ARG: Hop thread dying\n");
 
 	return 0;
 }
@@ -346,10 +318,10 @@ struct arg_network_info *create_arg_network_info(void)
 {
 	struct arg_network_info *newInfo = NULL;
 
-	newInfo = (struct arg_network_info*)kmalloc(sizeof(struct arg_network_info), GFP_KERNEL);
+	newInfo = (struct arg_network_info*)malloc(sizeof(struct arg_network_info));
 	if(newInfo == NULL)
 	{
-		printk("ARG: Unable to allocate space for ARG network info\n");
+		printf("ARG: Unable to allocate space for ARG network info\n");
 		return NULL;
 	}
 
@@ -357,7 +329,7 @@ struct arg_network_info *create_arg_network_info(void)
 	memset(newInfo, 0, sizeof(struct arg_network_info));
 	
 	// Init lock
-	newInfo->lock = __RW_LOCK_UNLOCKED(newInfo->lock);
+	pthread_spin_init(&newInfo->lock, PTHREAD_PROCESS_SHARED);
 	
 	return newInfo;
 }
@@ -374,18 +346,18 @@ struct arg_network_info *remove_arg_network(struct arg_network_info *network)
 		network->prev->next = network->next;
 
 	// Free us
-	kfree(network);
+	free(network);
 
 	return next;
 }
 
 void remove_all_associated_arg_networks(void)
 {
-	printk("ARG: Removing all associated ARG networks\n");
+	printf("ARG: Removing all associated ARG networks\n");
 
 	if(gateInfo == NULL)
 	{
-		printk("ARG: Attempt to remove associated networks when hopper not initialized\n");
+		printf("ARG: Attempt to remove associated networks when hopper not initialized\n");
 		return;
 	}
 
@@ -395,29 +367,29 @@ void remove_all_associated_arg_networks(void)
 		remove_arg_network(gateInfo->next);
 }
 
-uchar *current_ip(void)
+uint8_t *current_ip(void)
 {
-	uchar *ipCopy = NULL;
+	uint8_t *ipCopy = NULL;
 
-	ipCopy = (uchar*)kmalloc(ADDR_SIZE, GFP_ATOMIC);
+	ipCopy = (uint8_t*)malloc(ADDR_SIZE);
 	if(ipCopy == NULL)
 	{
-		printk("ARG: Unable to allocate space for saving off IP address.\n");
+		printf("ARG: Unable to allocate space for saving off IP address.\n");
 		return NULL;
 	}
 
-	read_lock(&ipLock);
+	pthread_spin_lock(&ipLock);
 	memmove(ipCopy, gateInfo->currIP, ADDR_SIZE);
-	read_unlock(&ipLock);
+	pthread_spin_unlock(&ipLock);
 
 	return ipCopy;
 }
 
-char is_current_ip(uchar const *ip)
+char is_current_ip(uint8_t const *ip)
 {
 	char ret = 0;
 
-	read_lock(&gateInfo->lock);
+	pthread_spin_lock(&gateInfo->lock);
 	
 	if(memcmp(ip, gateInfo->currIP, ADDR_SIZE) == 0)
 		ret = 1;
@@ -426,57 +398,49 @@ char is_current_ip(uchar const *ip)
 	else
 		ret = 0;
 	
-	read_unlock(&gateInfo->lock);
+	pthread_spin_unlock(&gateInfo->lock);
 
 	return ret;
 }
 
-char process_admin_msg(struct sk_buff *skb, struct arg_network_info *srcGate, uchar *data, int dlen)
+char process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate)
 {
-	switch(get_msg_type(data, dlen))
+	switch(get_msg_type(packet->arg))
 	{
 	case ARG_PING_MSG:
-		process_arg_ping(gateInfo, srcGate, data, dlen);
+		process_arg_ping(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_PONG_MSG:
-		process_arg_pong(gateInfo, srcGate, data, dlen);
+		process_arg_pong(gateInfo, srcGate, packet);
 		break;
 	
 	case ARG_CONN_REQ_MSG:
-		process_arg_conn_req(gateInfo, srcGate, data, dlen);
+		process_arg_conn_req(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_CONN_RESP_MSG:
-		process_arg_conn_resp(gateInfo, data, dlen);
-		break;
-	
-	case ARG_TIME_REQ_MSG:
-		process_arg_time_req(gateInfo, srcGate, data, dlen);
-		break;
-
-	case ARG_TIME_RESP_MSG:
-		process_arg_time_resp(gateInfo, data, dlen);
+		process_arg_conn_resp(gateInfo, packet);
 		break;
 
 	default:
-		printk(KERN_ALERT "ARG: Unhandled message type seen (%i)\n", get_msg_type(data, dlen));
-		return 0;	
+		printf("ARG: Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
+		return -1;	
 	}
 
-	return 1;
+	return 0;
 }
 
 void update_ips(struct arg_network_info *gate)
 {
 	int i = 0;
 	uint32_t bits = 0;
-	uchar *bitIndex = (uchar*)&bits;
+	uint8_t *bitIndex = (uint8_t*)&bits;
 	int minLen = 0;
-	uchar ip[sizeof(gate->currIP)];
+	uint8_t ip[sizeof(gate->currIP)];
 
 	// Is the cache out of date? If not, do nothing
-	if(gate->ipCacheExpiration > jiffies)
+	if(current_time_offset(&gate->ipCacheExpiration) > gate->hopInterval)
 		return;
 
 	// Copy in top part of address. baseIP has already been masked to
@@ -486,7 +450,7 @@ void update_ips(struct arg_network_info *gate)
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
-	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, jiffies - gate->timeBase); 
+	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, current_time_offset(&gate->timeBase)); 
 
 	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
 	for(i = 0; i < minLen; i++)
@@ -505,38 +469,34 @@ void update_ips(struct arg_network_info *gate)
 
 		// Update cache time. TBD this should probably technically be moved to update on a precise
 		// time, not just hopInterval in the future
-		gate->ipCacheExpiration = jiffies + gate->hopInterval;
+		current_time(&gate->ipCacheExpiration);
+		time_plus(&gate->ipCacheExpiration, gate->hopInterval);
 	}
 }
 
-void set_external_ip(uchar *addr)
+void set_external_ip(uint8_t *addr)
 {
-	struct in_ifaddr *ifa = extDev->ip_ptr->ifa_list;
-
 	// Set physical card
-	rtnl_lock();
-	memmove(&ifa->ifa_address, addr, ADDR_SIZE);
-	ifa->ifa_local = ifa->ifa_address;
-	rtnl_unlock();
+	// TBD this will have to change for user space
 }
 
-char is_signature_valid(struct sk_buff const *skb)
+char is_signature_valid(const struct packet_data *packet)
 {
 	return 1;
 }
 
-char do_arg_wrap(struct sk_buff *skb, struct arg_network_info *gate)
+char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate)
 {
-	printk("ARG: Wrapping packet for transmission\n");
+	printf("ARG: Wrapping packet for transmission\n");
 
-	printRaw(skb->data_len, skb->data);
+	printRaw(packet->len, packet->data);
 
 	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_MSG, skb->data, skb->data_len);
 
 	return 1;
 }
 
-char do_arg_unwrap(const struct sk_buff *skb, struct arghdr *argh)
+char do_arg_unwrap(const struct packet_data *packet, struct arghdr *argh)
 {
 	return 1;
 }

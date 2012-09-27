@@ -1,15 +1,12 @@
 #ifndef HOPPER_H
 #define HOPPER_H
 
-#include <linux/skbuff.h>
-#include <linux/ip.h>
-#include <linux/types.h>
-#include <linux/spinlock.h>
+#include <pthread.h>
 
 #include "utility.h"
-#include "net_info.h"
 #include "uthash.h"
 #include "crypto.h"
+#include "packet.h"
 #include "protocol.h"
 
 // State bits used in arg_network_info
@@ -27,7 +24,7 @@
 // otherwise specified
 typedef struct arg_network_info {
 	// Basic info
-	uchar name[MAX_NAME_SIZE];
+	char name[MAX_NAME_SIZE];
 	
 	char authenticated:1,
 		 connected:1; // Connection/admin state
@@ -35,7 +32,7 @@ typedef struct arg_network_info {
 	struct proto_data proto;
 
 	// Lock
-	rwlock_t lock;
+	pthread_spinlock_t lock;
 
 	// Encryption keys
 	uchar privKey[RSA_KEY_SIZE];
@@ -44,7 +41,7 @@ typedef struct arg_network_info {
 
 	// Hopping information
 	uchar hopKey[HOP_KEY_SIZE];
-	long timeBase;
+	struct timespec timeBase;
 	long hopInterval;
 
 	// IP range information
@@ -53,7 +50,7 @@ typedef struct arg_network_info {
 
 	uchar currIP[ADDR_SIZE];
 	uchar prevIP[ADDR_SIZE];
-	long ipCacheExpiration;
+	struct timespec ipCacheExpiration;
 
 	// Linked-list links
 	struct arg_network_info *next;
@@ -62,22 +59,22 @@ typedef struct arg_network_info {
 
 // Take care of resources
 void init_hopper_locks(void);
-char init_hopper(void);
+char init_hopper(char *conf, char *name);
 void init_hopper_finish(void);
 void uninit_hopper(void);
 
 // Retreives and sets known ARG network keys/local gateway keys, etc
-char get_hopper_conf(void);
+char get_hopper_conf(char *confPath, char *gateName);
 
 // Enable and disable hopping
 void enable_hopping(void);
 void disable_hopping(void);
 
 // Does the initial connect to all of the gateways we know of
-int connect_thread(void *data);
+void *connect_thread(void *data);
 
 // Perform actual periodic hop
-int timed_hop_thread(void *data);
+void *timed_hop_thread(void *data);
 
 // Manage the list of ARG networks. NOT synchronzied, caller should claim lock!
 struct arg_network_info *create_arg_network_info(void);
@@ -96,7 +93,7 @@ uchar *current_ip(void);
 char is_current_ip(uchar const *ip);
 
 // Processes incoming admin messages by handing them off to the correct protocol handler
-char process_admin_msg(struct sk_buff *skb, struct arg_network_info *srcGate, uchar *data, int dlen);
+char process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate);
 
 // Sets the current external IP address of the physical card
 void set_external_ip(uchar *ip);
@@ -104,24 +101,20 @@ void set_external_ip(uchar *ip);
 // Generates the IP address for a given gate, based on the mask, hop key, and time
 void update_ips(struct arg_network_info *gate);
 
-// Checks if the given packet is an administrative 
-// packet or not. Returns true if it is, false otherwise
-char is_admin_packet(struct sk_buff const *skb);
-
 // Checks if the given packet is signed correctly.
 // Returns true if it is, false otherwise
-char is_signature_valid(struct sk_buff const *skb);
+char is_signature_valid(const struct packet_data *packet);
 
 // Wraps the given packet for the appropriate ARG network
-// and signs it. The new packet is left in skb
+// and signs it.
 // Returns false if the packet is not destined for a known
 // ARG network or another error occurs during processing
-char do_arg_wrap(struct sk_buff *skb, struct arg_network_info *gate);
+char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate);
 
-// Unwraps the given packet, leaving the inner packet in skb.
+// Unwraps the given packet.
 // Returns false if the signature fails to match or another error
 // occurs during processing
-//char do_arg_unwrap(struct sk_buff *skb, struct arg_network_info *gate);
+//char do_arg_unwrap(struct packet_data *packet, struct arg_network_info *gate);
 
 // Returns pointer to the ARG network the give IP belongs to
 struct arg_network_info *get_arg_network(void const *ip);

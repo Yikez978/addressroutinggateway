@@ -1,8 +1,11 @@
 #ifndef ARG_PROTOCOL_H
 #define ARG_PROTOCOL_H
 
+#include <stdint.h>
+
 #include "utility.h"
 #include "crypto.h"
+#include "packet.h"
 
 struct arg_network_info;
 
@@ -36,29 +39,16 @@ struct arg_network_info;
  *		marked as authenticated. Time for auth is determined and recorded by
  *		dividing the start and end times, giving the one-way latency in jiffies
  *
- * Time sync, to ensure both gateways know when they are changing IPs
- * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
- *	1. Ensure auth (do process if needed)
- *	3. Local sends TIME_REQ containing its time in jiffies (4 bytes) and
- *		its jiffies per second (4 bytes). This packet is _NOT_ encrypted
- *	4. Remote receives packet and does the calculation:
- *			diff = Rj * Rjps - Lj * Ljps 
- *		Where Lj is local jiffies (received), Ljps is local jiffies/sec,
- *		Rj is remote jiffies, and Rjps is remote jiffies/sec. This gives
- *		the difference between the two times in seconds
- *	5. Remote sends TIME_RESP back to local with diff/Ljps (unencrypted)
- *	6. Remote records diff/Rjps 
- *	7. Local receives TIME_RESP and records value
- *
  * Connect process
  * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
- *	1. Ensure time sync
- *	2. Local sends CONN_REQ containing its hop key, hop interval, and
+ *	1. Ensure auth
+ *	2. Local sends CONN_REQ containing its hop key, hop interval, time offset in ms (curr time - base), and
  *		symmetric key, all encrypted with global key. (Remote MAY save this data,
  *		or it could simply do its own request next.)
  *	3. Remote sends CONN_RESP acknowledgement back, containing the remote
- *		hop key, hop interval, and symmetric key. Again, encrypted with global key
- *	4. Local saves data and marks gateway as connected
+ *		hop key, hop interval, hop point, and symmetric key. Again, encrypted with global key
+ *	4. Local saves data and marks gateway as connected. Offset is converted to a
+ *		local base time for that gateway via local curr time - offset
  *
  * Route packet
  *	1. Ensure connect
@@ -86,12 +76,18 @@ struct arg_network_info;
 #define ARG_TIME_RESP_MSG 8
 
 typedef struct arghdr {
-	__u8 version;
-	__u8 type;
-	__be16 len; // Size in bytes from version to end of data
+	uint8_t version;
+	uint8_t type;
+	uint16_t len; // Size in bytes from version to end of data
 
-	uchar hmac[HMAC_SIZE];
+	uint8_t hmac[HMAC_SIZE];
 } arghdr;
+
+typedef struct argmsg {
+	uint16_t len;
+
+	uint8_t *data;
+} argmsg;
 
 #define ARG_HDR_LEN sizeof(struct arghdr)
 
@@ -105,8 +101,8 @@ typedef struct proto_data {
 
 	long latency; // One-way latency in jiffies
 	
-	long pingSentTime;
-	__be32 pingID;
+	struct timespec pingSentTime;
+	uint32_t pingID;
 } proto_data;
 
 void init_protocol_locks(void);
@@ -123,50 +119,42 @@ char send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote);
 char process_arg_ping(struct arg_network_info *local,
 					  struct arg_network_info *remote,
-					  const uchar *packet, int plen);
+					  const struct packet_data *packet);
 char process_arg_pong(struct arg_network_info *local,
 					  struct arg_network_info *remote,
-					  const uchar *packet, int plen);
-
-// Time
-char send_arg_time_req(struct arg_network_info *local,
-					   struct arg_network_info *remote);
-char process_arg_time_req(struct arg_network_info *local,
-						  struct arg_network_info *remote,
-						  const uchar *packet, int plen);
-char process_arg_time_resp(struct arg_network_info *remote, const uchar *packet, int plen);
+					  const struct packet_data *packet);
 
 // Connect
 char send_arg_conn_req(struct arg_network_info *local,
 					   struct arg_network_info *remote);
 char process_arg_conn_req(struct arg_network_info *local,
 						  struct arg_network_info *remote,
-						  const uchar *packet, int plen);
-char process_arg_conn_resp(struct arg_network_info *remote, const uchar *packet, int plen);
+						  const struct packet_data *packet);
+char process_arg_conn_resp(struct arg_network_info *remote,
+						   const struct packet_data *packet);
 
 // Creates the ARG header for the given data and sends it
 char send_arg_packet(struct arg_network_info *srcGate,
 					 struct arg_network_info *destGate,
 					 int type,
-					 const uchar *hmacKey,
-					 const uchar *encKey,
-					 const uchar *data, int dlen);
+					 const uint8_t *hmacKey,
+					 const uint8_t *encKey,
+					 const struct argmsg *msg);
 
 // Validates the packet data (from ARG header on) and decrypts it.
 // New space is allocated and placed into out, which must be freed via free_arg_packet()
-char process_arg_packet(const uchar *hmacKey, const uchar *encKey,
-						const uchar *data, const int dlen,
-						uchar **out, int *outLen);
-void free_arg_data(uchar *data);
+char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
+						const struct arghdr *hdr,
+						struct argmsg **msg);
+struct argmsg *create_arg_msg(uint16_t len);
+void free_arg_msg(struct argmsg *msg);
 
 // Creates and sends a packet with the given data. Only works between ARG gateways currently
-char send_packet(uchar *srcIP, uchar *destIP, uchar *data, int dlen);
+char send_packet(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen);
 
-char get_msg_type(uchar *data, int dlen);
-char is_wrapped_msg(uchar *data, int dlen);
-char is_admin_msg(uchar *data, int dlen);
-
-char skbuff_to_msg(struct sk_buff *skb, uchar **data, int *dlen);
+char get_msg_type(const struct arghdr *msg);
+char is_wrapped_msg(const struct arghdr *msg);
+char is_admin_msg(const struct arghdr *msg);
 
 #endif
 

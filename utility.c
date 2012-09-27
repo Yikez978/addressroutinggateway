@@ -1,32 +1,23 @@
+#include <stdio.h>
+
 #include "utility.h"
-
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/ip.h>
-#include <linux/udp.h>
-#include <linux/tcp.h>
-#include <linux/net.h>
-
-#include "net_info.h"
-#include "protocol.h"
 
 // Show hex of all data in buf
 void printRaw(int len, const void *buf)
 {
 	int i = 0;
-	uchar *bufC = (uchar*)buf;
+	uint8_t *bufC = (uint8_t*)buf;
 
 	for(i = 0; i < len; i++)
 	{
 		// Tag beginning of line
 		if(i % 16 == 0)
-			printk("\nARG: [%4i]  ", i);
+			printf("\nARG: [%4i]  ", i);
 		
-		printk("%02x ", bufC[i]);
+		printf("%02x ", bufC[i]);
 	}
 
-	printk("\n");
+	printf("\n");
 }
 
 // Display printable data in buf
@@ -36,7 +27,7 @@ void printAscii(int len, const void *buf)
 	int i = 0;
 	int shown = 0;
 	
-	uchar *bufC = (uchar*)buf;
+	uint8_t *bufC = (uint8_t*)buf;
 
 	for(i = 0; i < len; i++)
 	{
@@ -50,175 +41,79 @@ void printAscii(int len, const void *buf)
 
 		// Tag beginning of line?
 		if(shown % 40 == 0)
-			printk("\nARG: [%4i]  ", i);
+			printf("\nARG: [%4i]  ", i);
 		
-		printk("%c", c);
+		printf("%c", c);
 		shown++;
 	}
 
-	printk("\n");
+	printf("\n");
 }
 
 void printIP(int len, const void *buf)
 {
 	int i = 0;
-	uchar *bufC = (uchar*)buf;
+	uint8_t *bufC = (uint8_t*)buf;
 
 	for(i = 0; i < len; i++)
 	{
-		printk("%i", bufC[i]);
+		printf("%i", bufC[i]);
 
 		if(i < len - 1)
-			printk(".");
+			printf(".");
 	}
 }
 
-void printPacket(const struct sk_buff *skb)
+void current_time(struct timespec *out)
 {
-	printRaw(skb->len, skb->data);
+	clock_gettime(CLOCK_MONOTONIC, out);
 }
 
-void printPacketInfo(const struct sk_buff *skb)
+long current_time_offset(const struct timespec *begin)
 {
-	struct iphdr *iph = ip_hdr(skb);
-	
-	printk(" proto=%i s=", iph->protocol);
-	printIP(ADDR_SIZE, (uchar*)&iph->saddr);
-	printk(":%i d=", get_source_port(skb));
-	printIP(ADDR_SIZE, (uchar*)&iph->daddr);
-	printk(":%i ", get_dest_port(skb));
+	struct timespec end;
+	current_time(&end);
+	return time_offset(begin, &end);
 }
 
-__be16 get_source_port(const struct sk_buff *skb)
+long time_offset(const struct timespec *begin, const struct timespec *end)
 {
-	struct iphdr *iph = ip_hdr(skb);
-	struct tcphdr *tcph = NULL;
-	struct udphdr *udph = NULL;
-	
-	// Find port numbers for appropriate protocol
-	switch(iph->protocol)
+	long diff = 0;
+  
+	diff = 1000 * ((long)end->tv_sec - (long)begin->tv_sec);
+
+	if(end->tv_nsec > begin->tv_nsec)
 	{
-	case ICMP_PROTO:
-	case ARG_PROTO:
-		return 0;
-	
-	case TCP_PROTO:
-		tcph = tcp_hdr(skb);
-		return ntohs(tcph->source);
-
-	case UDP_PROTO:
-		udph = udp_hdr(skb);
-		return ntohs(udph->source);
-
-	default:
-		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
-		return 0;
+		diff += (end->tv_nsec - begin->tv_nsec) / 1000000;
 	}
-}
-
-__be16 get_dest_port(const struct sk_buff *skb)
-{
-	struct iphdr *iph = ip_hdr(skb);
-	struct tcphdr *tcph = NULL;
-	struct udphdr *udph = NULL;
-	
-	// Find port numbers for appropriate protocol
-	switch(iph->protocol)
+	else
 	{
-	case ICMP_PROTO:
-	case ARG_PROTO:
-		return 0;
-	
-	case TCP_PROTO:
-		tcph = tcp_hdr(skb);
-		return ntohs(tcph->dest);
-
-	case UDP_PROTO:
-		udph = udp_hdr(skb);
-		return ntohs(udph->dest);
-
-	default:
-		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
-		return 0;
+		diff -= (begin->tv_nsec - end->tv_nsec) / 1000000;
 	}
+
+	return diff;
 }
 
-void set_source_port(const struct sk_buff *skb, const __be16 port)
+void time_plus(struct timespec *ts, int ms)
 {
-	struct iphdr *iph = ip_hdr(skb);
-	struct tcphdr *tcph = NULL;
-	struct udphdr *udph = NULL;
-	
-	// Find port numbers for appropriate protocol
-	switch(iph->protocol)
-	{
-	case ICMP_PROTO:
-	case ARG_PROTO:
-		break;
-	
-	case TCP_PROTO:
-		tcph = tcp_hdr(skb);
-		tcph->source = htons(port);
-		break;
-
-	case UDP_PROTO:
-		udph = udp_hdr(skb);
-		udph->source = htons(port);
-		break;
-
-	default:
-		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
+	if(ms == 0)
 		return;
-	}
-}
 
-void set_dest_port(const struct sk_buff *skb, const __be16 port)
-{
-	struct iphdr *iph = ip_hdr(skb);
-	struct tcphdr *tcph = NULL;
-	struct udphdr *udph = NULL;
-	
-	// Find port numbers for appropriate protocol
-	switch(iph->protocol)
+	ts->tv_sec += ms / 1000;
+	ts->tv_nsec += (ms % 1000) * 1000000;
+	if(ts->tv_nsec > 1000000000)
 	{
-	case ICMP_PROTO:
-	case ARG_PROTO:
-		break;
-	
-	case TCP_PROTO:
-		tcph = tcp_hdr(skb);
-		tcph->dest = htons(port);
-		break;
-
-	case UDP_PROTO:
-		udph = udp_hdr(skb);
-		udph->dest = htons(port);
-		break;
-
-	default:
-		printk("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
-		return;
+		ts->tv_sec++;
+		ts->tv_nsec -= 1000000000;
 	}
-}
-
-void fix_transport_header(struct sk_buff *skb)
-{
-	struct iphdr *iph  = ip_hdr(skb);
-	skb_set_transport_header(skb, iph->ihl * 4);
-}
-
-char is_conn_oriented(const struct sk_buff *skb)
-{
-	struct iphdr *iph = ip_hdr(skb);
-	return iph->protocol == TCP_PROTO;
 }
 
 void mask_array(int len, void *orig, void *mask, void *result)
 {
 	int i = 0;
-	uchar *oCast = (uchar*)orig;
-	uchar *mCast = (uchar*)mask;
-	uchar *rCast = (uchar*)result;
+	uint8_t *oCast = (uint8_t*)orig;
+	uint8_t *mCast = (uint8_t*)mask;
+	uint8_t *rCast = (uint8_t*)result;
 
 	for(i = 0; i < len; i++, oCast++, rCast++, mCast++)
 		*rCast = *oCast & *mCast;
@@ -227,11 +122,11 @@ void mask_array(int len, void *orig, void *mask, void *result)
 char mask_array_cmp(int len, const void *mask, const void *left, const void *right)
 {
 	int i = 0;
-	uchar *mCast = (uchar*)mask;
-	uchar *lCast = (uchar*)left;
-	uchar *rCast = (uchar*)right;
+	uint8_t *mCast = (uint8_t*)mask;
+	uint8_t *lCast = (uint8_t*)left;
+	uint8_t *rCast = (uint8_t*)right;
 
-	//printk("ARG: doing mask compare with:\n");
+	//printf("ARG: doing mask compare with:\n");
 	//printRaw(len, mask);
 	//printRaw(len, left);
 	//printRaw(len, right);

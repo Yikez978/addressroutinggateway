@@ -1,31 +1,28 @@
 #ifndef NAT_H
 #define NAT_H
 
-#include <linux/skbuff.h>
-#include <linux/types.h>
-
 #include "settings.h"
 #include "utility.h"
 #include "uthash.h"
-#include "net_info.h"
+#include "director.h"
 
 // Struct of an entry in the NAT table
 struct nat_entry_bucket;
 
 typedef struct nat_entry {
 	// Host inside of ARG
-	uchar intIP[ADDR_SIZE];
-	__be16 intPort;
+	uint8_t intIP[ADDR_SIZE];
+	uint16_t intPort;
 	
 	// Gateway IP at the time the connection was established
-	uchar gateIP[ADDR_SIZE];
-	__be16 gatePort;
+	uint8_t gateIP[ADDR_SIZE];
+	uint16_t gatePort;
 
 	// Protocol of the connection
 	int proto;
 
 	// Walltime of the last time this connection was actively used
-	__kernel_time_t lastUsed;
+	struct timespec lastUsed;
 
 	// Traversal info for list
 	struct nat_entry_bucket *bucket;
@@ -38,8 +35,8 @@ typedef struct nat_entry_bucket {
 	int key;
 	
 	// Host outside of ARG that is being connected to
-	uchar extIP[ADDR_SIZE];
-	__be16 extPort;
+	uint8_t extIP[ADDR_SIZE];
+	uint16_t extPort;
 
 	// Connections in this bucket
 	struct nat_entry *first;
@@ -56,13 +53,13 @@ void uninit_nat(void);
 // Re-writes the given packet based on data in
 // the NAT table and returns true. If it is unable
 // to (i.e., there is no coresponding entry), false is returned.
-char do_nat_inbound_rewrite(struct sk_buff *skb);
+char do_nat_inbound_rewrite(const struct packet_data *packet);
 
 // Re-writes the given packet based on data in
 // the NAT table and returns true. If needed, a new
 // entry is created in the table based on the current IP
 // If it is unable to rewrite, false is returned.
-char do_nat_outbound_rewrite(struct sk_buff *skb);
+char do_nat_outbound_rewrite(const struct packet_data *packet);
 
 // Displays all the data in the NAT table
 void print_nat_table(void);
@@ -72,14 +69,14 @@ void print_nat_bucket(const struct nat_entry_bucket *bucket);
 void print_nat_entry(const struct nat_entry *entry);
 
 // Helpers to create NAT data
-struct nat_entry_bucket *create_nat_bucket(const struct sk_buff *skb, const int key);
-struct nat_entry *create_nat_entry(const struct sk_buff *skb, struct nat_entry_bucket *bucket);
+struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, const int key);
+struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_entry_bucket *bucket);
 
 void update_nat_entry_time(struct nat_entry *e);
 
 // Build bucket key based on the given IP and port (must be given directly,
 // not as an sk_buff because incoming/outgoing use different parts)
-int create_nat_bucket_key(const void *ip, const __be16 port); 
+int create_nat_bucket_key(const void *ip, const uint16_t port); 
 
 // Helpers to remove NAT entries. Return references to the next element, where applicable
 // NOT synchronized. Callers MUST ensure they have the write lock
@@ -89,7 +86,7 @@ struct nat_entry *remove_nat_entry(struct nat_entry *e);
 // Clears the NAT table of old functions/provides
 // callback for timed cleanup. All functions work with the lock to ensure synchronization
 void empty_nat_table(void);
-int nat_cleanup_thread(void *data);
+void *nat_cleanup_thread(void *data);
 void clean_nat_table(void);
 
 #endif
