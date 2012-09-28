@@ -50,7 +50,7 @@ typedef struct packet_data
 
 char parse_packet(struct packet_data *packet);
 
-struct packet_data *create_packet(void);
+struct packet_data *create_packet(int len);
 struct packet_data *copy_packet(const struct packet_data *packet);
 void free_packet(struct packet_data *packet);
 

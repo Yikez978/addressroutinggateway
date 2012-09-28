@@ -74,7 +74,7 @@ char send_arg_ping(struct arg_network_info *local,
 	r = send_arg_packet(local, remote, ARG_PING_MSG, argGlobalKey, argGlobalKey, msg);
 	if(r)
 		current_time(&remote->proto.pingSentTime);
-	
+
 	pthread_spin_unlock(&remote->lock);
 	
 	return r;
@@ -89,7 +89,7 @@ char process_arg_ping(struct arg_network_info *local,
 
 	printf("ARG: Received ping from %s\n", remote->name);
 	
-	if(process_arg_packet(argGlobalKey, argGlobalKey, packet->arg, &msg))
+	if(process_arg_packet(argGlobalKey, argGlobalKey, packet, &msg))
 	{
 		printf("ARG: Stopping pong processing\n");
 		return 0;
@@ -120,7 +120,7 @@ char process_arg_pong(struct arg_network_info *local,
 	
 	printf("ARG: Received pong from %s\n", remote->name);
 	
-	if(process_arg_packet(argGlobalKey, argGlobalKey, packet->arg, &msg))
+	if(process_arg_packet(argGlobalKey, argGlobalKey, packet, &msg))
 	{
 		printf("ARG: Stopping pong processing\n");
 		return 0;
@@ -144,7 +144,7 @@ char process_arg_pong(struct arg_network_info *local,
 			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
 			remote->authenticated = 1;
 			status = 1;
-			printf("ARG: Latency to %s: %li jiffies\n", remote->name, remote->proto.latency);
+			printf("ARG: Latency to %s: %li ms\n", remote->name, remote->proto.latency);
 		}
 		else
 		{
@@ -200,91 +200,118 @@ char send_arg_packet(struct arg_network_info *srcGate,
 					 const uint8_t *encKey,
 					 const struct argmsg *msg)
 {
-	struct arghdr *hdr = NULL;
-	uint8_t *fullData = NULL;
-	uint16_t fullLen = ARG_HDR_LEN;
-	char r = 0;
-
+	struct packet_data *packet = NULL;
+	uint16_t fullLen = 0;
+	
+	// Create packet we will build within
+	fullLen = 20 + ARG_HDR_LEN;
 	if(msg != NULL)
 		fullLen += msg->len;
-
-	// Create wrapper around data
-	// TBD we could probably get a nice boost out of pre-allocating extra space
-	// then just moving bytes forward as needed
-	fullData = malloc(fullLen);
-	if(fullData == NULL)
+	packet = create_packet(fullLen);
+	if(packet == NULL)
 	{
-		printf("ARG: Unable to allocate space to create ARG packet\n");
-		return 0;
+		printf("Unable to allocate space for ARG packet\n");
+		return -1;
 	}
+	
+	// Ensure IPs are up-to-date
+	update_ips(srcGate);
+	update_ips(destGate);	
+
+	// IP header
+	packet->ipv4->version = 4;
+	packet->ipv4->ihl = 5;
+	packet->ipv4->ttl = 32;
+	packet->ipv4->tos = 0;
+	packet->ipv4->protocol = ARG_PROTO;
+	memcpy(&packet->ipv4->saddr, srcGate->currIP, sizeof(packet->ipv4->saddr));
+	memcpy(&packet->ipv4->daddr, destGate->currIP, sizeof(packet->ipv4->daddr));
+	packet->ipv4->id = 0;
+	packet->ipv4->frag_off = 0;
+	packet->ipv4->tot_len = htons(packet->len);
+	packet->ipv4->check = 0;
+
+	parse_packet(packet);
 
 	// TBD encrypt
 	//if(encKey != NULL)
 	//	;
 
-	memset(fullData, 0, fullLen);
-	hdr = (struct arghdr *)fullData;
-	hdr->version = 1;
-	hdr->type = type;
-	hdr->len = htons(fullLen);
-	
+	packet->arg->version = 1;
+	packet->arg->type = type;
 	if(msg != NULL)
-		memcpy(fullData + ARG_HDR_LEN, msg->data, msg->len);
-
-	if(hmacKey != NULL)
-		hmac_sha1(hmacKey, AES_KEY_SIZE, fullData, fullLen, hdr->hmac);
+	{
+		packet->arg->len = htons(msg->len + ARG_HDR_LEN);
+		memcpy((uint8_t*)packet->arg + ARG_HDR_LEN, msg->data, msg->len);
+	}
+	else
+		packet->arg->len = 0;
 	
-	// Ensure IPs are up-to-date and send it on its way
-	update_ips(srcGate);
-	update_ips(destGate);
-	//r = send_packet2(srcGate->currIP, destGate->currIP, fullData, fullLen); // TBD make packet
-	free(fullData);
-	return r;
+	if(hmacKey != NULL)
+		hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)packet->arg, ntohs(packet->arg->len), packet->arg->hmac);
+	
+	// Send!
+	if(send_packet(packet) < 0)
+	{
+		printf("Failed to send ARG packet\n");
+		return -2;
+	}
+
+	free_packet(packet);
+
+	return 0;
 }
 
 char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
-						const struct arghdr *hdr,
+						const struct packet_data *packet,
 						struct argmsg **msg)
 {
-	struct argmsg *out;
-	uint8_t packetHmac[HMAC_SIZE];
-	uint8_t computedHmac[HMAC_SIZE];
+	struct packet_data *newPacket = NULL;
+	struct argmsg *out = NULL;
+
+	//printf("Processing packet");
+	//printRaw(packet->len, packet->data);
 
 	// Duplicate packet so we can remove the hash and check
-	out = create_arg_msg(hdr->len);
-	if(out == NULL)
+	newPacket = copy_packet(packet);
+	if(newPacket == NULL)
 	{
-		printf("Unable to allocate space to process arg packet\n");
+		printf("Unable to duplicate packet for checking\n");
 		return -1;
 	}
-
-	memcpy(out->data, hdr, hdr->len);
-
+	
 	// Check hash
 	if(hmacKey != NULL)
 	{
-		memcpy(packetHmac, &hdr->hmac, sizeof(hdr->hmac));
+		memset(newPacket->arg->hmac, 0, sizeof(newPacket->arg->hmac));
+		hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)newPacket->arg, ntohs(newPacket->arg->len), newPacket->arg->hmac);
 		
-		memset(&(((struct arghdr*)(out->data))->hmac), 0, sizeof(hdr->hmac));
-		hmac_sha1(hmacKey, AES_KEY_SIZE, out->data, out->len, computedHmac);
-		
-		if(memcmp(packetHmac, computedHmac, sizeof(hdr->hmac)) != 0)
+		if(memcmp(packet->arg->hmac, newPacket->arg->hmac, sizeof(packet->arg->hmac)) != 0)
 		{
 			printf("ARG: Received packet did not have a matching HMAC\n");
+			free_packet(newPacket);
 			return -2;
 		}
 	}
-
-	// TBD unencrypt
+	
+	// TBD decrypt
 	//if(encKey != NULL)
 	//	;
 	// else
 	
-	// Received data:
-	//printf("ARG: data in thing we received:");
-	//printRaw(*outLen, *out);
+	out = create_arg_msg(ntohs(newPacket->arg->len) - ARG_HDR_LEN);
+	if(out == NULL)
+	{
+		printf("Unable to allocate space to write decrypted message\n");
+		free_packet(newPacket);
+		return -3;
+	}
 
+	memcpy(out->data, (uint8_t*)newPacket->arg + ARG_HDR_LEN, out->len);
 	*msg = out;
+	
+	//printf("msg from packet");
+	//printRaw(out->len, out->data);
 	
 	return 0;
 }
@@ -317,99 +344,6 @@ void free_arg_msg(struct argmsg *msg)
 
 		free(msg);
 	}
-}
-
-char send_packet2(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen)
-{
-	// A lot of this code is taken from pkggen.c/fill_packet_ipv4()
-	/*struct socket *s = NULL;
-	struct sockaddr_in addr;
-	const int ipv4_hdrsize = 20;
-	
-	int r = -1;
-
-	uint8_t *fullData = NULL;
-	int fullDataLen;
-	
-	int iplen;
-	struct iphdr *iph;
-
-	struct msghdr msg;
-	struct iovec iov;
-	
-	mm_segment_t oldfs;
-
-	// Compose message
-	fullDataLen = ipv4_hdrsize + dlen;
-	fullData = malloc(fullDataLen);
-	if(fullData == NULL)
-	{
-		printf("ARG: Unable to allocate space for adding IP header to packet\n");
-		return 0;
-	}
-
-	iph = (struct iphdr*)fullData;
-	iph->ihl = ipv4_hdrsize / 4;
-	iph->version = 4;
-	iph->ttl = 32;
-	iph->tos = 0;
-	iph->protocol = ARG_PROTO;
-	memcpy(&iph->saddr, srcIP, sizeof(iph->saddr));
-	memcpy(&iph->daddr, destIP, sizeof(iph->daddr));
-	iph->id = 0;
-	iph->frag_off = 0;
-	iplen = fullDataLen;
-	iph->tot_len = htons(iplen);
-	iph->check = 0;
-	iph->check = ip_fast_csum((void*)iph, iph->ihl);
-
-	memcpy(fullData + ipv4_hdrsize, data, dlen);
-
-	//printf("ARG: thing we want to send:");
-	//printRaw(fullDataLen, fullData);
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	memcpy(&addr.sin_addr.s_addr, destIP, ADDR_SIZE);
-	addr.sin_port = htons(ARG_ADMIN_PORT);
-
-	msg.msg_name = &addr;
-	msg.msg_namelen = sizeof(addr);
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = NULL;
-	msg.msg_controllen = 0;
-	msg.msg_flags = 0; // TBD flags?
-
-	iov.iov_len = fullDataLen;
-	iov.iov_base = fullData;
-
-	// Send
-	r = sock_create(PF_INET, SOCK_RAW, IPPROTO_RAW, &s);
-	if(r < 0)
-	{
-		printf("ARG: Error in create socket: %i\n", r);
-		free(fullData);
-		return 0;
-	}
-
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-	r = sock_sendmsg(s, &msg, fullDataLen);
-	set_fs(oldfs);
-
-	kernel_sock_shutdown(s, SHUT_RDWR);
-	
-	free(fullData);
-	
-	if(r < 0)
-	{
-		printf("ARG: Error in sendmsg: %i\n", r);
-		return 0;
-	}
-	else
-		return 1;*/
-	return 0;
 }
 
 char get_msg_type(const struct arghdr *msg)

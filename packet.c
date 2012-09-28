@@ -58,6 +58,35 @@ char parse_packet(struct packet_data *packet)
 	return 0;
 }
 
+struct packet_data *create_packet(int len)
+{
+	struct packet_data *c = NULL;
+	c = (struct packet_data*)malloc(sizeof(struct packet_data));
+	if(c == NULL)
+	{
+		printf("Unable to allocate space for new packet\n");
+		return NULL;
+	}
+
+	c->len = 0;
+	c->linkLayerLen = 0;
+	
+	if(len > 0)
+	{
+		c->len = len;
+		c->data = (uint8_t*)calloc(len, 1);
+		if(c->data == NULL)
+		{
+			printf("Unable to allocate space for new packet data\n");
+			free(c);
+			return NULL;
+		}
+	}
+
+	parse_packet(c);
+	return c;
+}
+
 struct packet_data *copy_packet(const struct packet_data *packet)
 {
 	struct packet_data *c = NULL;
@@ -107,6 +136,9 @@ char send_packet(const struct packet_data *packet)
 	static int sock = 0;
 	struct sockaddr_in dest_addr;
 	int len = 0;
+
+	//printf("Sending packet:");
+	//printRaw(packet->len, packet->data);
 
 	if(sock <= 0)
 	{

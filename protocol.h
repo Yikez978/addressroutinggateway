@@ -99,7 +99,7 @@ typedef struct argmsg {
 typedef struct proto_data {
 	char state; // Records actions that need to occur
 
-	long latency; // One-way latency in jiffies
+	long latency; // One-way latency in ms
 	
 	struct timespec pingSentTime;
 	uint32_t pingID;
@@ -144,7 +144,7 @@ char send_arg_packet(struct arg_network_info *srcGate,
 // Validates the packet data (from ARG header on) and decrypts it.
 // New space is allocated and placed into out, which must be freed via free_arg_packet()
 char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
-						const struct arghdr *hdr,
+						const struct packet_data *packet,
 						struct argmsg **msg);
 struct argmsg *create_arg_msg(uint16_t len);
 void free_arg_msg(struct argmsg *msg);

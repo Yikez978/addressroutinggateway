@@ -58,13 +58,15 @@ void *receive_thread(void *tData)
 
 	char ebuf[PCAP_ERRBUF_SIZE];
 	struct pcap_pkthdr header;
-	int linkLayerLen = 0;
+	int frameHeadLen = 0;
+	int frameTailLen = 0;
 	
 	struct bpf_program fp;
 	char filter[MAX_FILTER_LEN];
 	char baseIP[INET_ADDRSTRLEN];
 	char mask[INET_ADDRSTRLEN];
 
+	uint8_t *wireData = NULL;
 	struct packet_data packet;
 
 	// Activate pcap
@@ -107,10 +109,14 @@ void *receive_thread(void *tData)
 
 	// Cache how far to jump in packets
 	if(pcap_datalink(pd) == DLT_EN10MB)
-		linkLayerLen = LINK_LAYER_SIZE;
+	{
+		frameHeadLen = LINK_LAYER_SIZE;
+		frameTailLen = 0;
+	}
 	else
 	{
-		linkLayerLen = 0;
+		frameHeadLen = 0;
+		frameTailLen = 0;
 		printf("Unable to determine data link type\n");
 		return (void*)-3;
 	}
@@ -120,19 +126,21 @@ void *receive_thread(void *tData)
 
 	for(;;)
 	{
-		packet.data = (uint8_t*)pcap_next(pd, &header);
-		if(packet.data == NULL)
+		wireData = (uint8_t*)pcap_next(pd, &header);
+		if(wireData == NULL)
 			continue;
 
-		packet.len = header.caplen;
-		packet.linkLayerLen = linkLayerLen;
+		// Point packet to skip the 
+		packet.linkLayerLen = 0;
+		packet.data = wireData + frameHeadLen;
+		packet.len = header.caplen - frameHeadLen - frameTailLen;
 
 		packet.tstamp.tv_sec = header.ts.tv_sec;
 		packet.tstamp.tv_nsec = header.ts.tv_usec * 1000;
 
 		if(parse_packet(&packet))
 			continue;
-
+		
 		if(!packet.ipv4)
 			continue;
 
@@ -156,8 +164,6 @@ void direct_inbound(const struct packet_data *packet)
 	gate = get_arg_network(&packet->ipv4->saddr);
 	if(gate != NULL)
 	{
-		printf("ARG: ARG packet inbound!\n");
-
 		if(packet->arg == NULL)
 		{
 			printf("Packet from ARG network, but not correct protocol\n");
@@ -205,8 +211,6 @@ void direct_outbound(const struct packet_data *packet)
 	gate = get_arg_network(&packet->ipv4->daddr);
 	if(gate != NULL)
 	{
-		printf("ARG: ARG packet outbound!\n");
-
 		// Destined for an ARG network
 		if(do_arg_wrap(packet, gate))
 		{
