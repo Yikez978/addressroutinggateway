@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include "utility.h"
 
@@ -61,6 +62,24 @@ void printIP(int len, const void *buf)
 
 		if(i < len - 1)
 			printf(".");
+	}
+}
+
+char get_next_line(FILE *f, char *line, int max)
+{
+	int len = 0;
+	for(;;)
+	{
+		if(fgets(line, max, f) == NULL)
+			return -1;
+
+		if(line[0] != '\n' && line[0] != '\r')
+		{
+			len = strnlen(line, max);
+			if(line[len - 1] == '\n')
+				line[len - 1] = '\0';
+			return 0;
+		}
 	}
 }
 

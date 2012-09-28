@@ -60,7 +60,7 @@ char send_arg_ping(struct arg_network_info *local,
 	printf("\n");
 
 	msg = create_arg_msg(sizeof(remote->proto.pingID));
-	if(msg != NULL)
+	if(msg == NULL)
 	{
 		printf("Unable to allocate space to send ping\n");
 		return -1;

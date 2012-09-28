@@ -2,6 +2,11 @@
 #include <time.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <linux/sockios.h>
+#include <errno.h>
 
 #include <pthread.h>
 
@@ -53,7 +58,7 @@ char init_hopper(char *conf, char *name)
 	
 	// Allow hopping now
 	printf("ARG: Starting hop thread\n");
-	pthread_create(&hopThread, NULL, timed_hop_thread, NULL);
+	pthread_create(&hopThread, NULL, timed_hop_thread, NULL); // TBD check return
 	enable_hopping();
 	
 	printf("ARG: Hopper initialized\n");
@@ -64,7 +69,7 @@ char init_hopper(char *conf, char *name)
 void init_hopper_finish(void)
 {
 	printf("ARG: Starting connection/gateway auth thread\n");
-	pthread_create(&connectThread, NULL, connect_thread, NULL);
+	pthread_create(&connectThread, NULL, connect_thread, NULL); // TBD check return
 }
 
 void uninit_hopper(void)
@@ -118,7 +123,7 @@ void uninit_hopper(void)
 char get_hopper_conf(char *confPath, char *gateName)
 {
 	FILE *confFile = NULL;
-	char line[MAX_CONF_LINE];
+	char line[MAX_CONF_LINE+1];
 
 	struct arg_network_info *currNet = NULL;
 	struct arg_network_info *prevNet = NULL;
@@ -155,32 +160,29 @@ char get_hopper_conf(char *confPath, char *gateName)
 		// name
 		// base ip in dot-notation
 		// mask in dot-notation
-		// --1 blank line--
 		// repeat for next gate
-		// TBD very fragile right now
-		if(!fgets(line, MAX_CONF_LINE, confFile))
+		if(get_next_line(confFile, line, MAX_CONF_LINE))
 		{
-			printf("Configuration file is bad, no name\n");
-			return -3;
+			remove_arg_network(currNet);
+			break;
 		}
 		strncpy(currNet->name, line, sizeof(currNet->name));
 		
-		if(!fgets(line, MAX_CONF_LINE, confFile))
+		if(get_next_line(confFile, line, MAX_CONF_LINE))
 		{
-			printf("Configuration file is bad, no name\n");
-			return -3;
+			printf("Problem reading in base IP from conf for %s\n", currNet->name);
+			remove_arg_network(currNet);
+			break;
 		}
 		inet_pton(AF_INET, line, currNet->baseIP);
 		
-		if(!fgets(line, MAX_CONF_LINE, confFile))
+		if(get_next_line(confFile, line, MAX_CONF_LINE))
 		{
-			printf("Configuration file is bad, no name\n");
-			return -3;
+			printf("Problem reading in mask from conf for %s\n", currNet->name);
+			remove_arg_network(currNet);
+			break;
 		}
 		inet_pton(AF_INET, line, currNet->mask);
-		
-		// Blank line
-		fgets(line, MAX_CONF_LINE, confFile);
 	}
 
 	fclose(confFile);
@@ -192,7 +194,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	currNet = gateInfo;
 	while(currNet != NULL)
 	{
-		if(strncmp(gateName, currNet->name, sizeof(currNet->name)))
+		if(strncmp(gateName, currNet->name, sizeof(currNet->name)) == 0)
 		{
 			// Found, make currNet the head of list (if not already)
 			if(currNet != gateInfo)
@@ -223,7 +225,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	{
 		// Didn't find a match
 		printf("ARG: Misconfiguration, unable to find which gate we are\n");
-		return -3;
+		return -4;
 	}
 
 	printf("ARG: Configured as %s\n", gateInfo->name);
@@ -298,6 +300,7 @@ void *timed_hop_thread(void *data)
 		{
 			printf("ARG: Updating local IPs\n");
 
+			
 			pthread_spin_lock(&gateInfo->lock);
 			update_ips(gateInfo);
 			pthread_spin_unlock(&gateInfo->lock);
@@ -440,7 +443,7 @@ void update_ips(struct arg_network_info *gate)
 	uint8_t ip[sizeof(gate->currIP)];
 
 	// Is the cache out of date? If not, do nothing
-	if(current_time_offset(&gate->ipCacheExpiration) > gate->hopInterval)
+	if(current_time_offset(&gate->ipCacheExpiration) < gate->hopInterval)
 		return;
 
 	// Copy in top part of address. baseIP has already been masked to
@@ -476,13 +479,55 @@ void update_ips(struct arg_network_info *gate)
 
 void set_external_ip(uint8_t *addr)
 {
-	// Set physical card
-	// TBD this will have to change for user space
-}
+	// Code mostly from http://www.lainoox.com/set-ip-address-c-linux/
+	int sockfd;
+	struct ifreq ifr;
+	struct sockaddr_in sin;
 
-char is_signature_valid(const struct packet_data *packet)
-{
-	return 1;
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if(sockfd == -1)
+	{
+		printf("Unable to create socket to set external IP address\n");
+		return;
+	}
+ 
+	// Get flags
+	strncpy(ifr.ifr_name, EXT_DEV_NAME, IFNAMSIZ);
+	if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0)
+	{
+		printf("Unable to get flags to set external IP address\n");
+		return;
+	}
+	
+	#ifdef ifr_flags
+	# define IRFFLAGS       ifr_flags
+	#else   /* Present on kFreeBSD */
+	# define IRFFLAGS       ifr_flagshigh
+	#endif
+ 
+	// If interface is down, bring it up
+	if (ifr.IRFFLAGS | ~(IFF_UP))
+	{
+		ifr.IRFFLAGS |= IFF_UP;
+		if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0)
+		{
+			printf("External interface down, unable to set IP: %i\n", errno);
+			return;
+		}
+	}
+ 
+	sin.sin_family = AF_INET;
+ 
+	memcpy(&sin.sin_addr.s_addr, addr, sizeof(sin.sin_addr.s_addr));
+	memcpy(&ifr.ifr_addr, &sin, sizeof(struct sockaddr));	
+ 
+	// Set interface address
+	if (ioctl(sockfd, SIOCSIFADDR, &ifr) < 0)
+	{
+		printf("Unable to set IP address on external interface\n");
+		return;
+	}	
+	#undef IRFFLAGS		
 }
 
 char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate)
@@ -491,14 +536,16 @@ char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate
 
 	printRaw(packet->len, packet->data);
 
+	// TBD wrap/end
 	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_MSG, skb->data, skb->data_len);
 
-	return 1;
+	return 0;
 }
 
 char do_arg_unwrap(const struct packet_data *packet, struct arghdr *argh)
 {
-	return 1;
+	// TBD unwrap/send
+	return 0;
 }
 
 struct arg_network_info *get_arg_network(void const *ip)

@@ -5,6 +5,7 @@
 #include "utility.h"
 #include "packet.h"
 #include "hopper.h"
+#include "nat.h"
 
 /***************************
 Receive thread data
@@ -23,7 +24,7 @@ char init_director(void)
 	printf("ARG: Director init\n");
 
 	// Enter receive loop, which we then pass off to director
-	pthread_create(&intData.thread, NULL, receive_thread, (void*)&intData);
+	pthread_create(&intData.thread, NULL, receive_thread, (void*)&intData); // TBD check returns
 	pthread_create(&extData.thread, NULL, receive_thread, (void*)&extData);
 	
 	printf("ARG: Director initialized\n");
@@ -78,7 +79,7 @@ void *receive_thread(void *tData)
 
 	// Cache how far to jump in packets
 	if(pcap_datalink(pd) == DLT_EN10MB)
-		linkLayerLen = 14;
+		linkLayerLen = LINK_LAYER_SIZE;
 	else
 	{
 		linkLayerLen = 0;
@@ -120,15 +121,14 @@ void direct_inbound(const struct packet_data *packet)
 	struct arg_network_info *gate = NULL;
 	
 	// Is this packet from an ARG network?
-	if(packet->arg != NULL)
+	gate = get_arg_network(&packet->ipv4->saddr);
+	if(gate != NULL)
 	{
 		printf("ARG: ARG packet inbound!\n");
-		gate = get_arg_network(&packet->ipv4->saddr);
-		if(gate == NULL)
+
+		if(packet->arg == NULL)
 		{
-			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Reject: ARG packet from non-ARG ip");
-			#endif
+			printf("Packet from ARG network, but not correct protocol\n");
 			return;
 		}
 
@@ -140,19 +140,20 @@ void direct_inbound(const struct packet_data *packet)
 		{
 			// Unwrap and drop into network, assuming everything checks out
 			// TBD, call unwrapper
+			#ifdef DISP_RESULTS
+			printf("ARG: Inbound Accept: Unwrapped\n");
+			#endif
 		}
 	}
 	else
 	{
 		// From a non-ARG IP
 		// Pass off to the NAT handler
-		/*if(do_nat_inbound_rewrite(skb))
+		if(do_nat_inbound_rewrite(packet) == 0)
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Inbound Accept: Rewrite\n");
 			#endif
-		
-			// TBD send
 		}
 		else
 		{
@@ -160,151 +161,50 @@ void direct_inbound(const struct packet_data *packet)
 			printf("ARG: Inbound Reject: NAT\n");
 			#endif
 		}
-		*/
 	}
 	
 }
 
 void direct_outbound(const struct packet_data *packet)
 {
-	printf("Direct outbound!\n");
-}
-
-/*
-unsigned int direct_inbound(unsigned int hooknum, struct sk_buff *skb, 
-							const struct net_device *in,
-							const struct net_device *out,
-							int (*okfn)(struct sk_buff *))
-{
-	struct iphdr *iph = ip_hdr(skb);
-	struct arg_network_info *gate = NULL;
-	uchar *data = NULL;
-	int dlen;
-
-	// Ensure everything is working as intended
-	fix_transport_header(skb);
-
-	// Ignore traffic not inbound on the EXTERNAL device
-	if(strcmp(EXT_DEV_NAME, in->name))	
-		return NF_ACCEPT;
-
-	// We only support a few protocols
-	if(!is_supported_proto(skb))
-	{
-		printf("ARG: Unsupported protocol (%i) seen\n", iph->protocol);
-		return NF_DROP;
-	}
-
-	// Is this an ARG packet?
-	gate = get_arg_network(&iph->saddr);
-	if(gate != NULL)
-	{
-		printf("ARG: ARG packet inbound!\n");
-
-		skbuff_to_msg(skb, &data, &dlen);
-
-		if(is_admin_msg(data, dlen))
-		{
-			process_admin_msg(skb, gate, data, dlen);
-
-			// We never forward admin packets into the network
-			return NF_DROP;
-		}
-		else
-		{
-			// Unwrap and drop into network, assuming everything checks out
-			// TBD, call unwrapper
-			return NF_ACCEPT;
-		}
-	}
-	else
-	{
-		// From a non-ARG IP
-		// Pass off to the NAT handler
-		if(do_nat_inbound_rewrite(skb))
-		{
-			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Accept: Rewrite\n");
-			#endif
-			return NF_ACCEPT;
-		}
-		else
-		{
-			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Reject: NAT\n");
-			#endif
-			return NF_DROP;
-		}
-	}
-
-	return NF_ACCEPT;
-}
-
-unsigned int direct_outbound(unsigned int hooknum, struct sk_buff *skb, 
-							const struct net_device *in,
-							const struct net_device *out,
-							int (*okfn)(struct sk_buff *))
-{
-	struct iphdr *iph = ip_hdr(skb);
 	struct arg_network_info *gate = NULL;
 
-	// Ensure everything is working as intended
-	fix_transport_header(skb);
-	
-	// Ignoral all traffic not actually leaving by the external device
-	if(strcmp(EXT_DEV_NAME, out->name))
-		return NF_ACCEPT;
-	
-	// We only support a few protocols
-	if(!is_supported_proto(skb))
-	{
-		printf(KERN_INFO "ARG: Unsupported protocol (%i) seen\n", iph->protocol);
-		return NF_DROP;
-	}
-	
 	// Who should handle it?
-	gate = get_arg_network(&iph->daddr);
+	gate = get_arg_network(&packet->ipv4->daddr);
 	if(gate != NULL)
 	{
 		printf("ARG: ARG packet outbound!\n");
 
 		// Destined for an ARG network
-		if(do_arg_wrap(skb, gate))
+		if(do_arg_wrap(packet, gate))
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound Accept: Wrap\n");
 			#endif
-			return NF_ACCEPT;
 		}
 		else
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound Reject: Failed to wrap\n");
 			#endif
-			return NF_DROP;
 		}
 	}
 	else
 	{
 		// Unknown destination. Rewrite via NAT, creating an entry
 		// if needed
-		if(do_nat_outbound_rewrite(skb))
+		if(do_nat_outbound_rewrite(packet))
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound: Accept: Rewrite\n");
 			#endif
-			return NF_ACCEPT;
 		}
 		else
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound Reject: NAT\n");
 			#endif
-			return NF_DROP;
 		}
 	}
-
-	return NF_ACCEPT;
 }
-*/
 

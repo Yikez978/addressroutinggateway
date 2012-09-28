@@ -19,6 +19,7 @@ install-sh
 missing
 stamp-h1
 .deps
+Makefile
 Makefile.in
 aclocal.m4
 arg

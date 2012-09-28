@@ -39,6 +39,7 @@ char parse_packet(int linkLayerLen, struct packet_data *packet)
 	else
 	{
 		packet->ipv4 = NULL;
+		printf("Unknown, non-IP packet received. Ignoring\n");
 		return -1;
 	}
 
@@ -66,7 +67,7 @@ struct packet_data *copy_packet(const struct packet_data *packet)
 	c->len = packet->len;
 	memmove(c->data, packet->data, c->len);
 
-	parse_packet(14, c);
+	parse_packet(LINK_LAYER_SIZE, c); // TBD I'd like to make link-layer size a struct member
 	return c;
 }
 

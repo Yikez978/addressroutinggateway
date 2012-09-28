@@ -1,11 +1,11 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#define INT_DEV_NAME "eth2"
+#define INT_DEV_NAME "eth0"
 #define EXT_DEV_NAME "eth1"
 
 // Whether or not to show accept/reject messages (and why)
-#define DISP_RESULTS
+//#define DISP_RESULTS
 
 // Number of milliseconds between hops
 #define HOP_TIME 5000
@@ -23,6 +23,7 @@
 #define NAT_OLD_CONN_TIME 120
 
 #define MAX_PACKET_SIZE 65536
+
 #define MAX_CONF_LINE 200
 
 #endif

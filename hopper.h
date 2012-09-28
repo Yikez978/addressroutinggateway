@@ -101,10 +101,6 @@ void set_external_ip(uchar *ip);
 // Generates the IP address for a given gate, based on the mask, hop key, and time
 void update_ips(struct arg_network_info *gate);
 
-// Checks if the given packet is signed correctly.
-// Returns true if it is, false otherwise
-char is_signature_valid(const struct packet_data *packet);
-
 // Wraps the given packet for the appropriate ARG network
 // and signs it.
 // Returns false if the packet is not destined for a known

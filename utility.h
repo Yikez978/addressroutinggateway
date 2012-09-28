@@ -2,6 +2,7 @@
 #define UTILITY_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 
 typedef unsigned char uchar;
@@ -9,6 +10,11 @@ typedef unsigned char uchar;
 void printRaw(int len, const void *buf);
 void printAscii(int len, const void *buf);
 void printIP(int len, const void *buf);
+
+// Reads until finding a not-blank line (COMPLETELY blank, not whitespace skipping)
+// Line has \n removed if needed
+// Returns 0 if line is found, 1 if not (eof, probably)
+char get_next_line(FILE *f, char *line, int max);
 
 // Returns the current monotonic time (not real-world time)
 void current_time(struct timespec *out);

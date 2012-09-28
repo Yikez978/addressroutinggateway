@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "crypto.h"
 #include "sha1.h"
@@ -116,6 +119,7 @@ uint32_t totp(const uint8_t *key, unsigned int klen, unsigned long step, unsigne
 
 void aes_encrypt(const uint8_t *key, int klen, const uint8_t *data, int dlen, uint8_t *out, int *outlen)
 {
+	// TBD encrypt
 	/*struct cryto_cipher *tfm;
 
 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
@@ -135,19 +139,20 @@ void aes_encrypt(const uint8_t *key, int klen, const uint8_t *data, int dlen, ui
 
 void aes_decrypt(uint8_t *data, int dlen, uint8_t *out, int *outlen)
 {
-
+	// TBD decrypt
 }
 
 void get_random_bytes(void *buf, int nbytes)
 {
-	uint8_t *curr = (uint8_t*)buf;
-	int i = 0;
+	static int randomData = 0;
+	int n = 0;
 
-	for(i = 0; i < nbytes; i++)
+	if(randomData == 0)
+		randomData = open("/dev/urandom", O_RDONLY);
+	
+	do
 	{
-		// TBD real random
-		*curr = 5;
-		curr++;
-	}
+		n += read(randomData, (uint8_t*)buf + n, nbytes - n);
+	} while(n < nbytes);
 }
 

@@ -14,6 +14,8 @@
 #define TCP_PROTO 0x06
 #define UDP_PROTO 0x11
 
+#define LINK_LAYER_SIZE 14
+
 // Size of IPv4 addresses (bytes)
 #define ADDR_SIZE sizeof(__be32)
 

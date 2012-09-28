@@ -25,11 +25,11 @@ char init_nat(void)
 {
 	printf("ARG: NAT init\n");
 
-	pthread_create(&natCleanupThread, NULL, nat_cleanup_thread, NULL);
+	pthread_create(&natCleanupThread, NULL, nat_cleanup_thread, NULL); // TBD check return
 
 	printf("ARG: NAT initialized\n");
 
-	return 1;
+	return 0;
 }
 
 void uninit_nat(void)
@@ -113,7 +113,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 
 	compute_packet_checksums(newPacket);
 
-	// Send
+	// TBD Send
 
 	return 0;
 }
@@ -184,8 +184,9 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	memcpy((void*)&newPacket->ipv4->saddr, e->gateIP, ADDR_SIZE);
 	set_source_port(newPacket, e->gatePort);
 
-	// Re-checksum
 	compute_packet_checksums(newPacket);
+
+	// TBD send
 
 	return 0;
 }
