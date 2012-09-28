@@ -21,13 +21,24 @@
 
 struct arghdr;
 
+typedef struct ethhdr
+{
+	uint8_t dest[6];
+	uint8_t src[6];
+	uint16_t type;
+
+	// data...
+	// CRC at the end
+} ethhdr;
+
 typedef struct packet_data
 {
 	unsigned long len;
 	int linkLayerLen;
 
 	struct timespec tstamp;
-	
+
+	struct ethhdr *eth;
 	struct iphdr *ipv4;
 	struct tcphdr *tcp;
 	struct udphdr *udp;

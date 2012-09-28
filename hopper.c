@@ -183,6 +183,9 @@ char get_hopper_conf(char *confPath, char *gateName)
 			break;
 		}
 		inet_pton(AF_INET, line, currNet->mask);
+
+		// Fix base ip by masking (just in case)
+		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
 	}
 
 	fclose(confFile);
@@ -406,6 +409,16 @@ char is_current_ip(uint8_t const *ip)
 	return ret;
 }
 
+const uint8_t *gate_base_ip(void)
+{
+	return gateInfo->baseIP;
+}
+
+const uint8_t *gate_mask(void)
+{
+	return gateInfo->mask;
+}
+
 char process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate)
 {
 	switch(get_msg_type(packet->arg))
@@ -532,10 +545,6 @@ void set_external_ip(uint8_t *addr)
 
 char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate)
 {
-	printf("ARG: Wrapping packet for transmission\n");
-
-	printRaw(packet->len, packet->data);
-
 	// TBD wrap/end
 	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_MSG, skb->data, skb->data_len);
 

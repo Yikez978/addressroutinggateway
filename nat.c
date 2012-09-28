@@ -111,10 +111,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	memcpy((void*)&newPacket->ipv4->daddr, e->intIP, ADDR_SIZE);
 	set_dest_port(newPacket, e->intPort);
 
-	compute_packet_checksums(newPacket);
-
 	send_packet(newPacket);
-	
 	free_packet(newPacket);
 
 	return 0;
@@ -186,10 +183,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	memcpy((void*)&newPacket->ipv4->saddr, e->gateIP, ADDR_SIZE);
 	set_source_port(newPacket, e->gatePort);
 
-	compute_packet_checksums(newPacket);
-
 	send_packet(newPacket);
-
 	free_packet(newPacket);
 
 	return 0;
@@ -415,7 +409,7 @@ void clean_nat_table(void)
 		while(e != NULL)
 		{
 			// Is this connection too old?
-			if(time_offset(&now, &e->lastUsed) > NAT_CLEAN_TIME * 1000)
+			if(time_offset(&e->lastUsed, &now) > NAT_CLEAN_TIME * 1000)
 				e = remove_nat_entry(e);
 			else
 				e = e->next;

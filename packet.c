@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <errno.h>
 
 #include <arpa/inet.h> // TBD add to configure.ac
 
@@ -12,14 +13,36 @@ char parse_packet(struct packet_data *packet)
 {
 	void *transStart = NULL;
 	
+	packet->eth = NULL;
+	packet->ipv4 = NULL;
 	packet->udp = NULL;
 	packet->tcp = NULL;
 	packet->icmp = NULL;
 	packet->arg = NULL;
-	packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
-	
-	if(packet->ipv4->version == 4)
+
+	if(sizeof(ethhdr) == packet->linkLayerLen)
 	{
+		packet->eth = (struct ethhdr*)packet->data;
+		
+		if(ntohs(packet->eth->type) == 0x0800)
+			packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
+		else if(ntohs(packet->eth->type) == 0x86DD)
+			printf("IPv6, sad day\n");
+	
+		// Probably ARP or something else
+	}
+	else
+	{
+		// Assume IP
+		packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
+	}
+
+	// Parse IP packets further
+	if(packet->ipv4 != NULL)
+	{
+		if(packet->ipv4->version != 4)
+			return -1;
+
 		transStart = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl*4);
 
 		if(packet->ipv4->protocol == ARG_PROTO)
@@ -30,18 +53,6 @@ char parse_packet(struct packet_data *packet)
 			packet->udp = (struct udphdr*)transStart;
 		else if(packet->ipv4->protocol == ICMP_PROTO)
 			packet->icmp = (struct icmphdr*)transStart;
-	}
-	else if(packet->ipv4->version == 6)
-	{
-		packet->ipv4 = NULL;
-		printf("IPv6 packet received, not currently parsed\n");
-		return -1;
-	}
-	else
-	{
-		packet->ipv4 = NULL;
-		printf("Unknown, non-IP packet received. Ignoring\n");
-		return -1;
 	}
 
 	return 0;
@@ -95,7 +106,8 @@ char send_packet(const struct packet_data *packet)
 {
 	static int sock = 0;
 	struct sockaddr_in dest_addr;
-	
+	int len = 0;
+
 	if(sock <= 0)
 	{
 		sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
@@ -110,10 +122,15 @@ char send_packet(const struct packet_data *packet)
 	dest_addr.sin_port = htons(get_dest_port(packet));
 	dest_addr.sin_addr.s_addr = packet->ipv4->daddr;
 
-	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen,
+	if(packet->ipv4)
+		len = ntohs(packet->ipv4->tot_len);
+	else
+		len = packet->len - packet->linkLayerLen;
+
+	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, len,
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
-		printf("Send failed\n");
+		printf("Send failed: %i\n", errno);
 		return -1;
 	}
 

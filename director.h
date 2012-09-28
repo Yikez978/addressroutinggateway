@@ -6,12 +6,18 @@
 
 #include "protocol.h"
 
+#define MAX_FILTER_LEN 100
+
+#define IFACE_EXTERNAL 0
+#define IFACE_INTERNAL 1
+
 struct packet_data;
 
 typedef struct receive_thread_data
 {
 	char dev[10];
 	void (*handler)(const struct packet_data*);
+	char ifaceSide;
 	pthread_t thread;
 } receive_thread_data;
 

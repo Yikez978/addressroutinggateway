@@ -127,11 +127,11 @@ void time_plus(struct timespec *ts, int ms)
 	}
 }
 
-void mask_array(int len, void *orig, void *mask, void *result)
+void mask_array(int len, const void *orig, const void *mask, void *result)
 {
 	int i = 0;
-	uint8_t *oCast = (uint8_t*)orig;
-	uint8_t *mCast = (uint8_t*)mask;
+	const uint8_t *oCast = (const uint8_t*)orig;
+	const uint8_t *mCast = (const uint8_t*)mask;
 	uint8_t *rCast = (uint8_t*)result;
 
 	for(i = 0; i < len; i++, oCast++, rCast++, mCast++)

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <arpa/inet.h>
 
 #include "director.h"
 #include "settings.h"
@@ -12,10 +13,12 @@ Receive thread data
 ***************************/
 static struct receive_thread_data intData = {
 	.dev = INT_DEV_NAME,
+	.ifaceSide = IFACE_INTERNAL,
 	.handler = direct_outbound,
 };
 static struct receive_thread_data extData = {
 	.dev = EXT_DEV_NAME,
+	.ifaceSide = IFACE_EXTERNAL,
 	.handler = direct_inbound,
 };
 
@@ -53,10 +56,15 @@ void *receive_thread(void *tData)
 {
 	struct receive_thread_data *data = (struct receive_thread_data*)tData;
 
-	int linkLayerLen = 0;
-
 	char ebuf[PCAP_ERRBUF_SIZE];
 	struct pcap_pkthdr header;
+	int linkLayerLen = 0;
+	
+	struct bpf_program fp;
+	char filter[MAX_FILTER_LEN];
+	char baseIP[INET_ADDRSTRLEN];
+	char mask[INET_ADDRSTRLEN];
+
 	struct packet_data packet;
 
 	// Activate pcap
@@ -75,6 +83,26 @@ void *receive_thread(void *tData)
 	{
 		printf("Unable to activate pcap on %s: %s\n", data->dev, pcap_geterr(pd));
 		return (void*)-2;
+	}
+
+	// Filter outbound traffic (we only want to get traffic incoming to this card)
+	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
+	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
+	snprintf(filter, sizeof(filter), "not arp and not %s net %s mask %s",
+		(data->ifaceSide == IFACE_EXTERNAL ? "src" : "dst"), baseIP, mask);
+	
+	printf("Using filter: %s\n", filter);
+    
+	if(pcap_compile(pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
+	{
+		printf("Unable to compile filter\n");
+		return (void*)-3;
+	}
+
+    if(pcap_setfilter(pd, &fp) == -1)
+	{
+		printf("Unable to set filter\n");
+		return (void*)-4;
 	}
 
 	// Cache how far to jump in packets
@@ -103,6 +131,9 @@ void *receive_thread(void *tData)
 		packet.tstamp.tv_nsec = header.ts.tv_usec * 1000;
 
 		if(parse_packet(&packet))
+			continue;
+
+		if(!packet.ipv4)
 			continue;
 
 		if(data->handler != NULL)
