@@ -97,11 +97,12 @@ void *receive_thread(void *tData)
 			continue;
 
 		packet.len = header.caplen;
-		
+		packet.linkLayerLen = linkLayerLen;
+
 		packet.tstamp.tv_sec = header.ts.tv_sec;
 		packet.tstamp.tv_nsec = header.ts.tv_usec * 1000;
 
-		if(parse_packet(linkLayerLen, &packet))
+		if(parse_packet(&packet))
 			continue;
 
 		if(data->handler != NULL)

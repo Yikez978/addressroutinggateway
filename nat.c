@@ -113,7 +113,9 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 
 	compute_packet_checksums(newPacket);
 
-	// TBD Send
+	send_packet(newPacket);
+	
+	free_packet(newPacket);
 
 	return 0;
 }
@@ -186,7 +188,9 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 
 	compute_packet_checksums(newPacket);
 
-	// TBD send
+	send_packet(newPacket);
+
+	free_packet(newPacket);
 
 	return 0;
 }

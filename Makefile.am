@@ -25,10 +25,14 @@ arg_SOURCES = uthash.h \
 
 # Default test to do whatever it is we want to do most often
 # for now, just do local test
-test : start
+testA : arg
+	sudo ./arg GateA
+
+testB : arg
+	sudo ./arg GateB
 
 # Control ARG gateways
-start : all
+start : arg
 	sudo ./arg
 
 # Start tests with/without ARG running

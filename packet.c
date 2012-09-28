@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 
 #include <arpa/inet.h> // TBD add to configure.ac
 
 #include "packet.h"
 #include "protocol.h"
 
-char parse_packet(int linkLayerLen, struct packet_data *packet)
+char parse_packet(struct packet_data *packet)
 {
 	void *transStart = NULL;
 	
@@ -15,7 +16,7 @@ char parse_packet(int linkLayerLen, struct packet_data *packet)
 	packet->tcp = NULL;
 	packet->icmp = NULL;
 	packet->arg = NULL;
-	packet->ipv4 = (struct iphdr*)(packet->data + linkLayerLen);
+	packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
 	
 	if(packet->ipv4->version == 4)
 	{
@@ -65,9 +66,10 @@ struct packet_data *copy_packet(const struct packet_data *packet)
 	}
 
 	c->len = packet->len;
+	c->linkLayerLen = packet->linkLayerLen;
 	memcpy(c->data, packet->data, c->len);
 
-	parse_packet(LINK_LAYER_SIZE, c); // TBD I'd like to make link-layer size a struct member
+	parse_packet(c);
 	return c;
 }
 
@@ -76,7 +78,9 @@ void free_packet(struct packet_data *packet)
 	if(packet != NULL)
 	{
 		if(packet->data != NULL)
+		{
 			free(packet->data);
+		}
 
 		free(packet);
 	}
@@ -84,7 +88,36 @@ void free_packet(struct packet_data *packet)
 
 void compute_packet_checksums(struct packet_data *packet)
 {
-	// TBD	
+	// TBD. May not be needed, sendto does it for us	
+}
+
+char send_packet(const struct packet_data *packet)
+{
+	static int sock = 0;
+	struct sockaddr_in dest_addr;
+	
+	if(sock <= 0)
+	{
+		sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+		if(sock < 0)
+		{
+			printf("Unable to create raw socket for sending\n");
+			return sock;
+		}
+	}
+
+	dest_addr.sin_family = AF_INET;
+	dest_addr.sin_port = htons(get_dest_port(packet));
+	dest_addr.sin_addr.s_addr = packet->ipv4->daddr;
+
+	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen,
+		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
+	{
+		printf("Send failed\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 uint16_t get_source_port(const struct packet_data *packet)

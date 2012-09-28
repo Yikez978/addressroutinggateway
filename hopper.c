@@ -306,7 +306,7 @@ void *timed_hop_thread(void *data)
 			pthread_spin_unlock(&gateInfo->lock);
 		
 			// Apply to the network card
-			set_external_ip(gateInfo->currIP);
+			//set_external_ip(gateInfo->currIP);
 		}
 		
 		usleep(1000 * gateInfo->hopInterval);

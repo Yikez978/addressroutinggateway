@@ -24,6 +24,8 @@ struct arghdr;
 typedef struct packet_data
 {
 	unsigned long len;
+	int linkLayerLen;
+
 	struct timespec tstamp;
 	
 	struct iphdr *ipv4;
@@ -35,12 +37,15 @@ typedef struct packet_data
 	uint8_t *data;
 } packet_data;
 
-char parse_packet(int linkLayerLen, struct packet_data *packet);
+char parse_packet(struct packet_data *packet);
 
+struct packet_data *create_packet(void);
 struct packet_data *copy_packet(const struct packet_data *packet);
 void free_packet(struct packet_data *packet);
 
 void compute_packet_checksums(struct packet_data *packet);
+
+char send_packet(const struct packet_data *packet);
 
 uint16_t get_source_port(const struct packet_data *packet);
 uint16_t get_dest_port(const struct packet_data *packet);

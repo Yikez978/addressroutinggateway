@@ -237,7 +237,7 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	// Ensure IPs are up-to-date and send it on its way
 	update_ips(srcGate);
 	update_ips(destGate);
-	r = send_packet(srcGate->currIP, destGate->currIP, fullData, fullLen);
+	//r = send_packet2(srcGate->currIP, destGate->currIP, fullData, fullLen); // TBD make packet
 	free(fullData);
 	return r;
 }
@@ -319,7 +319,7 @@ void free_arg_msg(struct argmsg *msg)
 	}
 }
 
-char send_packet(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen)
+char send_packet2(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen)
 {
 	// A lot of this code is taken from pkggen.c/fill_packet_ipv4()
 	/*struct socket *s = NULL;

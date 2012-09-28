@@ -1,7 +1,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#define INT_DEV_NAME "eth0"
+#define INT_DEV_NAME "eth2"
 #define EXT_DEV_NAME "eth1"
 
 // Whether or not to show accept/reject messages (and why)

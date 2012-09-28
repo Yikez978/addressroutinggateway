@@ -97,8 +97,14 @@ int main(int argc, char *argv[])
 	//sigaction (SIGHUP, &action, NULL);
 	//sigaction (SIGTERM, &action, NULL);
 	#endif
-	
-	arg_init("gate_conf.txt", "GateA");
+
+	if(argc != 2)
+	{
+		printf("Usage: %s <gate name>\n", argv[0]);
+		return 1;
+	}
+
+	arg_init("gate_conf.txt", argv[1]);
 	
 	// Run, waiting patiently
 	join_director();

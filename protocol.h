@@ -149,9 +149,6 @@ char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
 struct argmsg *create_arg_msg(uint16_t len);
 void free_arg_msg(struct argmsg *msg);
 
-// Creates and sends a packet with the given data. Only works between ARG gateways currently
-char send_packet(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen);
-
 char get_msg_type(const struct arghdr *msg);
 char is_wrapped_msg(const struct arghdr *msg);
 char is_admin_msg(const struct arghdr *msg);
