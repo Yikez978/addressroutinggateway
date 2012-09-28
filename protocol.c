@@ -69,7 +69,7 @@ char send_arg_ping(struct arg_network_info *local,
 	pthread_spin_lock(&remote->lock);
 
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
-	memmove(msg->data, &remote->proto.pingID, msg->len);
+	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
 	r = send_arg_packet(local, remote, ARG_PING_MSG, argGlobalKey, argGlobalKey, msg);
 	if(r)
@@ -229,7 +229,7 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	hdr->len = htons(fullLen);
 	
 	if(msg != NULL)
-		memmove(fullData + ARG_HDR_LEN, msg->data, msg->len);
+		memcpy(fullData + ARG_HDR_LEN, msg->data, msg->len);
 
 	if(hmacKey != NULL)
 		hmac_sha1(hmacKey, AES_KEY_SIZE, fullData, fullLen, hdr->hmac);
@@ -258,12 +258,12 @@ char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
 		return -1;
 	}
 
-	memmove(out->data, hdr, hdr->len);
+	memcpy(out->data, hdr, hdr->len);
 
 	// Check hash
 	if(hmacKey != NULL)
 	{
-		memmove(packetHmac, &hdr->hmac, sizeof(hdr->hmac));
+		memcpy(packetHmac, &hdr->hmac, sizeof(hdr->hmac));
 		
 		memset(&(((struct arghdr*)(out->data))->hmac), 0, sizeof(hdr->hmac));
 		hmac_sha1(hmacKey, AES_KEY_SIZE, out->data, out->len, computedHmac);
@@ -354,8 +354,8 @@ char send_packet(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen)
 	iph->ttl = 32;
 	iph->tos = 0;
 	iph->protocol = ARG_PROTO;
-	memmove(&iph->saddr, srcIP, sizeof(iph->saddr));
-	memmove(&iph->daddr, destIP, sizeof(iph->daddr));
+	memcpy(&iph->saddr, srcIP, sizeof(iph->saddr));
+	memcpy(&iph->daddr, destIP, sizeof(iph->daddr));
 	iph->id = 0;
 	iph->frag_off = 0;
 	iplen = fullDataLen;
@@ -363,14 +363,14 @@ char send_packet(uint8_t *srcIP, uint8_t *destIP, uint8_t *data, int dlen)
 	iph->check = 0;
 	iph->check = ip_fast_csum((void*)iph, iph->ihl);
 
-	memmove(fullData + ipv4_hdrsize, data, dlen);
+	memcpy(fullData + ipv4_hdrsize, data, dlen);
 
 	//printf("ARG: thing we want to send:");
 	//printRaw(fullDataLen, fullData);
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	memmove(&addr.sin_addr.s_addr, destIP, ADDR_SIZE);
+	memcpy(&addr.sin_addr.s_addr, destIP, ADDR_SIZE);
 	addr.sin_port = htons(ARG_ADMIN_PORT);
 
 	msg.msg_name = &addr;

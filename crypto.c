@@ -35,14 +35,14 @@ int hmac_sha1(const uint8_t *key, unsigned int klen, const uint8_t *data, unsign
 	// Steps refer to the steps under the HMAC RFC's "Definition of HMAC" section
 	// (1) Pad key. TBD this could always come in padded to allow 
 	// the copy to be skipped
-	memmove(scratchSpace, key, klen);
+	memcpy(scratchSpace, key, klen);
 	
 	// (2) XOR padded key with ipad (0x36 repeated, from RFC2104)
 	for(i = 0; i < HMAC_BLOCK_SIZE; i++)
 		scratchSpace[i] ^= 0x36;
 
 	// (3) Append data
-	memmove(scratchSpace + HMAC_BLOCK_SIZE, data, dlen);
+	memcpy(scratchSpace + HMAC_BLOCK_SIZE, data, dlen);
 
 	// (4) Hash that mess
 	SHA1Reset(&sha);
@@ -55,14 +55,14 @@ int hmac_sha1(const uint8_t *key, unsigned int klen, const uint8_t *data, unsign
 
 	// (pre-5) Redo the key padding
 	memset(scratchSpace, 0, HMAC_BLOCK_SIZE);
-	memmove(scratchSpace, key, klen);
+	memcpy(scratchSpace, key, klen);
 	
 	// (5) XOR padded key with opad (0x5C repeated, from RFC2104)
 	for(i = 0; i < HMAC_BLOCK_SIZE; i++)
 		scratchSpace[i] ^= 0x5C;
 
 	// (6) Append first hash
-	memmove(scratchSpace, sha.Message_Digest, HMAC_SIZE);
+	memcpy(scratchSpace, sha.Message_Digest, HMAC_SIZE);
 	
 	// (7) And hash again
 	SHA1Reset(&sha);
@@ -74,7 +74,7 @@ int hmac_sha1(const uint8_t *key, unsigned int klen, const uint8_t *data, unsign
 	}
 
 	// Save off
-	memmove(out, sha.Message_Digest, HMAC_SIZE);
+	memcpy(out, sha.Message_Digest, HMAC_SIZE);
 
 	// All done!
 	free(scratchSpace);

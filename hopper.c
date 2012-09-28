@@ -382,7 +382,7 @@ uint8_t *current_ip(void)
 	}
 
 	pthread_spin_lock(&ipLock);
-	memmove(ipCopy, gateInfo->currIP, ADDR_SIZE);
+	memcpy(ipCopy, gateInfo->currIP, ADDR_SIZE);
 	pthread_spin_unlock(&ipLock);
 
 	return ipCopy;
@@ -449,7 +449,7 @@ void update_ips(struct arg_network_info *gate)
 	// Copy in top part of address. baseIP has already been masked to
 	// ensure it is zeros for the portion that changes, so we only have
 	// to copy it in
-	memmove(ip, gate->baseIP, sizeof(gate->baseIP));
+	memcpy(ip, gate->baseIP, sizeof(gate->baseIP));
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
@@ -467,8 +467,8 @@ void update_ips(struct arg_network_info *gate)
 	// If we always blindly rotated, spurious updates would cause us to lose our prevIP
 	if(memcmp(ip, gate->currIP, sizeof(gate->currIP)) != 0)
 	{
-		memmove(gate->prevIP, gate->currIP, sizeof(gate->currIP));
-		memmove(gate->currIP, ip, sizeof(gate->currIP));
+		memcpy(gate->prevIP, gate->currIP, sizeof(gate->currIP));
+		memcpy(gate->currIP, ip, sizeof(gate->currIP));
 
 		// Update cache time. TBD this should probably technically be moved to update on a precise
 		// time, not just hopInterval in the future

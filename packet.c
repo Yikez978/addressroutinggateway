@@ -65,7 +65,7 @@ struct packet_data *copy_packet(const struct packet_data *packet)
 	}
 
 	c->len = packet->len;
-	memmove(c->data, packet->data, c->len);
+	memcpy(c->data, packet->data, c->len);
 
 	parse_packet(LINK_LAYER_SIZE, c); // TBD I'd like to make link-layer size a struct member
 	return c;
