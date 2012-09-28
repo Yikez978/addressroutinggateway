@@ -176,8 +176,11 @@ void direct_inbound(const struct packet_data *packet)
 		}
 		else
 		{
+			// TBD check IP
+
 			// Unwrap and drop into network, assuming everything checks out
-			// TBD, call unwrapper
+			do_arg_unwrap(packet, gate);
+
 			#ifdef DISP_RESULTS
 			printf("ARG: Inbound Accept: Unwrapped\n");
 			#endif

@@ -26,6 +26,10 @@ long time_offset(const struct timespec *begin, const struct timespec *end);
 
 // Returns the current time + the given number of milliseconds.
 // ms may be negative
+void current_time_plus(struct timespec *ts, int ms);
+
+// Returns the given time + the given number of milliseconds.
+// ms may be negative
 void time_plus(struct timespec *ts, int ms);
 
 // Mask an arbitrarily long number of bytes. Eh, whatever. It's a hack

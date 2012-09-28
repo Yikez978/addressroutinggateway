@@ -8,16 +8,13 @@
 #include "crypto.h"
 #include "packet.h"
 #include "protocol.h"
+#include "settings.h"
 
 // State bits used in arg_network_info
 #define HOP_STATE_AUTH      0x01
 #define HOP_STATE_CONNECTED 0x02
 
 #define MAX_NAME_SIZE 20
-
-#define RSA_KEY_SIZE 16
-#define AES_KEY_SIZE 16
-#define HOP_KEY_SIZE 16
 
 // Structure to hold data on associated ARG networks
 // All times here are given in jiffies for the current system, unless
@@ -28,7 +25,7 @@ typedef struct arg_network_info {
 	
 	char authenticated:1,
 		 connected:1; // Connection/admin state
-	long lastAuthTime;
+	struct timespec lastAuthTime;
 	struct proto_data proto;
 
 	// Lock
@@ -42,7 +39,7 @@ typedef struct arg_network_info {
 	// Hopping information
 	uint8_t hopKey[HOP_KEY_SIZE];
 	struct timespec timeBase;
-	long hopInterval;
+	uint32_t hopInterval;
 
 	// IP range information
 	uint8_t baseIP[ADDR_SIZE];
@@ -109,12 +106,12 @@ void update_ips(struct arg_network_info *gate);
 // and signs it.
 // Returns false if the packet is not destined for a known
 // ARG network or another error occurs during processing
-char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate);
+char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate);
 
 // Unwraps the given packet.
 // Returns false if the signature fails to match or another error
 // occurs during processing
-//char do_arg_unwrap(struct packet_data *packet, struct arg_network_info *gate);
+char do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate);
 
 // Returns pointer to the ARG network the give IP belongs to
 struct arg_network_info *get_arg_network(void const *ip);

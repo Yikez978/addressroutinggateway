@@ -92,6 +92,9 @@ long current_time_offset(const struct timespec *begin)
 {
 	struct timespec end;
 	current_time(&end);
+
+	//printf("CURRENT TIME: %lu : %lu\n  BEGIN TIME %lu : %lu\n", end.tv_sec, end.tv_nsec, begin->tv_sec, begin->tv_nsec);
+
 	return time_offset(begin, &end);
 }
 
@@ -111,6 +114,12 @@ long time_offset(const struct timespec *begin, const struct timespec *end)
 	}
 
 	return diff;
+}
+
+void current_time_plus(struct timespec *ts, int ms)
+{
+	current_time(ts);
+	time_plus(ts, ms);
 }
 
 void time_plus(struct timespec *ts, int ms)

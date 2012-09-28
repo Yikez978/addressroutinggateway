@@ -6,6 +6,7 @@
 #include "utility.h"
 #include "crypto.h"
 #include "packet.h"
+#include "settings.h"
 
 struct arg_network_info;
 
@@ -83,6 +84,13 @@ typedef struct arghdr {
 	uint8_t hmac[HMAC_SIZE];
 } arghdr;
 
+typedef struct arg_conn_data {
+	uint8_t symKey[AES_KEY_SIZE];
+	uint8_t hopKey[AES_KEY_SIZE];
+	uint32_t hopInterval;
+	uint32_t timeOffset;
+} arg_conn_data;
+
 typedef struct argmsg {
 	uint16_t len;
 
@@ -94,7 +102,7 @@ typedef struct argmsg {
 #define ARG_DO_AUTH 0x01
 #define ARG_DO_PING ARG_DO_AUTH
 #define ARG_DO_TIME 0x04
-#define ARG_DO_CONN 0x08
+#define ARG_DO_CONN ARG_DO_TIME
 
 typedef struct proto_data {
 	char state; // Records actions that need to occur
@@ -130,8 +138,17 @@ char send_arg_conn_req(struct arg_network_info *local,
 char process_arg_conn_req(struct arg_network_info *local,
 						  struct arg_network_info *remote,
 						  const struct packet_data *packet);
-char process_arg_conn_resp(struct arg_network_info *remote,
+char process_arg_conn_resp(struct arg_network_info *local,
+						   struct arg_network_info *remote,
 						   const struct packet_data *packet);
+
+// Encapsulation
+char send_arg_wrapped(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const struct packet_data *packet);
+char process_arg_wrapped(struct arg_network_info *local,
+						 struct arg_network_info *remote,
+						 const struct packet_data *packet);
 
 // Creates the ARG header for the given data and sends it
 char send_arg_packet(struct arg_network_info *srcGate,

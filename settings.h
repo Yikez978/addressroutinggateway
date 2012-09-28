@@ -25,6 +25,9 @@
 #define MAX_PACKET_SIZE 65536
 
 #define MAX_CONF_LINE 200
+#define RSA_KEY_SIZE 16
+#define AES_KEY_SIZE 16
+#define HOP_KEY_SIZE 16
 
 #endif
 

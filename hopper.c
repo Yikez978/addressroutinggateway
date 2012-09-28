@@ -436,7 +436,7 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 		break;
 
 	case ARG_CONN_RESP_MSG:
-		process_arg_conn_resp(gateInfo, packet);
+		process_arg_conn_resp(gateInfo, srcGate, packet);
 		break;
 
 	default:
@@ -543,18 +543,14 @@ void set_external_ip(uint8_t *addr)
 	#undef IRFFLAGS		
 }
 
-char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *gate)
+char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate)
 {
-	// TBD wrap/end
-	//send_arg_packet(gateInfo, gate, ARG_WRAPPED_MSG, skb->data, skb->data_len);
-
-	return 0;
+	return send_arg_wrapped(gateInfo, destGate, packet);
 }
 
-char do_arg_unwrap(const struct packet_data *packet, struct arghdr *argh)
+char do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate)
 {
-	// TBD unwrap/send
-	return 0;
+	return process_arg_wrapped(gateInfo, srcGate, packet);
 }
 
 struct arg_network_info *get_arg_network(void const *ip)
