@@ -37,7 +37,6 @@ void init_hopper_locks(void)
 char init_hopper(char *conf, char *name)
 {
 	int ret;
-	char test[] = "rsa_encrypt";
 
 	printf("ARG: Hopper init\n");
 
@@ -218,11 +217,6 @@ char get_hopper_conf(char *confPath, char *gateName)
 		}
 
 		currNet->rsa.len = ( mpi_msb( &currNet->rsa.N ) + 7 ) >> 3;
-
-		printf("RSA (%i) N: ", currNet->rsa.len);
-		mpi_write_file(NULL, &currNet->rsa.N, 16, NULL);
-		printf("RSA E: ");
-		mpi_write_file(NULL, &currNet->rsa.E, 16, NULL);
 	}
 
 	fclose(confFile);

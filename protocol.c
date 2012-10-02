@@ -550,8 +550,10 @@ char send_arg_packet(struct arg_network_info *srcGate,
 					 int type,
 					 const struct argmsg *msg)
 {
+	int ret;
 	struct packet_data *packet = NULL;
 	uint16_t fullLen = 0;
+	uint8_t hash[SHA1_HASH_SIZE];
 
 	// Create packet we will build within, giving it plenty of extra space (encryption padding and such)
 	fullLen = 20 + ARG_HDR_LEN;
@@ -617,14 +619,23 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
 	packet->ipv4->tot_len = htons(packet->len);
 
-	//if(hmacKey != NULL)
-	//	hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)packet->arg, ntohs(packet->arg->len), packet->arg->hmac);
+	// Sign
+	sha1((uint8_t*)packet->arg, ntohs(packet->arg->len), hash);
+	//printf("Sig");
+	//printRaw(sizeof(hash), hash);
+	if((ret = rsa_pkcs1_sign(&srcGate->rsa, NULL, NULL, RSA_PRIVATE, SIG_RSA_SHA1,
+		sizeof(hash), hash, packet->arg->sig)) != 0)
+	{
+		printf("Unable to sign, error %i\n", ret);
+		free_packet(packet);
+		return -3;
+	}
 	
 	// Send!
-	printf("Msg ");
-	printRaw(msg->len, msg->data);
-	printf("Sending ");
-	printRaw(packet->len, packet->data);
+	//printf("Msg ");
+	//printRaw(msg->len, msg->data);
+	//printf("Sending ");
+	//printRaw(packet->len, packet->data);
 	if(send_packet(packet) < 0)
 	{
 		printf("Failed to send ARG packet\n");
@@ -644,6 +655,8 @@ char process_arg_packet(struct arg_network_info *local,
 	int ret;
 	size_t len;
 
+	uint8_t hash[SHA1_HASH_SIZE];
+
 	struct packet_data *newPacket = NULL;
 	struct argmsg *out = NULL;
 
@@ -658,22 +671,19 @@ char process_arg_packet(struct arg_network_info *local,
 		return -1;
 	}
 
-	// Check hash
-	/*if(hmacKey != NULL)
+	// Check signature
+	memset(newPacket->arg->sig, 0, sizeof(newPacket->arg->sig));
+	sha1((uint8_t*)newPacket->arg, ntohs(newPacket->arg->len), hash);
+	if((ret = rsa_pkcs1_verify(&remote->rsa, RSA_PUBLIC, SIG_RSA_SHA1,
+		sizeof(hash), hash, packet->arg->sig)) != 0 )
 	{
-		memset(newPacket->arg->hmac, 0, sizeof(newPacket->arg->hmac));
-		hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)newPacket->arg, ntohs(newPacket->arg->len), newPacket->arg->hmac);
-		
-		if(memcmp(packet->arg->hmac, newPacket->arg->hmac, sizeof(packet->arg->hmac)) != 0)
-		{
-			printf("ARG: Received packet did not have a matching HMAC\n");
-			free_packet(newPacket);
-			return -2;
-		}
-	}*/
-	
-	printf("Received ");
-	printRaw(packet->len, packet->data);
+		printf("Unable to verify signature, error %i\n", ret);
+		free_packet(newPacket);
+		return -3;
+	}
+
+	//printf("Received ");
+	//printRaw(packet->len, packet->data);
 	
 	// Decrypt
 	if(newPacket->arg->len > ARG_HDR_LEN)
@@ -695,8 +705,6 @@ char process_arg_packet(struct arg_network_info *local,
 		else
 		{
 			// Decrypt with local private key
-			printRaw(out->len, newPacket->unknown_data);
-
 			if((ret = rsa_pkcs1_decrypt(&local->rsa, RSA_PRIVATE, &len,
 				newPacket->unknown_data, out->data, out->len)) != 0)
 			{
@@ -709,8 +717,8 @@ char process_arg_packet(struct arg_network_info *local,
 			out->len = len;
 		}
 		
-		printf("msg from packet");
-		printRaw(out->len, out->data);
+		//printf("msg from packet");
+		//printRaw(out->len, out->data);
 		
 		*msg = out;
 	}

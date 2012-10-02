@@ -90,7 +90,7 @@ typedef struct arghdr {
 	uint16_t len; // Size in bytes from version to end of data
 	uint32_t seq; // Sequence number, monotonically increasing
 
-	uint8_t hmac[HMAC_SIZE];
+	uint8_t sig[RSA_SIG_SIZE];
 } arghdr;
 
 typedef struct arg_conn_data {
