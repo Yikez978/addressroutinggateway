@@ -24,6 +24,10 @@ AC_CHECK_HEADERS([pcap.h])
 # pthread
 AC_CHECK_LIB([pthread], [main])
 
+# PolarSSL (AES/RSA)
+AC_CHECK_LIB([polarssl], [main])
+AC_CHECK_HEADERS([polarssl/config.h])
+
 # Optional: Capture signals (SIGTERM, etc) and handle cleanly
 AC_CHECK_HEADERS([signal.h])
 

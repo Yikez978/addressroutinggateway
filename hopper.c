@@ -36,6 +36,9 @@ void init_hopper_locks(void)
 
 char init_hopper(char *conf, char *name)
 {
+	int ret;
+	char test[] = "rsa_encrypt";
+
 	printf("ARG: Hopper init\n");
 
 	pthread_spin_lock(&networksLock);
@@ -51,6 +54,18 @@ char init_hopper(char *conf, char *name)
 		uninit_hopper();
 
 		return -1;
+	}
+
+	entropy_init(&gateInfo->entropy);
+	if((ret = ctr_drbg_init( &gateInfo->ctr_drbg, entropy_func, &gateInfo->entropy, NULL, 0)) != 0)
+	{
+		printf( "Unable to initialize entropy pool, error %d\n", ret);
+		
+		pthread_spin_unlock(&ipLock);
+		pthread_spin_unlock(&networksLock);
+		uninit_hopper();
+
+		return -2;
 	}
 
 	pthread_spin_unlock(&ipLock);
@@ -122,8 +137,14 @@ void uninit_hopper(void)
 
 char get_hopper_conf(char *confPath, char *gateName)
 {
+	int ret = 0;
+
 	FILE *confFile = NULL;
 	char line[MAX_CONF_LINE+1];
+	
+	char *dirPathEnd;
+	FILE *privKeyFile = NULL;
+	char privKeyPath[MAX_NAME_SIZE + 100] = "";
 
 	struct arg_network_info *currNet = NULL;
 	struct arg_network_info *prevNet = NULL;
@@ -186,9 +207,26 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 		// Fix base ip by masking (just in case)
 		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
+		
+		// Read in public key
+		if((ret = mpi_read_file( &currNet->rsa.N, 16, confFile)) != 0 ||
+			(ret = mpi_read_file( &currNet->rsa.E, 16, confFile)) != 0 )
+		{
+			printf("Unable to read in public key for %s (returned %i)\n", currNet->name, ret);
+			remove_arg_network(currNet);
+			break;
+		}
+
+		currNet->rsa.len = ( mpi_msb( &currNet->rsa.N ) + 7 ) >> 3;
+
+		printf("RSA (%i) N: ", currNet->rsa.len);
+		mpi_write_file(NULL, &currNet->rsa.N, 16, NULL);
+		printf("RSA E: ");
+		mpi_write_file(NULL, &currNet->rsa.E, 16, NULL);
 	}
 
 	fclose(confFile);
+	confFile = NULL;
 
 	// Which one is our head? Find it, move to beginning, and rearrange
 	// all relevant pointers.
@@ -233,6 +271,48 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	printf("ARG: Configured as %s\n", gateInfo->name);
 
+	// Private key. Must be named the same as our gate
+	dirPathEnd = strrchr(confPath, '/');
+	if(dirPathEnd == NULL)
+		dirPathEnd = strrchr(confPath, '\\');
+	if(dirPathEnd != NULL)
+		strncpy(privKeyPath, confPath, dirPathEnd - confPath + 1);
+	
+	strncpy(privKeyPath + strlen(privKeyPath), gateInfo->name, MAX_NAME_SIZE);
+	strcpy(privKeyPath + strlen(privKeyPath), ".priv");	
+
+	printf("Private key expected at at %s\n", privKeyPath);
+	
+	privKeyFile = fopen(privKeyPath, "r");
+	if(privKeyFile == NULL)
+	{
+		printf("Unable to open private key file at %s\n", confPath);
+		return -5;
+	}
+
+	if( ( ret = mpi_read_file( &gateInfo->rsa.N , 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.E , 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.D , 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.P , 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.Q , 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.DP, 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.DQ, 16, privKeyFile ) ) != 0 ||
+		( ret = mpi_read_file( &gateInfo->rsa.QP, 16, privKeyFile ) ) != 0 )
+	{
+		printf("Failed to load private key for ourselves (error %i)\n", ret);
+		fclose(privKeyFile);
+		return -5;
+	}
+
+	fclose(privKeyFile);
+	privKeyFile = NULL;
+
+	if((ret = rsa_check_privkey(&gateInfo->rsa)) != 0)
+	{
+		printf("Private key check failed, error %i\n", ret);
+		return -5;
+	}
+
 	// Hop and symmetric key
 	printf("ARG: Generating hop and symmetric encryption keys\n");
 	get_random_bytes(gateInfo->hopKey, sizeof(gateInfo->hopKey));
@@ -273,13 +353,9 @@ void *connect_thread(void *data)
 		while(gate != NULL)
 		{
 			if(!gate->connected)
-			{
-				printf("ARG: Attempting to connect to gateway at ");
-				printIP(sizeof(gate->baseIP), gate->baseIP);
-				printf("\n");
-
 				start_connection(gateInfo, gate);
-			}	
+			else
+				do_next_action(gateInfo, gate);
 
 			// Next
 			gate = gate->next;
@@ -299,15 +375,15 @@ void *timed_hop_thread(void *data)
 
 	for(;;)
 	{
-		if(hoppingEnabled)
+		if(0 && hoppingEnabled)
 		{
-			printf("ARG: Updating local IPs\n");
-
+			printf("ARG: Updating local IPs: ");
 			
 			pthread_spin_lock(&gateInfo->lock);
 			update_ips(gateInfo);
 			pthread_spin_unlock(&gateInfo->lock);
 		
+
 			// Apply to the network card
 			//set_external_ip(gateInfo->currIP);
 		}
@@ -334,9 +410,10 @@ struct arg_network_info *create_arg_network_info(void)
 	// Clear it all out
 	memset(newInfo, 0, sizeof(struct arg_network_info));
 	
-	// Init lock
+	// Init things that need it
 	pthread_spin_init(&newInfo->lock, PTHREAD_PROCESS_SHARED);
-	
+	rsa_init(&newInfo->rsa, RSA_PKCS_V15, 0);
+
 	return newInfo;
 }
 
@@ -350,6 +427,9 @@ struct arg_network_info *remove_arg_network(struct arg_network_info *network)
 	
 	if(network->prev != NULL)
 		network->prev->next = network->next;
+
+	//pthread_spin_destroy(&network->lock);
+	rsa_free(&network->rsa);
 
 	// Free us
 	free(network);
@@ -391,23 +471,31 @@ uint8_t *current_ip(void)
 	return ipCopy;
 }
 
-char is_current_ip(uint8_t const *ip)
+char is_valid_local_ip(const uint8_t *ip)
+{
+	return is_valid_ip(gateInfo, ip);
+}
+
+char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 {
 	char ret = 0;
 
-	pthread_spin_lock(&gateInfo->lock);
-	
-	if(memcmp(ip, gateInfo->currIP, ADDR_SIZE) == 0)
+	pthread_spin_lock(&gate->lock);
+
+	update_ips(gate);
+
+	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
 		ret = 1;
-	else if(memcmp(ip, gateInfo->prevIP, ADDR_SIZE) == 0)
+	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
 		ret = 1;
 	else
 		ret = 0;
 	
-	pthread_spin_unlock(&gateInfo->lock);
+	pthread_spin_unlock(&gate->lock);
 
 	return ret;
 }
+
 
 const uint8_t *gate_base_ip(void)
 {
@@ -455,8 +543,14 @@ void update_ips(struct arg_network_info *gate)
 	int minLen = 0;
 	uint8_t ip[sizeof(gate->currIP)];
 
+	struct timespec currTime;
+	current_time(&currTime);
+	
+	/*if(gate->hopInterval != 0)
+		printf("We believe the time offset for %s is %li (base %lu, curr %lu). At step %li\n", gate->name, time_offset(&gate->timeBase, &currTime), gate->timeBase.tv_sec, currTime.tv_sec, time_offset(&gate->timeBase, &currTime) / gate->hopInterval);*/
+
 	// Is the cache out of date? If not, do nothing
-	if(current_time_offset(&gate->ipCacheExpiration) < gate->hopInterval)
+	if(time_offset(&gate->ipCacheExpiration, &currTime) < gate->hopInterval)
 		return;
 
 	// Copy in top part of address. baseIP has already been masked to
@@ -466,7 +560,7 @@ void update_ips(struct arg_network_info *gate)
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
-	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, current_time_offset(&gate->timeBase)); 
+	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, time_offset(&gate->timeBase, &currTime)); 
 
 	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
 	for(i = 0; i < minLen; i++)

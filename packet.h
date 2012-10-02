@@ -44,7 +44,9 @@ typedef struct packet_data
 	struct udphdr *udp;
 	struct icmphdr *icmp;
 	struct arghdr *arg;
-	
+
+	uint8_t *unknown_data; // Pointer to first part of data we didn't parse
+
 	uint8_t *data;
 } packet_data;
 

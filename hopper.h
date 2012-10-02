@@ -3,6 +3,11 @@
 
 #include <pthread.h>
 
+#include <polarssl/config.h>
+#include <polarssl/rsa.h>
+#include <polarssl/entropy.h>
+#include <polarssl/ctr_drbg.h>
+
 #include "utility.h"
 #include "uthash.h"
 #include "crypto.h"
@@ -31,10 +36,12 @@ typedef struct arg_network_info {
 	// Lock
 	pthread_spinlock_t lock;
 
-	// Encryption keys
-	uint8_t privKey[RSA_KEY_SIZE];
-	uint8_t pubKey[RSA_KEY_SIZE];
+	// Encryption keys and parameters
 	uint8_t symKey[AES_KEY_SIZE];
+
+	rsa_context rsa;
+	entropy_context entropy;
+	ctr_drbg_context ctr_drbg;
 
 	// Hopping information
 	uint8_t hopKey[HOP_KEY_SIZE];
@@ -87,7 +94,8 @@ void add_network(void);
 uint8_t *current_ip(void);
 
 // Returns true if the given IP is valid, false otherwise
-char is_current_ip(uint8_t const *ip);
+char is_valid_local_ip(const uint8_t *ip);
+char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
 
 // Returns configuration information
 const uint8_t *gate_base_ip(void);

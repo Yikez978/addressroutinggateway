@@ -62,24 +62,33 @@ struct arg_network_info;
 #define ARG_ADMIN_PORT 7654
 #define ARG_PROTO 253
 
-#define ARG_WRAPPED_MSG 0
+enum {
+	ARG_WRAPPED_MSG,
+	
+	// Authenticating
+	ARG_GATE_HELLO_MSG,
+	ARG_GATE_WELCOME_MSG,
+	ARG_GATE_VERIFIED_MSG,
 
-#define ARG_PING_MSG 1
-#define ARG_PONG_MSG 2
+	// Lag
+	ARG_PING_MSG,
+	ARG_PONG_MSG,
 
-#define ARG_AUTH_REQ_MSG ARG_PING_MSG
-#define ARG_AUTH_RESP_MSG ARG_PONG_MSG
+	// Connection data
+	//ARG_AUTH_REQ_MSG
+	//ARG_AUTH_RESP_MSG,
+	ARG_CONN_REQ_MSG,
+	ARG_CONN_RESP_MSG,
 
-#define ARG_CONN_REQ_MSG 5
-#define ARG_CONN_RESP_MSG 6
-
-#define ARG_TIME_REQ_MSG 7
-#define ARG_TIME_RESP_MSG 8
+	ARG_TIME_REQ_MSG,
+	ARG_TIME_RESP_MSG,
+};
 
 typedef struct arghdr {
 	uint8_t version;
 	uint8_t type;
 	uint16_t len; // Size in bytes from version to end of data
+	uint32_t seq; // Sequence number, monotonically increasing
 
 	uint8_t hmac[HMAC_SIZE];
 } arghdr;
@@ -91,6 +100,11 @@ typedef struct arg_conn_data {
 	uint32_t timeOffset;
 } arg_conn_data;
 
+typedef struct arg_welcome {
+	uint32_t id1;
+	uint32_t id2;
+} arg_welcome;
+
 typedef struct argmsg {
 	uint16_t len;
 
@@ -98,6 +112,8 @@ typedef struct argmsg {
 } argmsg;
 
 #define ARG_HDR_LEN sizeof(struct arghdr)
+
+#define ARG_GATE_HELLO 0x01
 
 #define ARG_DO_AUTH 0x01
 #define ARG_DO_PING ARG_DO_AUTH
@@ -107,10 +123,16 @@ typedef struct argmsg {
 typedef struct proto_data {
 	char state; // Records actions that need to occur
 
+	uint32_t inSeqNum; // Last sequence number we received from them
+	uint32_t outSeqNum; // Last sequence number we sent
 	long latency; // One-way latency in ms
 	
 	struct timespec pingSentTime;
 	uint32_t pingID;
+
+	uint32_t myID;
+	uint32_t theirID;
+	uint32_t theirPendingID;
 } proto_data;
 
 void init_protocol_locks(void);
@@ -121,6 +143,18 @@ char start_time_sync(struct arg_network_info *local, struct arg_network_info *re
 char start_connection(struct arg_network_info *local, struct arg_network_info *remote);
 
 char do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
+
+// Authentication
+char send_arg_hello(struct arg_network_info *local,
+						struct arg_network_info *remote);
+char process_arg_hello(struct arg_network_info *local,
+						   struct arg_network_info *remote,
+						   const struct packet_data *packet);
+char process_arg_verified(struct arg_network_info *local,
+						   struct arg_network_info *remote,
+						   const struct packet_data *packet);
+
+
 
 // Lag detection
 char send_arg_ping(struct arg_network_info *local,
@@ -154,13 +188,12 @@ char process_arg_wrapped(struct arg_network_info *local,
 char send_arg_packet(struct arg_network_info *srcGate,
 					 struct arg_network_info *destGate,
 					 int type,
-					 const uint8_t *hmacKey,
-					 const uint8_t *encKey,
 					 const struct argmsg *msg);
 
 // Validates the packet data (from ARG header on) and decrypts it.
 // New space is allocated and placed into out, which must be freed via free_arg_packet()
-char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
+char process_arg_packet(struct arg_network_info *local,
+						struct arg_network_info *remote,
 						const struct packet_data *packet,
 						struct argmsg **msg);
 struct argmsg *create_arg_msg(uint16_t len);

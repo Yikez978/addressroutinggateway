@@ -29,7 +29,7 @@ char parse_packet(struct packet_data *packet)
 		else if(ntohs(packet->eth->type) == 0x86DD)
 			printf("IPv6, sad day\n");
 	
-		// Probably ARP or something else
+		packet->unknown_data = packet->data + sizeof(struct ethhdr);
 	}
 	else
 	{
@@ -46,13 +46,27 @@ char parse_packet(struct packet_data *packet)
 		transStart = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl*4);
 
 		if(packet->ipv4->protocol == ARG_PROTO)
+		{
 			packet->arg = (struct arghdr*)transStart;
+			packet->unknown_data = (uint8_t*)transStart + sizeof(struct arghdr);
+		}
 		else if(packet->ipv4->protocol == TCP_PROTO)
+		{
 			packet->tcp = (struct tcphdr*)transStart;
+			packet->unknown_data = (uint8_t*)transStart + sizeof(struct tcphdr);
+		}
 		else if(packet->ipv4->protocol == UDP_PROTO)
+		{
 			packet->udp = (struct udphdr*)transStart;
+			packet->unknown_data = (uint8_t*)transStart + sizeof(struct udphdr);
+		}
 		else if(packet->ipv4->protocol == ICMP_PROTO)
+		{
 			packet->icmp = (struct icmphdr*)transStart;
+			packet->unknown_data = (uint8_t*)transStart + sizeof(struct icmphdr);
+		}
+		else
+			packet->unknown_data = (uint8_t*)transStart;
 	}
 
 	return 0;

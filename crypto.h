@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#include "polarssl/config.h"	
+#include "polarssl/rsa.h"
+#include "polarssl/sha1.h"
+
 #define HMAC_SIZE 20
 #define HMAC_BLOCK_SIZE 64
 

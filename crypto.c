@@ -120,21 +120,7 @@ uint32_t totp(const uint8_t *key, unsigned int klen, unsigned long step, unsigne
 void aes_encrypt(const uint8_t *key, int klen, const uint8_t *data, int dlen, uint8_t *out, int *outlen)
 {
 	// TBD encrypt
-	/*struct cryto_cipher *tfm;
-
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
-	if(IS_ERR(tfm))
-	{
-		printf("ARG: Unable to allocate cipher for AES encryption\n");
-		return;
-	}
-
-	crypto_cipher_setkey(tfm, key, klen);
-
-	crypto_cipher_encrypt_one(tfm, b, b_0);
- 
-
-	crypto_free_cipher(tfm);*/
+	
 }
 
 void aes_decrypt(uint8_t *data, int dlen, uint8_t *out, int *outlen)

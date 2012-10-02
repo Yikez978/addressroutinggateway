@@ -23,17 +23,24 @@ arg_SOURCES = uthash.h \
 	director.c \
 	init.c
 
+arg-local : stop
+
 # Default test to do whatever it is we want to do most often
 # for now, just do local test
-testA : arg
-	sudo ./arg GateA
+testA : stop arg
+	sudo ./arg conf/arg.conf GateA
 
-testB : arg
-	sudo ./arg GateB
+testB : stop arg
+	sudo ./arg conf/arg.conf GateB
+
+test : start
 
 # Control ARG gateways
 start : arg
 	sudo ./arg
+
+stop : 
+	-killall arg
 
 # Start tests with/without ARG running
 test-arg-on : start

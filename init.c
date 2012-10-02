@@ -98,13 +98,13 @@ int main(int argc, char *argv[])
 	//sigaction (SIGTERM, &action, NULL);
 	#endif
 
-	if(argc != 2)
+	if(argc != 3)
 	{
-		printf("Usage: %s <gate name>\n", argv[0]);
+		printf("Usage: %s <conf path> <gate name>\n", argv[0]);
 		return 1;
 	}
 
-	arg_init("gate_conf.txt", argv[1]);
+	arg_init(argv[1], argv[2]);
 	
 	// Run, waiting patiently
 	join_director();

@@ -49,6 +49,183 @@ char do_next_action(struct arg_network_info *local, struct arg_network_info *rem
 		return 0;
 }
 
+char send_arg_hello(struct arg_network_info *local,
+				   struct arg_network_info *remote)
+{
+	struct argmsg *msg = NULL;
+	
+	printf("ARG: Sending ping to %s\n", remote->name);
+
+	msg = create_arg_msg(sizeof(remote->proto.myID));
+	if(msg == NULL)
+	{
+		printf("Unable to allocate space to send gateway hello\n");
+		return -1;
+	}
+
+	pthread_spin_lock(&remote->lock);
+
+	// Every gateway we talk to gets a unique identifier from us. (they'll also have a unique incoming one)
+	if(remote->proto.myID == 0)
+		get_random_bytes(&remote->proto.myID, sizeof(remote->proto.myID));
+	memcpy(msg->data, &remote->proto.myID, msg->len);
+
+	if(send_arg_packet(local, remote, ARG_GATE_HELLO_MSG, msg) < 0)
+		printf("Failed to send ARG gateway hello\n");
+
+	pthread_spin_unlock(&remote->lock);
+	
+	free_arg_msg(msg);
+	
+	return 0;
+}
+
+char process_arg_hello(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const struct packet_data *packet)
+{
+	char status = 0;
+	struct argmsg *inMsg = NULL;
+	struct argmsg *outMsg = NULL;
+	struct arg_welcome *welcome = NULL;
+
+	printf("ARG: Received gateway hello from %s\n", remote->name);
+	
+	if(process_arg_packet(local, remote, packet, &inMsg))
+	{
+		printf("Stopping hello processing\n");
+		return -1;
+	}
+
+	if(inMsg->len != sizeof(remote->proto.theirID))
+	{
+		printf("ARG: Not sending welcome, packet not correct length\n");
+		free_arg_msg(inMsg);
+		return -2;
+	}
+
+	// Pull out their ID. We don't accept it yet, they have to verify it with
+	// a corresponding verification of OUR id
+	remote->proto.theirPendingID = *((uint32_t*)inMsg);
+	free_arg_msg(inMsg);
+	inMsg = NULL;
+
+	outMsg = create_arg_msg(sizeof(remote->proto.myID));
+	if(outMsg == NULL)
+	{
+		printf("Unable to allocate space to send gateway hello\n");
+		return -1;
+	}
+
+	// Send back both their and our IDs
+	if(remote->proto.myID == 0)
+		get_random_bytes(&remote->proto.myID, sizeof(remote->proto.myID));
+
+	welcome = (struct arg_welcome*)outMsg->data;
+	welcome->id1 = remote->proto.theirPendingID;
+	welcome->id2 = remote->proto.myID;
+
+	if(send_arg_packet(local, remote, ARG_GATE_WELCOME_MSG, outMsg) < 0)
+		printf("Failed to send ARG gateway welcome\n");
+	
+	free_arg_msg(outMsg);
+	return status;
+}
+
+
+char process_arg_welcome(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const struct packet_data *packet)
+{
+	char status = 0;
+	struct argmsg *inMsg = NULL;
+	struct argmsg *outMsg = NULL;
+	struct arg_welcome *welcome = NULL;
+
+	printf("ARG: Received gateway welcome from %s\n", remote->name);
+	
+	if(process_arg_packet(local, remote, packet, &inMsg))
+	{
+		printf("Stopping welcome processing\n");
+		return -1;
+	}
+
+	if(inMsg->len != sizeof(struct arg_welcome))
+	{
+		printf("Not sending verification, welcome improperly sized\n");
+		free_arg_msg(inMsg);
+		return -2;
+	}
+
+	welcome = (struct arg_welcome*)inMsg->data;
+
+	free_arg_msg(inMsg);
+	return status;
+}
+
+char process_arg_verified(struct arg_network_info *local,
+					  struct arg_network_info *remote,
+					  const struct packet_data *packet)
+{
+	char status = 0;
+	struct argmsg *msg = NULL;
+	uint32_t *id = 0;
+	
+	printf("ARG: Received pong from %s\n", remote->name);
+	
+	if(process_arg_packet(local, remote, packet, &msg))
+	{
+		printf("ARG: Stopping pong processing\n");
+		return -1;
+	}
+
+	if(msg->data == NULL || msg->len != sizeof(remote->proto.pingID))
+	{
+		printf("ARG: Not accepting pong, data not a proper ping ID\n");
+		free_arg_msg(msg);
+		return -2;
+	}
+
+	pthread_spin_lock(&remote->lock);
+
+	if(remote->proto.pingID != 0)
+	{
+		id = (uint32_t*)(msg->data);
+
+		if(remote->proto.pingID == *id)
+		{
+			// TBD skip/try again with huge latency changes?
+			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
+			remote->authenticated = 1;
+			status = 0;
+			printf("ARG: Latency to %s: %li ms\n", remote->name, remote->proto.latency);
+		}
+		else
+		{
+			// We sent one, but the ID was incorrect. The remote gateway
+			// had the wrong ID or it did not have the correct global key
+			// Either way, we don't trust them now
+			printf("ARG: The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
+			remote->authenticated = 0;
+			status = 0;
+		}
+	}
+	else
+	{
+		printf("ARG: Not accepting pong, no ping sent\n");
+		status = -3;
+	}
+	
+	pthread_spin_unlock(&remote->lock);
+	
+	free_arg_msg(msg);
+	
+	// All done with a ping/auth
+	remote->proto.state &= ~ARG_DO_AUTH;
+	do_next_action(local, remote);
+	
+	return status;
+}
 char send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote)
 {
@@ -68,7 +245,7 @@ char send_arg_ping(struct arg_network_info *local,
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
-	if(send_arg_packet(local, remote, ARG_PING_MSG, argGlobalKey, argGlobalKey, msg) == 0)
+	if(send_arg_packet(local, remote, ARG_PING_MSG, msg) == 0)
 		current_time(&remote->proto.pingSentTime);
 	else
 		printf("Failed to send ARG ping\n");
@@ -87,7 +264,7 @@ char process_arg_ping(struct arg_network_info *local,
 
 	printf("ARG: Received ping from %s\n", remote->name);
 	
-	if(process_arg_packet(argGlobalKey, argGlobalKey, packet, &msg))
+	if(process_arg_packet(local, remote, packet, &msg))
 	{
 		printf("ARG: Stopping pong processing\n");
 		return -1;
@@ -96,7 +273,7 @@ char process_arg_ping(struct arg_network_info *local,
 	if(msg->len == sizeof(remote->proto.pingID))
 	{
 		// Echo back their data
-		status = send_arg_packet(local, remote, ARG_PONG_MSG, argGlobalKey, argGlobalKey, msg);
+		status = send_arg_packet(local, remote, ARG_PONG_MSG, msg);
 	}
 	else
 	{
@@ -118,7 +295,7 @@ char process_arg_pong(struct arg_network_info *local,
 	
 	printf("ARG: Received pong from %s\n", remote->name);
 	
-	if(process_arg_packet(argGlobalKey, argGlobalKey, packet, &msg))
+	if(process_arg_packet(local, remote, packet, &msg))
 	{
 		printf("ARG: Stopping pong processing\n");
 		return -1;
@@ -179,8 +356,8 @@ char send_arg_conn_req(struct arg_network_info *local,
 	// Make sure this gateway is authenticated
 	if(!remote->authenticated)
 	{
-		printf("Refusing to send connection request, %s is not authenticated\n", remote->name);
-		return -1;
+		printf("Authenticating %s before sending connection request\n", remote->name);
+		return start_connection(local, remote);
 	}
 
 	printf("ARG: Sending connect request to %s\n", remote->name);
@@ -188,7 +365,7 @@ char send_arg_conn_req(struct arg_network_info *local,
 	pthread_spin_lock(&remote->lock);
 
 	// Send
-	if(send_arg_packet(local, remote, ARG_CONN_REQ_MSG, argGlobalKey, argGlobalKey, NULL) == 0)
+	if(send_arg_packet(local, remote, ARG_CONN_REQ_MSG, NULL) == 0)
 		current_time(&remote->proto.pingSentTime);
 	else
 		printf("Failed to send ARG connection request\n");
@@ -208,8 +385,8 @@ char process_arg_conn_req(struct arg_network_info *local,
 	// Make sure this gateway is authenticated
 	if(!remote->authenticated)
 	{
-		printf("Refusing to send connection data, %s is not authenticated\n", remote->name);
-		return -1;
+		printf("Authenticating %s before sending connection data\n", remote->name);
+		return start_auth(local, remote);
 	}
 
 	printf("ARG: Sending connect information to %s\n", remote->name);
@@ -231,7 +408,7 @@ char process_arg_conn_req(struct arg_network_info *local,
 	pthread_spin_lock(&remote->lock);
 
 	// Send
-	if(send_arg_packet(local, remote, ARG_CONN_RESP_MSG, argGlobalKey, argGlobalKey, msg) == 0)
+	if(send_arg_packet(local, remote, ARG_CONN_RESP_MSG, msg) == 0)
 		current_time(&remote->proto.pingSentTime);
 	else
 		printf("Failed to send ARG connection data\n");
@@ -257,10 +434,10 @@ char process_arg_conn_resp(struct arg_network_info *local,
 	if(!remote->authenticated)
 	{
 		printf("Refusing to accept connection request, %s is not authenticated\n", remote->name);
-		return -1;
+		return start_connection(local, remote);
 	}
 	
-	if(process_arg_packet(argGlobalKey, argGlobalKey, packet, &msg))
+	if(process_arg_packet(local, remote, packet, &msg))
 	{
 		printf("ARG: Stopping connection data processing\n");
 		return -1;
@@ -307,7 +484,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 
 	pthread_spin_lock(&remote->lock);
 	
-	// Must be connectet and authenticated
+	// Must be connected and authenticated
 	if(!remote->authenticated || !remote->connected)
 	{
 		printf("Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
@@ -318,7 +495,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 	// Create message containing packet data
 	msg.len = packet->len;
 	msg.data = packet->data;
-	status = send_arg_packet(local, remote, ARG_WRAPPED_MSG, local->symKey, remote->symKey, &msg);
+	status = send_arg_packet(local, remote, ARG_WRAPPED_MSG, &msg);
 
 	pthread_spin_unlock(&remote->lock);
 
@@ -343,7 +520,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 		return -1;
 	}
 
-	if(process_arg_packet(remote->symKey, local->symKey, packet, &msg))
+	if(process_arg_packet(local, remote, packet, &msg))
 	{
 		printf("ARG: Stopping connection data processing\n");
 		pthread_spin_unlock(&remote->lock);
@@ -371,17 +548,16 @@ char process_arg_wrapped(struct arg_network_info *local,
 char send_arg_packet(struct arg_network_info *srcGate,
 					 struct arg_network_info *destGate,
 					 int type,
-					 const uint8_t *hmacKey,
-					 const uint8_t *encKey,
 					 const struct argmsg *msg)
 {
 	struct packet_data *packet = NULL;
 	uint16_t fullLen = 0;
-	
-	// Create packet we will build within
+
+	// Create packet we will build within, giving it plenty of extra space (encryption padding and such)
 	fullLen = 20 + ARG_HDR_LEN;
 	if(msg != NULL)
 		fullLen += msg->len;
+	fullLen += srcGate->rsa.len;
 	packet = create_packet(fullLen);
 	if(packet == NULL)
 	{
@@ -391,7 +567,7 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	
 	// Ensure IPs are up-to-date
 	update_ips(srcGate);
-	update_ips(destGate);	
+	update_ips(destGate);
 
 	// IP header
 	packet->ipv4->version = 4;
@@ -403,29 +579,52 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	memcpy(&packet->ipv4->daddr, destGate->currIP, sizeof(packet->ipv4->daddr));
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;
-	packet->ipv4->tot_len = htons(packet->len);
+	packet->ipv4->tot_len = htons(packet->ipv4->ihl * 4);
 	packet->ipv4->check = 0;
 
 	parse_packet(packet);
-
-	// TBD encrypt
-	//if(encKey != NULL)
-	//	;
-
+	
+	// Encrypt
 	packet->arg->version = 1;
 	packet->arg->type = type;
 	if(msg != NULL)
 	{
-		packet->arg->len = htons(msg->len + ARG_HDR_LEN);
-		memcpy((uint8_t*)packet->arg + ARG_HDR_LEN, msg->data, msg->len);
+		if(type == ARG_WRAPPED_MSG)
+		{
+			// Symmetric encryption, TBD
+			memcpy(packet->unknown_data, msg->data, msg->len);
+			packet->arg->len = htons(msg->len + ARG_HDR_LEN);
+		}
+		else
+		{
+			// Admin packets can be at most keysize/8 bytes (ie, 128 bytes for a 1024 bit key)
+			if(msg->len > destGate->rsa.len)
+			{
+				printf("Admin packet data must be %lu bytes or less\n", destGate->rsa.len);
+				free_packet(packet);
+				return -2;
+			}
+
+			// RSA encryption with destination public key
+			packet->arg->len = htons((uint16_t)destGate->rsa.len + ARG_HDR_LEN);
+			rsa_pkcs1_encrypt(&destGate->rsa, ctr_drbg_random, &srcGate->ctr_drbg, RSA_PUBLIC,
+				msg->len, msg->data, packet->unknown_data);
+		}
 	}
 	else
-		packet->arg->len = 0;
-	
-	if(hmacKey != NULL)
-		hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)packet->arg, ntohs(packet->arg->len), packet->arg->hmac);
+		packet->arg->len = htons(ARG_HDR_LEN);
+
+	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
+	packet->ipv4->tot_len = htons(packet->len);
+
+	//if(hmacKey != NULL)
+	//	hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)packet->arg, ntohs(packet->arg->len), packet->arg->hmac);
 	
 	// Send!
+	printf("Msg ");
+	printRaw(msg->len, msg->data);
+	printf("Sending ");
+	printRaw(packet->len, packet->data);
 	if(send_packet(packet) < 0)
 	{
 		printf("Failed to send ARG packet\n");
@@ -437,10 +636,14 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	return 0;
 }
 
-char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
+char process_arg_packet(struct arg_network_info *local,
+						struct arg_network_info *remote,
 						const struct packet_data *packet,
 						struct argmsg **msg)
 {
+	int ret;
+	size_t len;
+
 	struct packet_data *newPacket = NULL;
 	struct argmsg *out = NULL;
 
@@ -454,9 +657,9 @@ char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
 		printf("Unable to duplicate packet for checking\n");
 		return -1;
 	}
-	
+
 	// Check hash
-	if(hmacKey != NULL)
+	/*if(hmacKey != NULL)
 	{
 		memset(newPacket->arg->hmac, 0, sizeof(newPacket->arg->hmac));
 		hmac_sha1(hmacKey, AES_KEY_SIZE, (uint8_t*)newPacket->arg, ntohs(newPacket->arg->len), newPacket->arg->hmac);
@@ -467,26 +670,52 @@ char process_arg_packet(const uint8_t *hmacKey, const uint8_t *encKey,
 			free_packet(newPacket);
 			return -2;
 		}
-	}
+	}*/
 	
-	// TBD decrypt
-	//if(encKey != NULL)
-	//	;
-	// else
+	printf("Received ");
+	printRaw(packet->len, packet->data);
 	
-	out = create_arg_msg(ntohs(newPacket->arg->len) - ARG_HDR_LEN);
-	if(out == NULL)
+	// Decrypt
+	if(newPacket->arg->len > ARG_HDR_LEN)
 	{
-		printf("Unable to allocate space to write decrypted message\n");
-		free_packet(newPacket);
-		return -3;
-	}
+		out = create_arg_msg(ntohs(newPacket->arg->len));
+		if(out == NULL)
+		{
+			printf("Unable to allocate space to write decrypted message\n");
+			free_packet(newPacket);
+			return -3;
+		}
 
-	memcpy(out->data, (uint8_t*)newPacket->arg + ARG_HDR_LEN, out->len);
-	*msg = out;
-	
-	//printf("msg from packet");
-	//printRaw(out->len, out->data);
+		if(newPacket->arg->type == ARG_WRAPPED_MSG)
+		{
+			// Symmetric decrypt, TBD
+			out->len = ntohs(packet->arg->len) - ARG_HDR_LEN;
+			memcpy(out->data, packet->unknown_data, out->len);
+		}
+		else
+		{
+			// Decrypt with local private key
+			printRaw(out->len, newPacket->unknown_data);
+
+			if((ret = rsa_pkcs1_decrypt(&local->rsa, RSA_PRIVATE, &len,
+				newPacket->unknown_data, out->data, out->len)) != 0)
+			{
+				printf("Unable to decrypt packet contents, error %i\n", ret);
+				free_arg_msg(out);
+				free_packet(newPacket);
+				return -4;
+			}
+
+			out->len = len;
+		}
+		
+		printf("msg from packet");
+		printRaw(out->len, out->data);
+		
+		*msg = out;
+	}
+	else
+		*msg = NULL;
 	
 	return 0;
 }

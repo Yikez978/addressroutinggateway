@@ -160,30 +160,65 @@ void direct_inbound(const struct packet_data *packet)
 {
 	struct arg_network_info *gate = NULL;
 	
-	// Is this packet from an ARG network?
+	// Is this packet from a connected and authenticated ARG network?
 	gate = get_arg_network(&packet->ipv4->saddr);
 	if(gate != NULL)
 	{
 		if(packet->arg == NULL)
 		{
-			printf("Packet from ARG network, but not correct protocol\n");
+			#ifdef DISP_RESULTS
+			printf("ARG: Inbound Reject: Bad Protocol\n");
+			#endif
 			return;
 		}
 
 		if(is_admin_msg(packet->arg))
 		{
-			process_admin_msg(packet, gate);
+			if(process_admin_msg(packet, gate) == 0)
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Accept: admin\n");
+				#endif
+			}
+			else
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Reject: Invalid admin\n");
+				#endif
+			}
 		}
 		else
 		{
-			// TBD check IP
+			// Ensure the IPs were correct
+			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Reject: Dest IP Incorrect\n");
+				#endif
+				return;
+			}
+			
+			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Reject: Dest IP Incorrect\n");
+				#endif
+				return;
+			}
 
 			// Unwrap and drop into network, assuming everything checks out
-			do_arg_unwrap(packet, gate);
-
-			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Accept: Unwrapped\n");
-			#endif
+			if(do_arg_unwrap(packet, gate) == 0)
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Accept: Unwrapped\n");
+				#endif
+			}
+			else
+			{
+				#ifdef DISP_RESULTS
+				printf("ARG: Inbound Reject: Failed to unwrap\n");
+				#endif
+			}
 		}
 	}
 	else
@@ -215,7 +250,7 @@ void direct_outbound(const struct packet_data *packet)
 	if(gate != NULL)
 	{
 		// Destined for an ARG network
-		if(do_arg_wrap(packet, gate))
+		if(do_arg_wrap(packet, gate) == 0)
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound Accept: Wrap\n");
@@ -232,7 +267,7 @@ void direct_outbound(const struct packet_data *packet)
 	{
 		// Unknown destination. Rewrite via NAT, creating an entry
 		// if needed
-		if(do_nat_outbound_rewrite(packet))
+		if(do_nat_outbound_rewrite(packet) == 0)
 		{
 			#ifdef DISP_RESULTS
 			printf("ARG: Outbound: Accept: Rewrite\n");
