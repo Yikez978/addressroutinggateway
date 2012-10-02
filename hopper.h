@@ -28,8 +28,8 @@ typedef struct arg_network_info {
 	// Basic info
 	char name[MAX_NAME_SIZE];
 	
-	char authenticated:1,
-		 connected:1; // Connection/admin state
+	char connected:1; // 1 if we have all the data needed to send ARG packets to this gateway
+
 	struct timespec lastAuthTime;
 	struct proto_data proto;
 

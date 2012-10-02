@@ -41,191 +41,14 @@ char start_connection(struct arg_network_info *local, struct arg_network_info *r
 char do_next_action(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	char state = remote->proto.state;
-	if(state & ARG_DO_AUTH)
+	if(state & ARG_DO_CONN)
+		return send_arg_conn_data(local, remote);
+	else if(state & ARG_DO_AUTH)
 		return send_arg_ping(local, remote);
-	else if(state & ARG_DO_CONN)
-		return send_arg_conn_req(local, remote);
 	else
 		return 0;
 }
 
-char send_arg_hello(struct arg_network_info *local,
-				   struct arg_network_info *remote)
-{
-	struct argmsg *msg = NULL;
-	
-	printf("ARG: Sending ping to %s\n", remote->name);
-
-	msg = create_arg_msg(sizeof(remote->proto.myID));
-	if(msg == NULL)
-	{
-		printf("Unable to allocate space to send gateway hello\n");
-		return -1;
-	}
-
-	pthread_spin_lock(&remote->lock);
-
-	// Every gateway we talk to gets a unique identifier from us. (they'll also have a unique incoming one)
-	if(remote->proto.myID == 0)
-		get_random_bytes(&remote->proto.myID, sizeof(remote->proto.myID));
-	memcpy(msg->data, &remote->proto.myID, msg->len);
-
-	if(send_arg_packet(local, remote, ARG_GATE_HELLO_MSG, msg) < 0)
-		printf("Failed to send ARG gateway hello\n");
-
-	pthread_spin_unlock(&remote->lock);
-	
-	free_arg_msg(msg);
-	
-	return 0;
-}
-
-char process_arg_hello(struct arg_network_info *local,
-					  struct arg_network_info *remote,
-					  const struct packet_data *packet)
-{
-	char status = 0;
-	struct argmsg *inMsg = NULL;
-	struct argmsg *outMsg = NULL;
-	struct arg_welcome *welcome = NULL;
-
-	printf("ARG: Received gateway hello from %s\n", remote->name);
-	
-	if(process_arg_packet(local, remote, packet, &inMsg))
-	{
-		printf("Stopping hello processing\n");
-		return -1;
-	}
-
-	if(inMsg->len != sizeof(remote->proto.theirID))
-	{
-		printf("ARG: Not sending welcome, packet not correct length\n");
-		free_arg_msg(inMsg);
-		return -2;
-	}
-
-	// Pull out their ID. We don't accept it yet, they have to verify it with
-	// a corresponding verification of OUR id
-	remote->proto.theirPendingID = *((uint32_t*)inMsg);
-	free_arg_msg(inMsg);
-	inMsg = NULL;
-
-	outMsg = create_arg_msg(sizeof(remote->proto.myID));
-	if(outMsg == NULL)
-	{
-		printf("Unable to allocate space to send gateway hello\n");
-		return -1;
-	}
-
-	// Send back both their and our IDs
-	if(remote->proto.myID == 0)
-		get_random_bytes(&remote->proto.myID, sizeof(remote->proto.myID));
-
-	welcome = (struct arg_welcome*)outMsg->data;
-	welcome->id1 = remote->proto.theirPendingID;
-	welcome->id2 = remote->proto.myID;
-
-	if(send_arg_packet(local, remote, ARG_GATE_WELCOME_MSG, outMsg) < 0)
-		printf("Failed to send ARG gateway welcome\n");
-	
-	free_arg_msg(outMsg);
-	return status;
-}
-
-
-char process_arg_welcome(struct arg_network_info *local,
-					  struct arg_network_info *remote,
-					  const struct packet_data *packet)
-{
-	char status = 0;
-	struct argmsg *inMsg = NULL;
-	struct argmsg *outMsg = NULL;
-	struct arg_welcome *welcome = NULL;
-
-	printf("ARG: Received gateway welcome from %s\n", remote->name);
-	
-	if(process_arg_packet(local, remote, packet, &inMsg))
-	{
-		printf("Stopping welcome processing\n");
-		return -1;
-	}
-
-	if(inMsg->len != sizeof(struct arg_welcome))
-	{
-		printf("Not sending verification, welcome improperly sized\n");
-		free_arg_msg(inMsg);
-		return -2;
-	}
-
-	welcome = (struct arg_welcome*)inMsg->data;
-
-	free_arg_msg(inMsg);
-	return status;
-}
-
-char process_arg_verified(struct arg_network_info *local,
-					  struct arg_network_info *remote,
-					  const struct packet_data *packet)
-{
-	char status = 0;
-	struct argmsg *msg = NULL;
-	uint32_t *id = 0;
-	
-	printf("ARG: Received pong from %s\n", remote->name);
-	
-	if(process_arg_packet(local, remote, packet, &msg))
-	{
-		printf("ARG: Stopping pong processing\n");
-		return -1;
-	}
-
-	if(msg->data == NULL || msg->len != sizeof(remote->proto.pingID))
-	{
-		printf("ARG: Not accepting pong, data not a proper ping ID\n");
-		free_arg_msg(msg);
-		return -2;
-	}
-
-	pthread_spin_lock(&remote->lock);
-
-	if(remote->proto.pingID != 0)
-	{
-		id = (uint32_t*)(msg->data);
-
-		if(remote->proto.pingID == *id)
-		{
-			// TBD skip/try again with huge latency changes?
-			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
-			remote->authenticated = 1;
-			status = 0;
-			printf("ARG: Latency to %s: %li ms\n", remote->name, remote->proto.latency);
-		}
-		else
-		{
-			// We sent one, but the ID was incorrect. The remote gateway
-			// had the wrong ID or it did not have the correct global key
-			// Either way, we don't trust them now
-			printf("ARG: The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
-			remote->authenticated = 0;
-			status = 0;
-		}
-	}
-	else
-	{
-		printf("ARG: Not accepting pong, no ping sent\n");
-		status = -3;
-	}
-	
-	pthread_spin_unlock(&remote->lock);
-	
-	free_arg_msg(msg);
-	
-	// All done with a ping/auth
-	remote->proto.state &= ~ARG_DO_AUTH;
-	do_next_action(local, remote);
-	
-	return status;
-}
 char send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote)
 {
@@ -318,7 +141,6 @@ char process_arg_pong(struct arg_network_info *local,
 		{
 			// TBD skip/try again with huge latency changes?
 			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
-			remote->authenticated = 1;
 			status = 0;
 			printf("ARG: Latency to %s: %li ms\n", remote->name, remote->proto.latency);
 		}
@@ -328,7 +150,6 @@ char process_arg_pong(struct arg_network_info *local,
 			// had the wrong ID or it did not have the correct global key
 			// Either way, we don't trust them now
 			printf("ARG: The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
-			remote->authenticated = 0;
 			status = 0;
 		}
 	}
@@ -350,44 +171,11 @@ char process_arg_pong(struct arg_network_info *local,
 }
 
 // Connect
-char send_arg_conn_req(struct arg_network_info *local,
-					   struct arg_network_info *remote)
-{
-	// Make sure this gateway is authenticated
-	if(!remote->authenticated)
-	{
-		printf("Authenticating %s before sending connection request\n", remote->name);
-		return start_connection(local, remote);
-	}
-
-	printf("ARG: Sending connect request to %s\n", remote->name);
-
-	pthread_spin_lock(&remote->lock);
-
-	// Send
-	if(send_arg_packet(local, remote, ARG_CONN_REQ_MSG, NULL) == 0)
-		current_time(&remote->proto.pingSentTime);
-	else
-		printf("Failed to send ARG connection request\n");
-
-	pthread_spin_unlock(&remote->lock);
-
-	return 0;
-}
-
-char process_arg_conn_req(struct arg_network_info *local,
-						  struct arg_network_info *remote,
-					  	  const struct packet_data *packet)
+char send_arg_conn_data(struct arg_network_info *local,
+							struct arg_network_info *remote)
 {
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL;
-
-	// Make sure this gateway is authenticated
-	if(!remote->authenticated)
-	{
-		printf("Authenticating %s before sending connection data\n", remote->name);
-		return start_auth(local, remote);
-	}
 
 	printf("ARG: Sending connect information to %s\n", remote->name);
 
@@ -408,9 +196,7 @@ char process_arg_conn_req(struct arg_network_info *local,
 	pthread_spin_lock(&remote->lock);
 
 	// Send
-	if(send_arg_packet(local, remote, ARG_CONN_RESP_MSG, msg) == 0)
-		current_time(&remote->proto.pingSentTime);
-	else
+	if(send_arg_packet(local, remote, ARG_CONN_DATA_MSG, msg) < 0)
 		printf("Failed to send ARG connection data\n");
 
 	pthread_spin_unlock(&remote->lock);
@@ -420,7 +206,7 @@ char process_arg_conn_req(struct arg_network_info *local,
 	return 0;
 }
 
-char process_arg_conn_resp(struct arg_network_info *local,
+char process_arg_conn_data(struct arg_network_info *local,
 						   struct arg_network_info *remote,
 						   const struct packet_data *packet)
 {
@@ -429,13 +215,6 @@ char process_arg_conn_resp(struct arg_network_info *local,
 	struct arg_conn_data *connData = NULL; 
 
 	printf("ARG: Received connection data from %s\n", remote->name);
-	
-	// Make sure this gateway is authenticated
-	if(!remote->authenticated)
-	{
-		printf("Refusing to accept connection request, %s is not authenticated\n", remote->name);
-		return start_connection(local, remote);
-	}
 	
 	if(process_arg_packet(local, remote, packet, &msg))
 	{
@@ -484,8 +263,8 @@ char send_arg_wrapped(struct arg_network_info *local,
 
 	pthread_spin_lock(&remote->lock);
 	
-	// Must be connected and authenticated
-	if(!remote->authenticated || !remote->connected)
+	// Must be connected
+	if(!remote->connected)
 	{
 		printf("Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);
@@ -512,8 +291,8 @@ char process_arg_wrapped(struct arg_network_info *local,
 
 	pthread_spin_lock(&remote->lock);
 	
-	// Must be connectet and authenicated
-	if(!remote->authenticated || !remote->connected)
+	// Must be connected
+	if(!remote->connected)
 	{
 		printf("Refusing to unwrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);

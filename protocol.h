@@ -75,10 +75,7 @@ enum {
 	ARG_PONG_MSG,
 
 	// Connection data
-	//ARG_AUTH_REQ_MSG
-	//ARG_AUTH_RESP_MSG,
-	ARG_CONN_REQ_MSG,
-	ARG_CONN_RESP_MSG,
+	ARG_CONN_DATA_MSG,
 
 	ARG_TIME_REQ_MSG,
 	ARG_TIME_RESP_MSG,
@@ -144,18 +141,6 @@ char start_connection(struct arg_network_info *local, struct arg_network_info *r
 
 char do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
 
-// Authentication
-char send_arg_hello(struct arg_network_info *local,
-						struct arg_network_info *remote);
-char process_arg_hello(struct arg_network_info *local,
-						   struct arg_network_info *remote,
-						   const struct packet_data *packet);
-char process_arg_verified(struct arg_network_info *local,
-						   struct arg_network_info *remote,
-						   const struct packet_data *packet);
-
-
-
 // Lag detection
 char send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote);
@@ -167,12 +152,9 @@ char process_arg_pong(struct arg_network_info *local,
 					  const struct packet_data *packet);
 
 // Connect
-char send_arg_conn_req(struct arg_network_info *local,
-					   struct arg_network_info *remote);
-char process_arg_conn_req(struct arg_network_info *local,
-						  struct arg_network_info *remote,
-						  const struct packet_data *packet);
-char process_arg_conn_resp(struct arg_network_info *local,
+char send_arg_conn_data(struct arg_network_info *local,
+						   struct arg_network_info *remote);
+char process_arg_conn_data(struct arg_network_info *local,
 						   struct arg_network_info *remote,
 						   const struct packet_data *packet);
 

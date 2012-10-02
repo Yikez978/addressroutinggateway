@@ -346,10 +346,7 @@ void *connect_thread(void *data)
 		gate = gateInfo->next;
 		while(gate != NULL)
 		{
-			if(!gate->connected)
-				start_connection(gateInfo, gate);
-			else
-				do_next_action(gateInfo, gate);
+			start_connection(gateInfo, gate);
 
 			// Next
 			gate = gate->next;
@@ -512,13 +509,9 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 	case ARG_PONG_MSG:
 		process_arg_pong(gateInfo, srcGate, packet);
 		break;
-	
-	case ARG_CONN_REQ_MSG:
-		process_arg_conn_req(gateInfo, srcGate, packet);
-		break;
 
-	case ARG_CONN_RESP_MSG:
-		process_arg_conn_resp(gateInfo, srcGate, packet);
+	case ARG_CONN_DATA_MSG:
+		process_arg_conn_data(gateInfo, srcGate, packet);
 		break;
 
 	default:
