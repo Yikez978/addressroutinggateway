@@ -201,7 +201,7 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Reject: Dest IP Incorrect\n");
+				printf("ARG: Inbound Reject: Source IP Incorrect\n");
 				#endif
 				return;
 			}

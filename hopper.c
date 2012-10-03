@@ -475,6 +475,14 @@ char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 
 	update_ips(gate);
 
+	/*printf("Request: ");
+	printIP(4, ip);
+	printf(" Could be ");
+	printIP(4, gate->currIP);
+	printf(" or ");
+	printIP(4, gate->prevIP);
+	printf("\n");*/
+
 	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
 		ret = 1;
 	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
@@ -532,12 +540,9 @@ void update_ips(struct arg_network_info *gate)
 
 	struct timespec currTime;
 	current_time(&currTime);
-	
-	/*if(gate->hopInterval != 0)
-		printf("We believe the time offset for %s is %li (base %lu, curr %lu). At step %li\n", gate->name, time_offset(&gate->timeBase, &currTime), gate->timeBase.tv_sec, currTime.tv_sec, time_offset(&gate->timeBase, &currTime) / gate->hopInterval);*/
 
 	// Is the cache out of date? If not, do nothing
-	if(time_offset(&gate->ipCacheExpiration, &currTime) < gate->hopInterval)
+	if(time_offset(&gate->ipCacheExpiration, &currTime) < 0)
 		return;
 
 	// Copy in top part of address. baseIP has already been masked to
@@ -547,6 +552,9 @@ void update_ips(struct arg_network_info *gate)
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
+	//printf("UPDATE IPS for %s: Hop interval %lu, offset %li, key ", gate->name, gate->hopInterval, time_offset(&gate->timeBase, &currTime));
+	//printRaw(sizeof(gate->hopKey), gate->hopKey);
+
 	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, time_offset(&gate->timeBase, &currTime)); 
 
 	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);

@@ -195,6 +195,8 @@ char send_arg_conn_data(struct arg_network_info *local,
 
 	pthread_spin_lock(&remote->lock);
 
+	//printf("We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
+
 	// Send
 	if(send_arg_packet(local, remote, ARG_CONN_DATA_MSG, msg) < 0)
 		printf("Failed to send ARG connection data\n");
@@ -231,9 +233,11 @@ char process_arg_conn_data(struct arg_network_info *local,
 		memcpy(remote->symKey, connData->symKey, sizeof(connData->symKey));
 		memcpy(remote->hopKey, connData->hopKey, sizeof(connData->hopKey));
 		remote->hopInterval = ntohl(connData->hopInterval);
-		current_time_plus(&remote->timeBase, -htonl(connData->timeOffset));
+		current_time_plus(&remote->timeBase, -ntohl(connData->timeOffset));
 
-		printf("time base for remote %s is now %lu %lu\n", remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec);
+		printf("Time base for remote %s is now %lus %luns, at hop %li\n",
+			remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec,
+			(current_time_offset(&remote->timeBase) / remote->hopInterval));
 
 		remote->connected = 1;
 		
@@ -311,6 +315,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 	if(newPacket == NULL)
 	{
 		printf("Unable to create new packet to drop into internal network\n");
+		free_arg_msg(msg);
 		pthread_spin_unlock(&remote->lock);
 		return -3;
 	}
@@ -320,6 +325,9 @@ char process_arg_wrapped(struct arg_network_info *local,
 	status = send_packet(newPacket);
 
 	pthread_spin_unlock(&remote->lock);
+
+	free_arg_msg(msg);
+	free_packet(newPacket);
 
 	return status;
 }
@@ -504,6 +512,8 @@ char process_arg_packet(struct arg_network_info *local,
 	else
 		*msg = NULL;
 	
+	free_packet(newPacket);
+
 	return 0;
 }
 
