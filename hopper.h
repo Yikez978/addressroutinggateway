@@ -7,6 +7,8 @@
 #include <polarssl/rsa.h>
 #include <polarssl/entropy.h>
 #include <polarssl/ctr_drbg.h>
+#include <polarssl/cipher.h>
+#include <polarssl/md.h>
 
 #include "utility.h"
 #include "uthash.h"
@@ -38,6 +40,10 @@ typedef struct arg_network_info {
 
 	// Encryption keys and parameters
 	uint8_t symKey[AES_KEY_SIZE];
+	uint8_t iv[AES_BLOCK_SIZE];
+
+	cipher_context_t cipher;
+	md_context_t md;
 
 	rsa_context rsa;
 	entropy_context entropy;

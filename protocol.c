@@ -3,6 +3,9 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
+#include <polarssl/cipher.h>
+#include <polarssl/md.h>
+
 #include "protocol.h"
 #include "crypto.h"
 #include "hopper.h"
@@ -191,6 +194,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 
 	connData = (struct arg_conn_data*)msg->data;
 	memcpy(connData->symKey, local->symKey, sizeof(connData->symKey));
+	memcpy(connData->iv, local->iv, sizeof(connData->iv));
 	memcpy(connData->hopKey, local->hopKey, sizeof(connData->hopKey));
 	connData->hopInterval = htonl(local->hopInterval);
 	connData->timeOffset = htonl(current_time_offset(&local->timeBase));
@@ -232,14 +236,21 @@ char process_arg_conn_data(struct arg_network_info *local,
 		
 		connData = (struct arg_conn_data*)msg->data;
 		
-		memcpy(remote->symKey, connData->symKey, sizeof(connData->symKey));
-		memcpy(remote->hopKey, connData->hopKey, sizeof(connData->hopKey));
+		memcpy(remote->symKey, connData->symKey, sizeof(remote->symKey));
+		memcpy(remote->iv, connData->iv, sizeof(remote->iv));
+		
+		// TBD do this completely separately in time message?
+		memcpy(remote->hopKey, connData->hopKey, sizeof(remote->hopKey));
 		remote->hopInterval = ntohl(connData->hopInterval);
 		current_time_plus(&remote->timeBase, -ntohl(connData->timeOffset));
 
-		printf("Time base for remote %s is now %lus %luns, at hop %li\n",
+		/*printf("Time base for remote %s is now %lus %luns, at hop %li\n",
 			remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec,
-			(current_time_offset(&remote->timeBase) / remote->hopInterval));
+			(current_time_offset(&remote->timeBase) / remote->hopInterval));*/
+
+		// Initialize AES/SHA for this new data
+		cipher_setkey(&remote->cipher, remote->symKey, sizeof(remote->symKey) * 8, POLARSSL_ENCRYPT);
+		md_hmac_starts(&remote->md, remote->symKey, sizeof(remote->symKey));
 
 		remote->connected = 1;
 		
@@ -334,11 +345,16 @@ char process_arg_wrapped(struct arg_network_info *local,
 	return status;
 }
 
-char send_arg_packet(struct arg_network_info *srcGate,
-					 struct arg_network_info *destGate,
+char send_arg_packet(struct arg_network_info *local,
+					 struct arg_network_info *remote,
 					 int type,
 					 const struct argmsg *msg)
 {
+	int i = 0;
+	int blockSize;
+	size_t ilen;
+	size_t olen;
+
 	int ret;
 	struct packet_data *packet = NULL;
 	uint16_t fullLen = 0;
@@ -348,7 +364,7 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	fullLen = 20 + ARG_HDR_LEN;
 	if(msg != NULL)
 		fullLen += msg->len;
-	fullLen += srcGate->rsa.len;
+	fullLen += local->rsa.len;
 	packet = create_packet(fullLen);
 	if(packet == NULL)
 	{
@@ -357,8 +373,8 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	}
 	
 	// Ensure IPs are up-to-date
-	update_ips(srcGate);
-	update_ips(destGate);
+	update_ips(local);
+	update_ips(remote);
 
 	// IP header
 	packet->ipv4->version = 4;
@@ -366,8 +382,8 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	packet->ipv4->ttl = 32;
 	packet->ipv4->tos = 0;
 	packet->ipv4->protocol = ARG_PROTO;
-	memcpy(&packet->ipv4->saddr, srcGate->currIP, sizeof(packet->ipv4->saddr));
-	memcpy(&packet->ipv4->daddr, destGate->currIP, sizeof(packet->ipv4->daddr));
+	memcpy(&packet->ipv4->saddr, local->currIP, sizeof(packet->ipv4->saddr));
+	memcpy(&packet->ipv4->daddr, remote->currIP, sizeof(packet->ipv4->daddr));
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;
 	packet->ipv4->tot_len = htons(packet->ipv4->ihl * 4);
@@ -382,23 +398,39 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	{
 		if(type == ARG_WRAPPED_MSG)
 		{
-			// Symmetric encryption, TBD
-			memcpy(packet->unknown_data, msg->data, msg->len);
-			packet->arg->len = htons(msg->len + ARG_HDR_LEN);
+			// Symmetric encryption with remote symmetric key
+			cipher_reset(&remote->cipher, remote->iv); // TBD, combine iv with sequence number
+
+			blockSize = cipher_get_block_size(&remote->cipher);
+
+			packet->arg->len = 0;
+
+			for(i = 0; i < msg->len; i += blockSize)
+			{
+				ilen = (size_t)(msg->len - i);
+				if(ilen > blockSize)
+					ilen = blockSize;
+
+				cipher_update(&remote->cipher, msg->data + i, ilen, packet->unknown_data + i, &olen);
+			
+				packet->arg->len += olen;
+			}
+
+			packet->arg->len = htons(packet->arg->len + ARG_HDR_LEN);
 		}
 		else
 		{
 			// Admin packets can be at most keysize/8 bytes (ie, 128 bytes for a 1024 bit key)
-			if(msg->len > destGate->rsa.len)
+			if(msg->len > remote->rsa.len)
 			{
-				printf("Admin packet data must be %lu bytes or less\n", destGate->rsa.len);
+				printf("Admin packet data must be %lu bytes or less\n", remote->rsa.len);
 				free_packet(packet);
 				return -2;
 			}
 
 			// RSA encryption with destination public key
-			packet->arg->len = htons((uint16_t)destGate->rsa.len + ARG_HDR_LEN);
-			rsa_pkcs1_encrypt(&destGate->rsa, ctr_drbg_random, &srcGate->ctr_drbg, RSA_PUBLIC,
+			packet->arg->len = htons((uint16_t)remote->rsa.len + ARG_HDR_LEN);
+			rsa_pkcs1_encrypt(&remote->rsa, ctr_drbg_random, &local->ctr_drbg, RSA_PUBLIC,
 				msg->len, msg->data, packet->unknown_data);
 		}
 	}
@@ -408,23 +440,27 @@ char send_arg_packet(struct arg_network_info *srcGate,
 	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
 	packet->ipv4->tot_len = htons(packet->len);
 
-	// Sign
-	sha1((uint8_t*)packet->arg, ntohs(packet->arg->len), hash);
-	//printf("Sig");
-	//printRaw(sizeof(hash), hash);
-	if((ret = rsa_pkcs1_sign(&srcGate->rsa, NULL, NULL, RSA_PRIVATE, SIG_RSA_SHA1,
-		sizeof(hash), hash, packet->arg->sig)) != 0)
+	if(type == ARG_WRAPPED_MSG)
 	{
-		printf("Unable to sign, error %i\n", ret);
-		free_packet(packet);
-		return -3;
+		// HMAC using local symmetric key
+		md_hmac_starts(&local->md, local->symKey, sizeof(local->symKey));
+		md_hmac_update(&local->md, (uint8_t*)packet->arg, ntohs(packet->arg->len));
+		md_hmac_finish(&local->md, packet->arg->sig);
 	}
-	
+	else
+	{
+		// Sign with private key
+		sha1((uint8_t*)packet->arg, ntohs(packet->arg->len), hash);
+		if((ret = rsa_pkcs1_sign(&local->rsa, NULL, NULL, RSA_PRIVATE, SIG_RSA_SHA1,
+			sizeof(hash), hash, packet->arg->sig)) != 0)
+		{
+			printf("Unable to sign, error %i\n", ret);
+			free_packet(packet);
+			return -3;
+		}
+	}
+
 	// Send!
-	//printf("Msg ");
-	//printRaw(msg->len, msg->data);
-	//printf("Sending ");
-	//printRaw(packet->len, packet->data);
 	if(send_packet(packet) < 0)
 	{
 		printf("Failed to send ARG packet\n");
@@ -441,10 +477,16 @@ char process_arg_packet(struct arg_network_info *local,
 						const struct packet_data *packet,
 						struct argmsg **msg)
 {
-	int ret;
-	size_t len;
+	int i = 0;
+	int blockSize;
+	size_t ilen;
+	size_t olen;
 
 	uint8_t hash[SHA1_HASH_SIZE];
+
+	int ret;
+	size_t len;
+	uint16_t argLen;
 
 	struct packet_data *newPacket = NULL;
 	struct argmsg *out = NULL;
@@ -460,24 +502,43 @@ char process_arg_packet(struct arg_network_info *local,
 		return -1;
 	}
 
-	// Check signature
+	argLen = ntohs(newPacket->arg->len);
+	
 	memset(newPacket->arg->sig, 0, sizeof(newPacket->arg->sig));
-	sha1((uint8_t*)newPacket->arg, ntohs(newPacket->arg->len), hash);
-	if((ret = rsa_pkcs1_verify(&remote->rsa, RSA_PUBLIC, SIG_RSA_SHA1,
-		sizeof(hash), hash, packet->arg->sig)) != 0 )
+	if(newPacket->arg->type == ARG_WRAPPED_MSG)
 	{
-		printf("Unable to verify signature, error %i\n", ret);
-		free_packet(newPacket);
-		return -3;
+		// Check hmac with remote symmetric key
+		md_hmac_starts(&remote->md, remote->symKey, sizeof(remote->symKey));
+		md_hmac_update(&remote->md, (uint8_t*)newPacket->arg, ntohs(newPacket->arg->len));
+		md_hmac_finish(&remote->md, newPacket->arg->sig);
+
+		if(memcmp(newPacket->arg->sig, packet->arg->sig, sizeof(newPacket->arg->sig)))
+		{
+			printf("Unable to verify hmac\n");
+			free_packet(newPacket);
+			return -3;
+		}
+	}
+	else
+	{
+		// Check private key signature
+		sha1((uint8_t*)newPacket->arg, argLen, hash);
+		if((ret = rsa_pkcs1_verify(&remote->rsa, RSA_PUBLIC, SIG_RSA_SHA1,
+			sizeof(hash), hash, packet->arg->sig)) != 0 )
+		{
+			printf("Unable to verify signature, error %i\n", ret);
+			free_packet(newPacket);
+			return -3;
+		}
 	}
 
 	//printf("Received ");
 	//printRaw(packet->len, packet->data);
 	
 	// Decrypt
-	if(newPacket->arg->len > ARG_HDR_LEN)
+	if(argLen > ARG_HDR_LEN)
 	{
-		out = create_arg_msg(ntohs(newPacket->arg->len));
+		out = create_arg_msg(argLen);
 		if(out == NULL)
 		{
 			printf("Unable to allocate space to write decrypted message\n");
@@ -487,9 +548,22 @@ char process_arg_packet(struct arg_network_info *local,
 
 		if(newPacket->arg->type == ARG_WRAPPED_MSG)
 		{
-			// Symmetric decrypt, TBD
-			out->len = ntohs(packet->arg->len) - ARG_HDR_LEN;
-			memcpy(out->data, packet->unknown_data, out->len);
+			// Symmetric decrypt using local symmetric key
+			cipher_reset(&local->cipher, local->iv); // TBD, combine iv with sequence number
+
+			blockSize = cipher_get_block_size(&local->cipher);
+
+			out->len = 0;
+
+			for(i = 0; i < argLen - ARG_HDR_LEN; i += blockSize)
+			{
+				ilen = (size_t)(argLen - ARG_HDR_LEN - i);
+				if(ilen > blockSize)
+					ilen = blockSize;
+
+				cipher_update(&local->cipher, packet->unknown_data + i, ilen, out->data + i, &olen);
+				out->len += olen;
+			}
 		}
 		else
 		{

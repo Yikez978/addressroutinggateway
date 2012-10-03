@@ -23,11 +23,17 @@
 #define NAT_OLD_CONN_TIME 120
 
 #define MAX_PACKET_SIZE 65536
-
 #define MAX_CONF_LINE 300
+
+#define SYMMETRIC_ALGO "AES-256-CTR"
+#define HASH_ALGO "SHA256"
+
 #define RSA_KEY_SIZE 128
 #define RSA_SIG_SIZE 128
-#define AES_KEY_SIZE 16
+
+#define AES_KEY_SIZE 32
+#define AES_BLOCK_SIZE 16
+
 #define HOP_KEY_SIZE 16
 #define SHA1_HASH_SIZE 20
 

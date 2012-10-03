@@ -92,7 +92,10 @@ typedef struct arghdr {
 
 typedef struct arg_conn_data {
 	uint8_t symKey[AES_KEY_SIZE];
-	uint8_t hopKey[AES_KEY_SIZE];
+	uint8_t iv[AES_BLOCK_SIZE];
+	
+	uint8_t hopKey[HOP_KEY_SIZE];
+	
 	uint32_t hopInterval;
 	uint32_t timeOffset;
 } arg_conn_data;
@@ -167,8 +170,8 @@ char process_arg_wrapped(struct arg_network_info *local,
 						 const struct packet_data *packet);
 
 // Creates the ARG header for the given data and sends it
-char send_arg_packet(struct arg_network_info *srcGate,
-					 struct arg_network_info *destGate,
+char send_arg_packet(struct arg_network_info *local,
+					 struct arg_network_info *remote,
 					 int type,
 					 const struct argmsg *msg);
 

@@ -309,8 +309,18 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	// Hop and symmetric key
 	printf("ARG: Generating hop and symmetric encryption keys\n");
+	get_random_bytes(gateInfo->iv, sizeof(gateInfo->iv));
 	get_random_bytes(gateInfo->hopKey, sizeof(gateInfo->hopKey));
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
+
+	cipher_setkey(&gateInfo->cipher, gateInfo->symKey, sizeof(gateInfo->symKey) * 8, POLARSSL_DECRYPT);
+	md_hmac_starts(&gateInfo->md, gateInfo->symKey, sizeof(gateInfo->symKey)); // TBD use separate key for hmac?
+	
+	if(cipher_get_block_size(&gateInfo->cipher) != AES_BLOCK_SIZE)
+	{
+		printf("WARNING!!! Cipher block size (%i) is not the same as compiled AES_BLOCK_SIZE (%i)\n",
+			cipher_get_block_size(&gateInfo->cipher), AES_BLOCK_SIZE);
+	}
 
 	// Rest of hop data
 	current_time(&gateInfo->timeBase);
@@ -404,6 +414,9 @@ struct arg_network_info *create_arg_network_info(void)
 	// Init things that need it
 	pthread_spin_init(&newInfo->lock, PTHREAD_PROCESS_SHARED);
 	rsa_init(&newInfo->rsa, RSA_PKCS_V15, 0);
+
+	cipher_init_ctx(&newInfo->cipher, cipher_info_from_string(SYMMETRIC_ALGO));
+	md_init_ctx(&newInfo->md, md_info_from_string(HASH_ALGO));
 
 	return newInfo;
 }
