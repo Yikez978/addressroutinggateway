@@ -74,7 +74,9 @@ char send_arg_ping(struct arg_network_info *local,
 		printf("Failed to send ARG ping\n");
 
 	pthread_spin_unlock(&remote->lock);
-	
+
+	free_arg_msg(msg);
+
 	return 0;
 }
 
@@ -159,12 +161,12 @@ char process_arg_pong(struct arg_network_info *local,
 		status = -3;
 	}
 	
+	// All done with a ping/auth
+	remote->proto.state &= ~ARG_DO_AUTH;
+	
 	pthread_spin_unlock(&remote->lock);
 	
 	free_arg_msg(msg);
-	
-	// All done with a ping/auth
-	remote->proto.state &= ~ARG_DO_AUTH;
 	do_next_action(local, remote);
 	
 	return status;

@@ -90,8 +90,8 @@ void *receive_thread(void *tData)
 	// Filter outbound traffic (we only want to get traffic incoming to this card)
 	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
 	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
-	snprintf(filter, sizeof(filter), "not arp and not %s net %s mask %s",
-		(data->ifaceSide == IFACE_EXTERNAL ? "src" : "dst"), baseIP, mask);
+	snprintf(filter, sizeof(filter), "not arp and %s net %s mask %s",
+		(data->ifaceSide == IFACE_EXTERNAL ? "dst" : "src"), baseIP, mask);
 	
 	printf("Using filter: %s\n", filter);
     
@@ -104,8 +104,11 @@ void *receive_thread(void *tData)
     if(pcap_setfilter(pd, &fp) == -1)
 	{
 		printf("Unable to set filter\n");
+		pcap_freecode(&fp);
 		return (void*)-4;
 	}
+	
+	pcap_freecode(&fp);
 
 	// Cache how far to jump in packets
 	if(pcap_datalink(pd) == DLT_EN10MB)
