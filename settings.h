@@ -14,7 +14,14 @@
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 15
+#define CONNECT_WAIT_TIME 30
+
+// Maximum number of seconds to wait for new data before declaring a gate disconnected
+#define MAX_UPDATE_TIME 300
+
+// Number of seconds to wait before trying initial connection (gives all the other threads time to
+// be ready to receive. Easier than an overkill barrier.)
+#define INITIAL_CONNECT_WAIT 3
 
 // Number of seconds between full checks of the NAT table for expired connections
 #define NAT_CLEAN_TIME 20

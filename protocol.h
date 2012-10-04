@@ -75,7 +75,8 @@ enum {
 	ARG_PONG_MSG,
 
 	// Connection data
-	ARG_CONN_DATA_MSG,
+	ARG_CONN_DATA_RESP_MSG,
+	ARG_CONN_DATA_REQ_MSG,
 
 	ARG_TIME_REQ_MSG,
 	ARG_TIME_RESP_MSG,
@@ -156,10 +157,14 @@ char process_arg_pong(struct arg_network_info *local,
 
 // Connect
 char send_arg_conn_data(struct arg_network_info *local,
-						   struct arg_network_info *remote);
-char process_arg_conn_data(struct arg_network_info *local,
 						   struct arg_network_info *remote,
-						   const struct packet_data *packet);
+						   char isResponse);
+char process_arg_conn_data_resp(struct arg_network_info *local,
+								struct arg_network_info *remote,
+								const struct packet_data *packet);
+char process_arg_conn_data_req(struct arg_network_info *local,
+							   struct arg_network_info *remote,
+							   const struct packet_data *packet);
 
 // Encapsulation
 char send_arg_wrapped(struct arg_network_info *local,

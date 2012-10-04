@@ -21,12 +21,9 @@ IP Hopping data
 static arg_network_info *gateInfo = NULL;
 static pthread_spinlock_t networksLock;
 
-static char hoppingEnabled = 0;
-
 static pthread_spinlock_t ipLock;
 
 static pthread_t connectThread;
-static pthread_t hopThread;
 
 void init_hopper_locks(void)
 {
@@ -70,11 +67,6 @@ char init_hopper(char *conf, char *name)
 	pthread_spin_unlock(&ipLock);
 	pthread_spin_unlock(&networksLock);
 	
-	// Allow hopping now
-	printf("ARG: Starting hop thread\n");
-	pthread_create(&hopThread, NULL, timed_hop_thread, NULL); // TBD check return
-	enable_hopping();
-	
 	printf("ARG: Hopper initialized\n");
 
 	return 0;
@@ -90,20 +82,7 @@ void uninit_hopper(void)
 {
 	printf("ARG: Hopper uninit\n");
 
-	// Disable hopping
-	disable_hopping();
-	
 	// No more need to hop and connect
-	// TBD isnt't there a possibility of something bad happening if we del_timer while in
-	// the timer? IE, it will reregister and then everything will die
-	if(hopThread != 0)
-	{
-		printf("ARG: Asking hop thread to stop...");
-		pthread_cancel(hopThread);
-		pthread_join(hopThread, NULL);
-		hopThread = 0;
-		printf("done\n");
-	}
 	if(connectThread != 0)
 	{
 		printf("ARG: Asking connect thread to stop...");
@@ -333,31 +312,31 @@ char get_hopper_conf(char *confPath, char *gateName)
 	return 0;
 }
 
-void enable_hopping(void)
-{
-	printf("ARG: Hopping enabled\n");
-	hoppingEnabled = 1;
-}
-
-void disable_hopping(void)
-{
-	printf("ARG: Hopping disabled\n");
-	hoppingEnabled = 0;
-}
-
 void *connect_thread(void *data)
 {
 	struct arg_network_info *gate = NULL;
 
+	long int offset = 0;
+
 	printf("ARG: Connect thread running\n");
+
+	sleep(INITIAL_CONNECT_WAIT);
 
 	for(;;)
 	{
 		gate = gateInfo->next;
 		while(gate != NULL)
 		{
-			start_connection(gateInfo, gate);
-
+			offset = current_time_offset(&gate->lastDataUpdate);
+			if(gate->connected && offset > MAX_UPDATE_TIME * 1000)
+			{
+				printf("No update from %s in %li seconds, disconnecting\n", gate->name, offset / 1000);
+				gate->connected = 0;
+			}
+			
+			if(offset > CONNECT_WAIT_TIME * 1000)
+				start_connection(gateInfo, gate);
+			
 			// Next
 			gate = gate->next;
 		}
@@ -366,33 +345,6 @@ void *connect_thread(void *data)
 	}
 	
 	printf("ARG: Connect thread dying\n");
-
-	return 0;
-}
-
-void *timed_hop_thread(void *data)
-{
-	printf("ARG: Hop thread running\n");
-
-	for(;;)
-	{
-		if(0 && hoppingEnabled)
-		{
-			printf("ARG: Updating local IPs: ");
-			
-			pthread_spin_lock(&gateInfo->lock);
-			update_ips(gateInfo);
-			pthread_spin_unlock(&gateInfo->lock);
-		
-
-			// Apply to the network card
-			//set_external_ip(gateInfo->currIP);
-		}
-		
-		usleep(1000 * gateInfo->hopInterval);
-	}
-	
-	printf("ARG: Hop thread dying\n");
 
 	return 0;
 }
@@ -418,7 +370,7 @@ struct arg_network_info *create_arg_network_info(void)
 	cipher_init_ctx(&newInfo->cipher, cipher_info_from_string(SYMMETRIC_ALGO));
 	md_init_ctx(&newInfo->md, md_info_from_string(HASH_ALGO));
 
-	newInfo.proto.outSeqNum = 1;
+	newInfo->proto.outSeqNum = 1;
 
 	return newInfo;
 }
@@ -533,10 +485,14 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 		process_arg_pong(gateInfo, srcGate, packet);
 		break;
 
-	case ARG_CONN_DATA_MSG:
-		process_arg_conn_data(gateInfo, srcGate, packet);
+	case ARG_CONN_DATA_REQ_MSG:
+		process_arg_conn_data_req(gateInfo, srcGate, packet);
 		break;
 
+	case ARG_CONN_DATA_RESP_MSG:
+		process_arg_conn_data_resp(gateInfo, srcGate, packet);
+		break;
+	
 	default:
 		printf("ARG: Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
 		return -1;	
@@ -590,7 +546,7 @@ void update_ips(struct arg_network_info *gate)
 		// Update cache time. TBD this should probably technically be moved to update on a precise
 		// time, not just hopInterval in the future
 		current_time(&gate->ipCacheExpiration);
-		time_plus(&gate->ipCacheExpiration, gate->hopInterval);
+		time_plus(&gate->ipCacheExpiration, gate->hopInterval * .8);
 	}
 }
 

@@ -37,7 +37,7 @@ char do_next_action(struct arg_network_info *local, struct arg_network_info *rem
 {
 	char state = remote->proto.state;
 	if(state & ARG_DO_CONN)
-		return send_arg_conn_data(local, remote);
+		return send_arg_conn_data(local, remote, 0);
 	else if(state & ARG_DO_AUTH)
 		return send_arg_ping(local, remote);
 	else
@@ -169,7 +169,8 @@ char process_arg_pong(struct arg_network_info *local,
 
 // Connect
 char send_arg_conn_data(struct arg_network_info *local,
-							struct arg_network_info *remote)
+							struct arg_network_info *remote,
+							char isResponse)
 {
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL;
@@ -196,8 +197,11 @@ char send_arg_conn_data(struct arg_network_info *local,
 	//printf("We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
 
 	// Send
-	if(send_arg_packet(local, remote, ARG_CONN_DATA_MSG, msg) < 0)
+	if(send_arg_packet(local, remote,
+			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg) < 0)
+	{
 		printf("Failed to send ARG connection data\n");
+	}
 
 	pthread_spin_unlock(&remote->lock);
 
@@ -206,9 +210,20 @@ char send_arg_conn_data(struct arg_network_info *local,
 	return 0;
 }
 
-char process_arg_conn_data(struct arg_network_info *local,
-						   struct arg_network_info *remote,
-						   const struct packet_data *packet)
+char process_arg_conn_data_req(struct arg_network_info *local,
+							   struct arg_network_info *remote,
+							   const struct packet_data *packet)
+{
+	int ret = 0;
+	if((ret = process_arg_conn_data_resp(local, remote, packet)) < 0)
+		return ret;
+
+	return send_arg_conn_data(local, remote, 1);
+}
+
+char process_arg_conn_data_resp(struct arg_network_info *local,
+								struct arg_network_info *remote,
+								const struct packet_data *packet)
 {
 	char status = 0;
 	struct argmsg *msg = NULL;
@@ -245,6 +260,7 @@ char process_arg_conn_data(struct arg_network_info *local,
 		md_hmac_starts(&remote->md, remote->symKey, sizeof(remote->symKey));
 
 		remote->connected = 1;
+		current_time(&remote->lastDataUpdate);
 		
 		pthread_spin_unlock(&remote->lock);
 	}
@@ -255,7 +271,7 @@ char process_arg_conn_data(struct arg_network_info *local,
 	}
 	
 	free_arg_msg(msg);
-	
+
 	// All done with a connection
 	remote->proto.state &= ~ARG_DO_CONN;
 	do_next_action(local, remote);
@@ -388,7 +404,7 @@ char send_arg_packet(struct arg_network_info *local,
 	// Basic info
 	packet->arg->version = 1;
 	packet->arg->type = type;
-	packet->arg->seq = remote->proto.outSeqNum++;
+	packet->arg->seq = htonl(remote->proto.outSeqNum++);
 	
 	// Encrypt
 	if(msg != NULL)
@@ -487,6 +503,8 @@ char process_arg_packet(struct arg_network_info *local,
 	uint8_t hash[SHA1_HASH_SIZE];
 	uint8_t nounce[AES_BLOCK_SIZE];
 
+	char recheckSeq = 0;
+
 	int ret;
 	size_t len;
 	uint16_t argLen;
@@ -496,16 +514,22 @@ char process_arg_packet(struct arg_network_info *local,
 
 	// Look at the sequence number and see if it makes sense
 	//printf("seq num in %u\n", packet->arg->seq);
-	if(packet->arg->seq > remote->proto.inSeqNum
-		|| (packet->arg->seq < SEQ_NUM_WRAP_ALLOWANCE
+	if(ntohl(packet->arg->seq) > remote->proto.inSeqNum
+		|| (ntohl(packet->arg->seq) < SEQ_NUM_WRAP_ALLOWANCE
 			&& remote->proto.inSeqNum > UINT16_MAX - SEQ_NUM_WRAP_ALLOWANCE))
 	{
-		remote->proto.inSeqNum = packet->arg->seq;
+		remote->proto.inSeqNum = ntohl(packet->arg->seq);
+	}
+	else if(packet->arg->type == ARG_CONN_DATA_REQ_MSG)
+	{
+		// IF this is an initial data send, then they must be using a new IV (compared to
+		// what we have currently). We will check once everything is decrypted
+		recheckSeq = 1;
 	}
 	else
 	{
 		// Fail, sequence numbers should always advance (except for wrap-around)
-		printf("Sequence number not monotonic (got %u, should be > %u)\n", packet->arg->seq, remote->proto.inSeqNum);
+		printf("Sequence number not monotonic (got %u, should be > %u)\n", ntohl(packet->arg->seq), remote->proto.inSeqNum);
 		return -2;
 	}
 	
@@ -602,6 +626,19 @@ char process_arg_packet(struct arg_network_info *local,
 	}
 	else
 		*msg = NULL;
+	
+	// Allow improper sequence number through if this is a seemingly valid connection
+	// data packet. This lets gateways die and then rejoin
+	if(recheckSeq)
+	{
+		if(*msg == NULL)
+			return -2;
+		
+		if(memcmp(((struct arg_conn_data*)out->data)->iv, remote->iv, sizeof(remote->iv)) == 0)
+			return -2;
+		
+		remote->proto.inSeqNum = ntohl(packet->arg->seq);
+	}
 	
 	free_packet(newPacket);
 

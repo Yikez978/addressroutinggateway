@@ -31,6 +31,7 @@ typedef struct arg_network_info {
 	char name[MAX_NAME_SIZE];
 	
 	char connected:1; // 1 if we have all the data needed to send ARG packets to this gateway
+	struct timespec lastDataUpdate;
 
 	struct timespec lastAuthTime;
 	struct proto_data proto;
@@ -76,15 +77,8 @@ void uninit_hopper(void);
 // Retreives and sets known ARG network keys/local gateway keys, etc
 char get_hopper_conf(char *confPath, char *gateName);
 
-// Enable and disable hopping
-void enable_hopping(void);
-void disable_hopping(void);
-
 // Does the initial connect to all of the gateways we know of
 void *connect_thread(void *data);
-
-// Perform actual periodic hop
-void *timed_hop_thread(void *data);
 
 // Manage the list of ARG networks. NOT synchronzied, caller should claim lock!
 struct arg_network_info *create_arg_network_info(void);
