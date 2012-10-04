@@ -28,6 +28,9 @@ AC_CHECK_LIB([pthread], [main])
 AC_CHECK_LIB([polarssl], [main])
 AC_CHECK_HEADERS([polarssl/config.h])
 
+# Linux networking
+AC_CHECK_HEADERS([arpa/inet.h])
+
 # Optional: Capture signals (SIGTERM, etc) and handle cleanly
 AC_CHECK_HEADERS([signal.h])
 

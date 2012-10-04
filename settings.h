@@ -22,7 +22,11 @@
 // Number of seconds before an inactive connection is removed
 #define NAT_OLD_CONN_TIME 120
 
-#define MAX_PACKET_SIZE 65536
+// Sequence numbers may have to wrap if they reach 2^32. How far from the boundary will we
+// accept a sudden reversion to the beginnig?
+#define SEQ_NUM_WRAP_ALLOWANCE 10
+
+#define MAX_PACKET_SIZE UINT16_MAX
 #define MAX_CONF_LINE 300
 
 #define SYMMETRIC_ALGO "AES-256-CTR"

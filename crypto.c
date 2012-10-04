@@ -117,17 +117,6 @@ uint32_t totp(const uint8_t *key, unsigned int klen, unsigned long step, unsigne
 	return hotp(key, klen, time / step);	
 }
 
-void aes_encrypt(const uint8_t *key, int klen, const uint8_t *data, int dlen, uint8_t *out, int *outlen)
-{
-	// TBD encrypt
-	
-}
-
-void aes_decrypt(uint8_t *data, int dlen, uint8_t *out, int *outlen)
-{
-	// TBD decrypt
-}
-
 void get_random_bytes(void *buf, int nbytes)
 {
 	static int randomData = 0;

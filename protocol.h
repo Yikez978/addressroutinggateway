@@ -124,7 +124,7 @@ typedef struct proto_data {
 	char state; // Records actions that need to occur
 
 	uint32_t inSeqNum; // Last sequence number we received from them
-	uint32_t outSeqNum; // Last sequence number we sent
+	uint32_t outSeqNum; // Next sequence number for us to send
 	long latency; // One-way latency in ms
 	
 	struct timespec pingSentTime;

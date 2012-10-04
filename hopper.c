@@ -410,13 +410,15 @@ struct arg_network_info *create_arg_network_info(void)
 
 	// Clear it all out
 	memset(newInfo, 0, sizeof(struct arg_network_info));
-	
+
 	// Init things that need it
 	pthread_spin_init(&newInfo->lock, PTHREAD_PROCESS_SHARED);
 	rsa_init(&newInfo->rsa, RSA_PKCS_V15, 0);
 
 	cipher_init_ctx(&newInfo->cipher, cipher_info_from_string(SYMMETRIC_ALGO));
 	md_init_ctx(&newInfo->md, md_info_from_string(HASH_ALGO));
+
+	newInfo.proto.outSeqNum = 1;
 
 	return newInfo;
 }

@@ -10,14 +10,6 @@
 #include "crypto.h"
 #include "hopper.h"
 
-// In a full implementation, we would use public and private keys for authentication
-// and initial connection to other gateways. For the test implementation, we used a
-// globally shared key for HMACs, rather than digital signatures
-static const uint8_t argGlobalKey[AES_KEY_SIZE] = {25, -18, -127, -10,
-												 67, 30, 7, -49,
-												 68, -70, 19, 106,
-												 -100, -11, 72, 18};
-
 void init_protocol_locks(void)
 {
 
@@ -360,6 +352,8 @@ char send_arg_packet(struct arg_network_info *local,
 	uint16_t fullLen = 0;
 	uint8_t hash[SHA1_HASH_SIZE];
 
+	uint8_t nounce[AES_BLOCK_SIZE];
+
 	// Create packet we will build within, giving it plenty of extra space (encryption padding and such)
 	fullLen = 20 + ARG_HDR_LEN;
 	if(msg != NULL)
@@ -390,16 +384,22 @@ char send_arg_packet(struct arg_network_info *local,
 	packet->ipv4->check = 0;
 
 	parse_packet(packet);
-	
-	// Encrypt
+
+	// Basic info
 	packet->arg->version = 1;
 	packet->arg->type = type;
+	packet->arg->seq = remote->proto.outSeqNum++;
+	
+	// Encrypt
 	if(msg != NULL)
 	{
 		if(type == ARG_WRAPPED_MSG)
 		{
 			// Symmetric encryption with remote symmetric key
-			cipher_reset(&remote->cipher, remote->iv); // TBD, combine iv with sequence number
+			memcpy(nounce, remote->iv, sizeof(nounce));
+			for(i = 0; i < sizeof(packet->arg->seq); i++)
+				nounce[i] ^= ((packet->arg->seq >> (i * 8)) & 0xFF);
+			cipher_reset(&remote->cipher, nounce);
 
 			blockSize = cipher_get_block_size(&remote->cipher);
 
@@ -439,6 +439,8 @@ char send_arg_packet(struct arg_network_info *local,
 
 	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
 	packet->ipv4->tot_len = htons(packet->len);
+	
+	//printf("seq num out %u\n", packet->arg->seq);
 
 	if(type == ARG_WRAPPED_MSG)
 	{
@@ -483,6 +485,7 @@ char process_arg_packet(struct arg_network_info *local,
 	size_t olen;
 
 	uint8_t hash[SHA1_HASH_SIZE];
+	uint8_t nounce[AES_BLOCK_SIZE];
 
 	int ret;
 	size_t len;
@@ -491,9 +494,21 @@ char process_arg_packet(struct arg_network_info *local,
 	struct packet_data *newPacket = NULL;
 	struct argmsg *out = NULL;
 
-	//printf("Processing packet");
-	//printRaw(packet->len, packet->data);
-
+	// Look at the sequence number and see if it makes sense
+	//printf("seq num in %u\n", packet->arg->seq);
+	if(packet->arg->seq > remote->proto.inSeqNum
+		|| (packet->arg->seq < SEQ_NUM_WRAP_ALLOWANCE
+			&& remote->proto.inSeqNum > UINT16_MAX - SEQ_NUM_WRAP_ALLOWANCE))
+	{
+		remote->proto.inSeqNum = packet->arg->seq;
+	}
+	else
+	{
+		// Fail, sequence numbers should always advance (except for wrap-around)
+		printf("Sequence number not monotonic (got %u, should be > %u)\n", packet->arg->seq, remote->proto.inSeqNum);
+		return -2;
+	}
+	
 	// Duplicate packet so we can remove the hash and check
 	newPacket = copy_packet(packet);
 	if(newPacket == NULL)
@@ -532,9 +547,6 @@ char process_arg_packet(struct arg_network_info *local,
 		}
 	}
 
-	//printf("Received ");
-	//printRaw(packet->len, packet->data);
-	
 	// Decrypt
 	if(argLen > ARG_HDR_LEN)
 	{
@@ -549,7 +561,10 @@ char process_arg_packet(struct arg_network_info *local,
 		if(newPacket->arg->type == ARG_WRAPPED_MSG)
 		{
 			// Symmetric decrypt using local symmetric key
-			cipher_reset(&local->cipher, local->iv); // TBD, combine iv with sequence number
+			memcpy(nounce, local->iv, sizeof(nounce));
+			for(i = 0; i < sizeof(newPacket->arg->seq); i++)
+				nounce[i] ^= ((newPacket->arg->seq >> (i * 8)) & 0xFF);
+			cipher_reset(&local->cipher, nounce);
 
 			blockSize = cipher_get_block_size(&local->cipher);
 

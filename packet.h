@@ -56,8 +56,6 @@ struct packet_data *create_packet(int len);
 struct packet_data *copy_packet(const struct packet_data *packet);
 void free_packet(struct packet_data *packet);
 
-void compute_packet_checksums(struct packet_data *packet);
-
 char send_packet(const struct packet_data *packet);
 
 uint16_t get_source_port(const struct packet_data *packet);

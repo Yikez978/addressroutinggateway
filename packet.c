@@ -4,7 +4,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 
-#include <arpa/inet.h> // TBD add to configure.ac
+#include <arpa/inet.h>
 
 #include "packet.h"
 #include "protocol.h"
@@ -138,11 +138,6 @@ void free_packet(struct packet_data *packet)
 
 		free(packet);
 	}
-}
-
-void compute_packet_checksums(struct packet_data *packet)
-{
-	// TBD. May not be needed, sendto does it for us	
 }
 
 char send_packet(const struct packet_data *packet)
