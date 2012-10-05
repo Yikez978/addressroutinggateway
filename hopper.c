@@ -386,8 +386,11 @@ struct arg_network_info *remove_arg_network(struct arg_network_info *network)
 	if(network->prev != NULL)
 		network->prev->next = network->next;
 
-	//pthread_spin_destroy(&network->lock);
+	pthread_spin_destroy(&network->lock);
+
 	rsa_free(&network->rsa);
+	md_free_ctx(&network->md);
+	cipher_free_ctx(&network->cipher);
 
 	// Free us
 	free(network);

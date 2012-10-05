@@ -97,14 +97,16 @@ void *receive_thread(void *tData)
     
 	if(pcap_compile(pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
 	{
-		printf("Unable to compile filter\n");
+		printf("Unable to compile filter: %s\n", pcap_geterr(pd));
+		pcap_close(pd);
 		return (void*)-3;
 	}
 
     if(pcap_setfilter(pd, &fp) == -1)
 	{
-		printf("Unable to set filter\n");
+		printf("Unable to set filter: %s\n", pcap_geterr(pd));
 		pcap_freecode(&fp);
+		pcap_close(pd);
 		return (void*)-4;
 	}
 	
