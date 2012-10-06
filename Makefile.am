@@ -7,8 +7,6 @@ bin_PROGRAMS = arg
 arg_SOURCES = uthash.h \
 	packet.h \
 	packet.c \
-	sha1.h \
-	sha1.c \
 	utility.h \
 	utility.c \
 	crypto.h \
