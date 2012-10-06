@@ -341,7 +341,7 @@ void *connect_thread(void *data)
 			gate = gate->next;
 		}
 
-		sleep(CONNECT_WAIT_TIME);
+		sleep(CONNECT_WAIT_TIME / 4);
 	}
 	
 	printf("ARG: Connect thread dying\n");
