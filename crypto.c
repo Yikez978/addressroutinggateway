@@ -6,81 +6,7 @@
 #include <unistd.h>
 
 #include "crypto.h"
-#include "sha1.h"
 #include "settings.h"
-
-int hmac_sha1(const uint8_t *key, unsigned int klen, const uint8_t *data, unsigned int dlen, uint8_t *out)
-{
-	int i = 0;
-	uint8_t *scratchSpace = NULL;
-	SHA1Context sha;
-	int maxLen = HMAC_BLOCK_SIZE + (HMAC_SIZE < dlen ? dlen : HMAC_SIZE);
-
-	// Safety check
-	if(klen > HMAC_BLOCK_SIZE)
-	{
-		printf("ARG: Key must be shorter than HMAC_BLOCK_SIZE (%i)\n", HMAC_BLOCK_SIZE);
-		return 0;
-	}
-	
-	// Allocate enough space for the max we need, which is
-	// the key padded to block size + either the data length or the hash length
-	scratchSpace = calloc(maxLen, 1);
-	if(scratchSpace == NULL)
-	{
-		printf("ARG: Unable to allocate scratch space for HMAC\n");
-		return 0;
-	}
-
-	// Steps refer to the steps under the HMAC RFC's "Definition of HMAC" section
-	// (1) Pad key. TBD this could always come in padded to allow 
-	// the copy to be skipped
-	memcpy(scratchSpace, key, klen);
-	
-	// (2) XOR padded key with ipad (0x36 repeated, from RFC2104)
-	for(i = 0; i < HMAC_BLOCK_SIZE; i++)
-		scratchSpace[i] ^= 0x36;
-
-	// (3) Append data
-	memcpy(scratchSpace + HMAC_BLOCK_SIZE, data, dlen);
-
-	// (4) Hash that mess
-	SHA1Reset(&sha);
-	SHA1Input(&sha, scratchSpace, HMAC_BLOCK_SIZE + dlen);
-	if(!SHA1Result(&sha))
-	{
-		printf("ARG: HMAC unable to create inner SHA\n");
-		return 0;
-	}
-
-	// (pre-5) Redo the key padding
-	memset(scratchSpace, 0, HMAC_BLOCK_SIZE);
-	memcpy(scratchSpace, key, klen);
-	
-	// (5) XOR padded key with opad (0x5C repeated, from RFC2104)
-	for(i = 0; i < HMAC_BLOCK_SIZE; i++)
-		scratchSpace[i] ^= 0x5C;
-
-	// (6) Append first hash
-	memcpy(scratchSpace, sha.Message_Digest, HMAC_SIZE);
-	
-	// (7) And hash again
-	SHA1Reset(&sha);
-	SHA1Input(&sha, scratchSpace, HMAC_BLOCK_SIZE + HMAC_SIZE);
-	if(!SHA1Result(&sha))
-	{
-		printf("ARG: HMAC unable to create outer SHA\n");
-		return 0;
-	}
-
-	// Save off
-	memcpy(out, sha.Message_Digest, HMAC_SIZE);
-
-	// All done!
-	free(scratchSpace);
-
-	return 1;
-}
 
 uint32_t hotp(const uint8_t *key, unsigned int klen, unsigned long count)
 {
@@ -88,11 +14,7 @@ uint32_t hotp(const uint8_t *key, unsigned int klen, unsigned long count)
 	uint32_t result = 0;
 	uint8_t hmac_result[HMAC_SIZE] = {0};
 	
-	if(!hmac_sha1(key, klen, (uint8_t*)&count, sizeof(count), hmac_result))
-	{
-		printf("ARG: Unable to perform HOTP\n");
-		return 0;
-	}
+	sha1_hmac(key, klen, (uint8_t*)&count, sizeof(count), hmac_result);
 
 	// Truncate, code directly from HOTP RFC
 	offset =  hmac_result[HMAC_SIZE - 1] & 0xf;
