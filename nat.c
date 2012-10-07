@@ -23,33 +23,33 @@ void init_nat_locks(void)
 
 char init_nat(void)
 {
-	printf("ARG: NAT init\n");
+	arglog(LOG_DEBUG, "NAT init\n");
 
 	pthread_create(&natCleanupThread, NULL, nat_cleanup_thread, NULL); // TBD check return
 
-	printf("ARG: NAT initialized\n");
+	arglog(LOG_DEBUG, "NAT initialized\n");
 
 	return 0;
 }
 
 void uninit_nat(void)
 {
-	printf("ARG: NAT uninit\n");
+	arglog(LOG_DEBUG, "NAT uninit\n");
 	
 	if(natCleanupThread != 0)
 	{
-		printf("ARG: Asking NAT cleanup thread to stop...");
+		arglog(LOG_DEBUG, "Asking NAT cleanup thread to stop...");
 		pthread_cancel(natCleanupThread);
 		pthread_join(natCleanupThread, NULL);
 		natCleanupThread = 0;
-		printf("done\n");
+		arglog(LOG_DEBUG, "done\n");
 	}
 
 	empty_nat_table();
 
 	pthread_spin_destroy(&natTableLock);
 
-	printf("ARG: NAT finished\n");
+	arglog(LOG_DEBUG, "NAT finished\n");
 }
 
 char do_nat_inbound_rewrite(const struct packet_data *packet)
@@ -104,7 +104,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	newPacket = copy_packet(packet);
 	if(newPacket == NULL)
 	{
-		printf("Unable to rewrite packet\n");
+		arglog(LOG_DEBUG, "Unable to rewrite packet\n");
 		return -3;
 	}
 
@@ -176,7 +176,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	newPacket = copy_packet(packet);
 	if(newPacket == NULL)
 	{
-		printf("Unable to rewrite packet\n");
+		arglog(LOG_DEBUG, "Unable to rewrite packet\n");
 		return -3;
 	}
 	
@@ -194,19 +194,19 @@ void print_nat_table(void)
 	struct nat_entry_bucket *b = natTable;
 	struct nat_entry *e = NULL;
 
-	printf("ARG: NAT Table:\n");
+	arglog(LOG_DEBUG, "NAT Table:\n");
 	while(b != NULL)
 	{
-		printf("ARG:  Bucket: ");
+		arglog(LOG_DEBUG, " Bucket: ");
 		print_nat_bucket(b);
-		printf("\n");
+		arglog(LOG_DEBUG, "\n");
 
 		e = b->first;
 		while(e != NULL)
 		{
-			printf("ARG:   Entry: ");
+			arglog(LOG_DEBUG, "  Entry: ");
 			print_nat_entry(e);
-			printf("\n");
+			arglog(LOG_DEBUG, "\n");
 
 			e = e->next;
 		}
@@ -217,18 +217,18 @@ void print_nat_table(void)
 
 void print_nat_bucket(const struct nat_entry_bucket *bucket)
 {
-	printf("k:%i e:", bucket->key);
+	arglog(LOG_DEBUG, "k:%i e:", bucket->key);
 	printIP(ADDR_SIZE, bucket->extIP);
-	printf(":%i", bucket->extPort);
+	arglog(LOG_DEBUG, ":%i", bucket->extPort);
 }
 
 void print_nat_entry(const struct nat_entry *entry)
 {
-	printf("i:");
+	arglog(LOG_DEBUG, "i:");
 	printIP(ADDR_SIZE, entry->intIP);
-	printf(":%i g:", entry->intPort);
+	arglog(LOG_DEBUG, ":%i g:", entry->intPort);
 	printIP(ADDR_SIZE, entry->gateIP);
-	printf(":%i (lu %li ms ago)", entry->gatePort, current_time_offset(&entry->lastUsed));
+	arglog(LOG_DEBUG, ":%i (lu %li ms ago)", entry->gatePort, current_time_offset(&entry->lastUsed));
 }
 
 struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, const int key)
@@ -240,7 +240,7 @@ struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, con
 	bucket = (nat_entry_bucket*)malloc(sizeof(struct nat_entry_bucket));
 	if(bucket == NULL)
 	{
-		printf("ARG: Unable to allocate space for new NAT bucket\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for new NAT bucket\n");
 		return NULL;
 	}
 
@@ -266,7 +266,7 @@ struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_
 	e = (struct nat_entry*)malloc(sizeof(struct nat_entry));
 	if(e == NULL)
 	{
-		printf("ARG: Unable to allocate space for new NAT entry\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for new NAT entry\n");
 		return NULL;
 	}
 
@@ -276,7 +276,7 @@ struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_
 	currIP = current_ip();
 	if(currIP == NULL)
 	{
-		printf("ARG: Unable to complete creation of new NAT entry, out of memory\n");
+		arglog(LOG_DEBUG, "Unable to complete creation of new NAT entry, out of memory\n");
 		free(e);
 		return NULL;
 	}
@@ -374,7 +374,7 @@ struct nat_entry *remove_nat_entry(struct nat_entry *e)
 
 void *nat_cleanup_thread(void *data)
 {
-	printf("ARG: NAT cleanup thread running\n");
+	arglog(LOG_DEBUG, "NAT cleanup thread running\n");
 
 	for(;;)
 	{
@@ -387,7 +387,7 @@ void *nat_cleanup_thread(void *data)
 		sleep(NAT_CLEAN_TIME);
 	}
 
-	printf("ARG: NAT cleanup thread dying\n");
+	arglog(LOG_DEBUG, "NAT cleanup thread dying\n");
 
 	return 0;
 }

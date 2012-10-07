@@ -49,12 +49,12 @@ char send_arg_ping(struct arg_network_info *local,
 {
 	struct argmsg *msg = NULL;
 	
-	printf("ARG: Sending ping to %s\n", remote->name);
+	arglog(LOG_DEBUG, "Sending ping to %s\n", remote->name);
 
 	msg = create_arg_msg(sizeof(remote->proto.pingID));
 	if(msg == NULL)
 	{
-		printf("Unable to allocate space to send ping\n");
+		arglog(LOG_DEBUG, "Unable to allocate space to send ping\n");
 		return -1;
 	}
 
@@ -66,7 +66,7 @@ char send_arg_ping(struct arg_network_info *local,
 	if(send_arg_packet(local, remote, ARG_PING_MSG, msg) == 0)
 		current_time(&remote->proto.pingSentTime);
 	else
-		printf("Failed to send ARG ping\n");
+		arglog(LOG_DEBUG, "Failed to send ARG ping\n");
 
 	pthread_spin_unlock(&remote->lock);
 
@@ -82,11 +82,11 @@ char process_arg_ping(struct arg_network_info *local,
 	char status = 0;
 	struct argmsg *msg = NULL;
 
-	printf("ARG: Received ping from %s\n", remote->name);
+	arglog(LOG_DEBUG, "Received ping from %s\n", remote->name);
 	
 	if(process_arg_packet(local, remote, packet, &msg))
 	{
-		printf("ARG: Stopping pong processing\n");
+		arglog(LOG_DEBUG, "Stopping pong processing\n");
 		return -1;
 	}
 
@@ -97,7 +97,7 @@ char process_arg_ping(struct arg_network_info *local,
 	}
 	else
 	{
-		printf("ARG: Not sending pong, data not a proper ping ID\n");
+		arglog(LOG_DEBUG, "Not sending pong, data not a proper ping ID\n");
 		status = -2;
 	}
 	
@@ -113,17 +113,17 @@ char process_arg_pong(struct arg_network_info *local,
 	struct argmsg *msg = NULL;
 	uint32_t *id = 0;
 	
-	printf("ARG: Received pong from %s\n", remote->name);
+	arglog(LOG_DEBUG, "Received pong from %s\n", remote->name);
 	
 	if(process_arg_packet(local, remote, packet, &msg))
 	{
-		printf("ARG: Stopping pong processing\n");
+		arglog(LOG_DEBUG, "Stopping pong processing\n");
 		return -1;
 	}
 
 	if(msg->data == NULL || msg->len != sizeof(remote->proto.pingID))
 	{
-		printf("ARG: Not accepting pong, data not a proper ping ID\n");
+		arglog(LOG_DEBUG, "Not accepting pong, data not a proper ping ID\n");
 		free_arg_msg(msg);
 		return -2;
 	}
@@ -139,20 +139,20 @@ char process_arg_pong(struct arg_network_info *local,
 			// TBD skip/try again with huge latency changes?
 			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
 			status = 0;
-			printf("ARG: Latency to %s: %li ms\n", remote->name, remote->proto.latency);
+			arglog(LOG_DEBUG, "Latency to %s: %li ms\n", remote->name, remote->proto.latency);
 		}
 		else
 		{
 			// We sent one, but the ID was incorrect. The remote gateway
 			// had the wrong ID or it did not have the correct global key
 			// Either way, we don't trust them now
-			printf("ARG: The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
+			arglog(LOG_DEBUG, "The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
 			status = 0;
 		}
 	}
 	else
 	{
-		printf("ARG: Not accepting pong, no ping sent\n");
+		arglog(LOG_DEBUG, "Not accepting pong, no ping sent\n");
 		status = -3;
 	}
 	
@@ -175,13 +175,13 @@ char send_arg_conn_data(struct arg_network_info *local,
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL;
 
-	printf("ARG: Sending connect information to %s\n", remote->name);
+	arglog(LOG_DEBUG, "Sending connect information to %s\n", remote->name);
 
 	// Build message
 	msg = create_arg_msg(sizeof(struct arg_conn_data));
 	if(msg == NULL)
 	{
-		printf("Unable to allocate space to send connect request\n");
+		arglog(LOG_DEBUG, "Unable to allocate space to send connect request\n");
 		return -2;
 	}
 
@@ -194,13 +194,13 @@ char send_arg_conn_data(struct arg_network_info *local,
 
 	pthread_spin_lock(&remote->lock);
 
-	//printf("We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
+	//arglog(LOG_DEBUG, "We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
 
 	// Send
 	if(send_arg_packet(local, remote,
 			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg) < 0)
 	{
-		printf("Failed to send ARG connection data\n");
+		arglog(LOG_DEBUG, "Failed to send ARG connection data\n");
 	}
 
 	pthread_spin_unlock(&remote->lock);
@@ -229,11 +229,11 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL; 
 
-	printf("ARG: Received connection data from %s\n", remote->name);
+	arglog(LOG_DEBUG, "Received connection data from %s\n", remote->name);
 	
 	if(process_arg_packet(local, remote, packet, &msg))
 	{
-		printf("ARG: Stopping connection data processing\n");
+		arglog(LOG_DEBUG, "Stopping connection data processing\n");
 		return -1;
 	}
 
@@ -251,7 +251,7 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 		remote->hopInterval = ntohl(connData->hopInterval);
 		current_time_plus(&remote->timeBase, -ntohl(connData->timeOffset));
 
-		/*printf("Time base for remote %s is now %lus %luns, at hop %li\n",
+		/*arglog(LOG_DEBUG, "Time base for remote %s is now %lus %luns, at hop %li\n",
 			remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec,
 			(current_time_offset(&remote->timeBase) / remote->hopInterval));*/
 
@@ -266,7 +266,7 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 	}
 	else
 	{
-		printf("ARG: Connection not properly sized\n");
+		arglog(LOG_DEBUG, "Connection not properly sized\n");
 		status = -2;
 	}
 	
@@ -291,7 +291,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 	// Must be connected
 	if(!remote->connected)
 	{
-		printf("Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
+		arglog(LOG_DEBUG, "Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);
 		return -1;
 	}
@@ -319,14 +319,14 @@ char process_arg_wrapped(struct arg_network_info *local,
 	// Must be connected
 	if(!remote->connected)
 	{
-		printf("Refusing to unwrap packet, %s is not authenticated/connected\n", remote->name);
+		arglog(LOG_DEBUG, "Refusing to unwrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);
 		return -1;
 	}
 
 	if(process_arg_packet(local, remote, packet, &msg))
 	{
-		printf("ARG: Stopping connection data processing\n");
+		arglog(LOG_DEBUG, "Stopping connection data processing\n");
 		pthread_spin_unlock(&remote->lock);
 		return -2;
 	}
@@ -335,7 +335,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 	newPacket = create_packet(msg->len);
 	if(newPacket == NULL)
 	{
-		printf("Unable to create new packet to drop into internal network\n");
+		arglog(LOG_DEBUG, "Unable to create new packet to drop into internal network\n");
 		free_arg_msg(msg);
 		pthread_spin_unlock(&remote->lock);
 		return -3;
@@ -378,7 +378,7 @@ char send_arg_packet(struct arg_network_info *local,
 	packet = create_packet(fullLen);
 	if(packet == NULL)
 	{
-		printf("Unable to allocate space for ARG packet\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for ARG packet\n");
 		return -1;
 	}
 	
@@ -439,7 +439,7 @@ char send_arg_packet(struct arg_network_info *local,
 			// Admin packets can be at most keysize/8 bytes (ie, 128 bytes for a 1024 bit key)
 			if(msg->len > remote->rsa.len)
 			{
-				printf("Admin packet data must be %lu bytes or less\n", remote->rsa.len);
+				arglog(LOG_DEBUG, "Admin packet data must be %lu bytes or less\n", remote->rsa.len);
 				free_packet(packet);
 				return -2;
 			}
@@ -456,7 +456,7 @@ char send_arg_packet(struct arg_network_info *local,
 	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
 	packet->ipv4->tot_len = htons(packet->len);
 	
-	//printf("seq num out %u\n", packet->arg->seq);
+	//arglog(LOG_DEBUG, "seq num out %u\n", packet->arg->seq);
 
 	if(type == ARG_WRAPPED_MSG)
 	{
@@ -472,7 +472,7 @@ char send_arg_packet(struct arg_network_info *local,
 		if((ret = rsa_pkcs1_sign(&local->rsa, NULL, NULL, RSA_PRIVATE, SIG_RSA_SHA1,
 			sizeof(hash), hash, packet->arg->sig)) != 0)
 		{
-			printf("Unable to sign, error %i\n", ret);
+			arglog(LOG_DEBUG, "Unable to sign, error %i\n", ret);
 			free_packet(packet);
 			return -3;
 		}
@@ -481,7 +481,7 @@ char send_arg_packet(struct arg_network_info *local,
 	// Send!
 	if(send_packet(packet) < 0)
 	{
-		printf("Failed to send ARG packet\n");
+		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
 		return -2;
 	}
 
@@ -513,7 +513,7 @@ char process_arg_packet(struct arg_network_info *local,
 	struct argmsg *out = NULL;
 
 	// Look at the sequence number and see if it makes sense
-	//printf("seq num in %u\n", packet->arg->seq);
+	//arglog(LOG_DEBUG, "seq num in %u\n", packet->arg->seq);
 	if(ntohl(packet->arg->seq) > remote->proto.inSeqNum
 		|| (ntohl(packet->arg->seq) < SEQ_NUM_WRAP_ALLOWANCE
 			&& remote->proto.inSeqNum > UINT16_MAX - SEQ_NUM_WRAP_ALLOWANCE))
@@ -529,7 +529,7 @@ char process_arg_packet(struct arg_network_info *local,
 	else
 	{
 		// Fail, sequence numbers should always advance (except for wrap-around)
-		printf("Sequence number not monotonic (got %u, should be > %u)\n", ntohl(packet->arg->seq), remote->proto.inSeqNum);
+		arglog(LOG_DEBUG, "Sequence number not monotonic (got %u, should be > %u)\n", ntohl(packet->arg->seq), remote->proto.inSeqNum);
 		return -2;
 	}
 	
@@ -537,7 +537,7 @@ char process_arg_packet(struct arg_network_info *local,
 	newPacket = copy_packet(packet);
 	if(newPacket == NULL)
 	{
-		printf("Unable to duplicate packet for checking\n");
+		arglog(LOG_DEBUG, "Unable to duplicate packet for checking\n");
 		return -1;
 	}
 
@@ -553,7 +553,7 @@ char process_arg_packet(struct arg_network_info *local,
 
 		if(memcmp(newPacket->arg->sig, packet->arg->sig, sizeof(newPacket->arg->sig)))
 		{
-			printf("Unable to verify hmac\n");
+			arglog(LOG_DEBUG, "Unable to verify hmac\n");
 			free_packet(newPacket);
 			return -3;
 		}
@@ -565,7 +565,7 @@ char process_arg_packet(struct arg_network_info *local,
 		if((ret = rsa_pkcs1_verify(&remote->rsa, RSA_PUBLIC, SIG_RSA_SHA1,
 			sizeof(hash), hash, packet->arg->sig)) != 0 )
 		{
-			printf("Unable to verify signature, error %i\n", ret);
+			arglog(LOG_DEBUG, "Unable to verify signature, error %i\n", ret);
 			free_packet(newPacket);
 			return -3;
 		}
@@ -577,7 +577,7 @@ char process_arg_packet(struct arg_network_info *local,
 		out = create_arg_msg(argLen);
 		if(out == NULL)
 		{
-			printf("Unable to allocate space to write decrypted message\n");
+			arglog(LOG_DEBUG, "Unable to allocate space to write decrypted message\n");
 			free_packet(newPacket);
 			return -3;
 		}
@@ -610,7 +610,7 @@ char process_arg_packet(struct arg_network_info *local,
 			if((ret = rsa_pkcs1_decrypt(&local->rsa, RSA_PRIVATE, &len,
 				newPacket->unknown_data, out->data, out->len)) != 0)
 			{
-				printf("Unable to decrypt packet contents, error %i\n", ret);
+				arglog(LOG_DEBUG, "Unable to decrypt packet contents, error %i\n", ret);
 				free_arg_msg(out);
 				free_packet(newPacket);
 				return -4;
@@ -619,7 +619,7 @@ char process_arg_packet(struct arg_network_info *local,
 			out->len = len;
 		}
 		
-		//printf("msg from packet");
+		//arglog(LOG_DEBUG, "msg from packet");
 		//printRaw(out->len, out->data);
 		
 		*msg = out;

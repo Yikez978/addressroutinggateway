@@ -24,25 +24,25 @@ static struct receive_thread_data extData = {
 
 char init_director(void)
 {
-	printf("ARG: Director init\n");
+	arglog(LOG_DEBUG, "Director init\n");
 
 	// Enter receive loop, which we then pass off to director
 	pthread_create(&intData.thread, NULL, receive_thread, (void*)&intData); // TBD check returns
 	pthread_create(&extData.thread, NULL, receive_thread, (void*)&extData);
 	
-	printf("ARG: Director initialized\n");
+	arglog(LOG_DEBUG, "Director initialized\n");
 	return 0;
 }
 
 char uninit_director(void)
 {
-	printf("ARG: Director uninit\n");
+	arglog(LOG_DEBUG, "Director uninit\n");
 
 	pthread_cancel(intData.thread);
 	pthread_cancel(extData.thread);
 	join_director();
 
-	printf("ARG: Director finished\n");
+	arglog(LOG_DEBUG, "Director finished\n");
 	return 0;
 }
 
@@ -73,7 +73,7 @@ void *receive_thread(void *tData)
 	pcap_t *pd = pcap_create(data->dev, ebuf);
 	if(pd == NULL)
 	{
-		printf("Unable to initialize create pcap driver on %s: %s\n", data->dev, ebuf);
+		arglog(LOG_DEBUG, "Unable to initialize create pcap driver on %s: %s\n", data->dev, ebuf);
 		return (void*)-1;
 	}
 
@@ -83,7 +83,7 @@ void *receive_thread(void *tData)
 
 	if(pcap_activate(pd))
 	{
-		printf("Unable to activate pcap on %s: %s\n", data->dev, pcap_geterr(pd));
+		arglog(LOG_DEBUG, "Unable to activate pcap on %s: %s\n", data->dev, pcap_geterr(pd));
 		return (void*)-2;
 	}
 
@@ -93,18 +93,18 @@ void *receive_thread(void *tData)
 	snprintf(filter, sizeof(filter), "not arp and %s net %s mask %s",
 		(data->ifaceSide == IFACE_EXTERNAL ? "dst" : "src"), baseIP, mask);
 	
-	printf("Using filter: %s\n", filter);
+	arglog(LOG_DEBUG, "Using filter: %s\n", filter);
     
 	if(pcap_compile(pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
 	{
-		printf("Unable to compile filter: %s\n", pcap_geterr(pd));
+		arglog(LOG_DEBUG, "Unable to compile filter: %s\n", pcap_geterr(pd));
 		pcap_close(pd);
 		return (void*)-3;
 	}
 
     if(pcap_setfilter(pd, &fp) == -1)
 	{
-		printf("Unable to set filter: %s\n", pcap_geterr(pd));
+		arglog(LOG_DEBUG, "Unable to set filter: %s\n", pcap_geterr(pd));
 		pcap_freecode(&fp);
 		pcap_close(pd);
 		return (void*)-4;
@@ -122,12 +122,12 @@ void *receive_thread(void *tData)
 	{
 		frameHeadLen = 0;
 		frameTailLen = 0;
-		printf("Unable to determine data link type\n");
+		arglog(LOG_DEBUG, "Unable to determine data link type\n");
 		return (void*)-3;
 	}
 
 	// Receive, parse, and pass on to handler
-	printf("Ready to receive packets on %s\n", data->dev);
+	arglog(LOG_DEBUG, "Ready to receive packets on %s\n", data->dev);
 
 	for(;;)
 	{
@@ -156,7 +156,7 @@ void *receive_thread(void *tData)
 	pcap_close(pd);
 	pd = NULL;
 
-	printf("Done receiving packets on %s\n", data->dev);
+	arglog(LOG_DEBUG, "Done receiving packets on %s\n", data->dev);
 
 	return NULL;
 }
@@ -172,7 +172,7 @@ void direct_inbound(const struct packet_data *packet)
 		if(packet->arg == NULL)
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Reject: Bad Protocol\n");
+			arglog(LOG_RESULTS, "Inbound Reject: Bad Protocol\n");
 			#endif
 			return;
 		}
@@ -182,13 +182,13 @@ void direct_inbound(const struct packet_data *packet)
 			if(process_admin_msg(packet, gate) == 0)
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Accept: admin\n");
+				arglog(LOG_RESULTS, "Inbound Accept: admin\n");
 				#endif
 			}
 			else
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Reject: Invalid admin\n");
+				arglog(LOG_RESULTS, "Inbound Reject: Invalid admin\n");
 				#endif
 			}
 		}
@@ -198,7 +198,7 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Reject: Dest IP Incorrect\n");
+				arglog(LOG_RESULTS, "Inbound Reject: Dest IP Incorrect\n");
 				#endif
 				return;
 			}
@@ -206,7 +206,7 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Reject: Source IP Incorrect\n");
+				arglog(LOG_RESULTS, "Inbound Reject: Source IP Incorrect\n");
 				#endif
 				return;
 			}
@@ -215,13 +215,13 @@ void direct_inbound(const struct packet_data *packet)
 			if(do_arg_unwrap(packet, gate) == 0)
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Accept: Unwrapped\n");
+				arglog(LOG_RESULTS, "Inbound Accept: Unwrapped\n");
 				#endif
 			}
 			else
 			{
 				#ifdef DISP_RESULTS
-				printf("ARG: Inbound Reject: Failed to unwrap\n");
+				arglog(LOG_RESULTS, "Inbound Reject: Failed to unwrap\n");
 				#endif
 			}
 		}
@@ -233,13 +233,13 @@ void direct_inbound(const struct packet_data *packet)
 		if(do_nat_inbound_rewrite(packet) == 0)
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Accept: Rewrite\n");
+			arglog(LOG_RESULTS, "Inbound Accept: Rewrite\n");
 			#endif
 		}
 		else
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Inbound Reject: NAT\n");
+			arglog(LOG_RESULTS, "Inbound Reject: NAT\n");
 			#endif
 		}
 	}
@@ -258,13 +258,13 @@ void direct_outbound(const struct packet_data *packet)
 		if(do_arg_wrap(packet, gate) == 0)
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Outbound Accept: Wrap\n");
+			arglog(LOG_RESULTS, "Outbound Accept: Wrap\n");
 			#endif
 		}
 		else
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Outbound Reject: Failed to wrap\n");
+			arglog(LOG_RESULTS, "Outbound Reject: Failed to wrap\n");
 			#endif
 		}
 	}
@@ -275,13 +275,13 @@ void direct_outbound(const struct packet_data *packet)
 		if(do_nat_outbound_rewrite(packet) == 0)
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Outbound: Accept: Rewrite\n");
+			arglog(LOG_RESULTS, "Outbound: Accept: Rewrite\n");
 			#endif
 		}
 		else
 		{
 			#ifdef DISP_RESULTS
-			printf("ARG: Outbound Reject: NAT\n");
+			arglog(LOG_RESULTS, "Outbound Reject: NAT\n");
 			#endif
 		}
 	}

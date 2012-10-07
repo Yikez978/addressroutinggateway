@@ -21,7 +21,7 @@ void sig_handler(int signum)
 // Called when the module is initialized
 static int arg_init(char *conf, char *gateName)
 {
-	printf("ARG: Starting\n");
+	arglog(LOG_DEBUG, "Starting\n");
 
 	// Take care of locks first so that we know they're ALWAYS safe to use
 	init_nat_locks();
@@ -31,7 +31,7 @@ static int arg_init(char *conf, char *gateName)
 	// Init various components
 	if(init_hopper(conf, gateName))
 	{
-		printf("ARG: Unable to initialize hopper\n");
+		arglog(LOG_DEBUG, "Unable to initialize hopper\n");
 		
 		uninit_hopper();
 		
@@ -40,7 +40,7 @@ static int arg_init(char *conf, char *gateName)
 
 	if(init_nat())
 	{
-		printf("ARG: NAT failed to initialize\n");
+		arglog(LOG_DEBUG, "NAT failed to initialize\n");
 
 		uninit_nat();
 		uninit_hopper();
@@ -51,7 +51,7 @@ static int arg_init(char *conf, char *gateName)
 	// Hook network communication to listen for instructions
 	if(init_director())
 	{
-		printf("ARG: Director failed to initialized, disabling subsystems\n");
+		arglog(LOG_DEBUG, "Director failed to initialized, disabling subsystems\n");
 		
 		uninit_director();
 		//uninit_nat();
@@ -60,7 +60,7 @@ static int arg_init(char *conf, char *gateName)
 		return -3;
 	}
 
-	printf("ARG: Running\n");
+	arglog(LOG_DEBUG, "Running\n");
    
 	// Do first attempt to connect to the gateways we know of
 	init_hopper_finish();
@@ -71,7 +71,7 @@ static int arg_init(char *conf, char *gateName)
 // Called when the module is unloaded
 static void arg_exit(void)
 {
-	printf("ARG: Shutting down\n");
+	arglog(LOG_DEBUG, "Shutting down\n");
 
 	// Unregister our network hooks so the system doesn't crash
 	uninit_director();
@@ -80,7 +80,7 @@ static void arg_exit(void)
 	uninit_nat();
 	//uninit_hopper();
 	
-	printf("ARG: Finished\n");
+	arglog(LOG_DEBUG, "Finished\n");
 }
 
 
@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
 
 	if(argc != 3)
 	{
-		printf("Usage: %s <conf path> <gate name>\n", argv[0]);
+		arglog(LOG_DEBUG, "Usage: %s <conf path> <gate name>\n", argv[0]);
 		return 1;
 	}
 

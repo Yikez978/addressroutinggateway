@@ -27,7 +27,7 @@ char parse_packet(struct packet_data *packet)
 		if(ntohs(packet->eth->type) == 0x0800)
 			packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
 		else if(ntohs(packet->eth->type) == 0x86DD)
-			printf("IPv6, sad day\n");
+			arglog(LOG_DEBUG, "IPv6, sad day\n");
 	
 		packet->unknown_data = packet->data + sizeof(struct ethhdr);
 	}
@@ -78,7 +78,7 @@ struct packet_data *create_packet(int len)
 	c = (struct packet_data*)malloc(sizeof(struct packet_data));
 	if(c == NULL)
 	{
-		printf("Unable to allocate space for new packet\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for new packet\n");
 		return NULL;
 	}
 
@@ -91,7 +91,7 @@ struct packet_data *create_packet(int len)
 		c->data = (uint8_t*)calloc(len, 1);
 		if(c->data == NULL)
 		{
-			printf("Unable to allocate space for new packet data\n");
+			arglog(LOG_DEBUG, "Unable to allocate space for new packet data\n");
 			free(c);
 			return NULL;
 		}
@@ -107,14 +107,14 @@ struct packet_data *copy_packet(const struct packet_data *packet)
 	c = (struct packet_data*)malloc(sizeof(struct packet_data));
 	if(c == NULL)
 	{
-		printf("Unable to allocate space to copy packet\n");
+		arglog(LOG_DEBUG, "Unable to allocate space to copy packet\n");
 		return NULL;
 	}
 
 	c->data = (uint8_t*)malloc(packet->len);
 	if(c->data == NULL)
 	{
-		printf("Unable to allocate space to copy packet data\n");
+		arglog(LOG_DEBUG, "Unable to allocate space to copy packet data\n");
 		free(c);
 		return NULL;
 	}
@@ -146,7 +146,7 @@ char send_packet(const struct packet_data *packet)
 	struct sockaddr_in dest_addr;
 	int len = 0;
 
-	//printf("Sending packet:");
+	//arglog(LOG_DEBUG, "Sending packet:");
 	//printRaw(packet->len, packet->data);
 
 	if(sock <= 0)
@@ -154,7 +154,7 @@ char send_packet(const struct packet_data *packet)
 		sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
 		if(sock < 0)
 		{
-			printf("Unable to create raw socket for sending\n");
+			arglog(LOG_DEBUG, "Unable to create raw socket for sending\n");
 			return sock;
 		}
 	}
@@ -171,7 +171,7 @@ char send_packet(const struct packet_data *packet)
 	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, len,
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
-		printf("Send failed: %i\n", errno);
+		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
 		return -1;
 	}
 

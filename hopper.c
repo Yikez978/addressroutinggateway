@@ -35,7 +35,7 @@ char init_hopper(char *conf, char *name)
 {
 	int ret;
 
-	printf("ARG: Hopper init\n");
+	arglog(LOG_DEBUG, "Hopper init\n");
 
 	pthread_spin_lock(&networksLock);
 	pthread_spin_lock(&ipLock);
@@ -43,7 +43,7 @@ char init_hopper(char *conf, char *name)
 	// "Read in" settings
 	if(get_hopper_conf(conf, name))
 	{
-		printf("ARG: Unable to configure hopper\n");
+		arglog(LOG_DEBUG, "Unable to configure hopper\n");
 		
 		pthread_spin_unlock(&ipLock);
 		pthread_spin_unlock(&networksLock);
@@ -55,7 +55,7 @@ char init_hopper(char *conf, char *name)
 	entropy_init(&gateInfo->entropy);
 	if((ret = ctr_drbg_init( &gateInfo->ctr_drbg, entropy_func, &gateInfo->entropy, NULL, 0)) != 0)
 	{
-		printf( "Unable to initialize entropy pool, error %d\n", ret);
+		arglog(LOG_DEBUG,  "Unable to initialize entropy pool, error %d\n", ret);
 		
 		pthread_spin_unlock(&ipLock);
 		pthread_spin_unlock(&networksLock);
@@ -67,29 +67,29 @@ char init_hopper(char *conf, char *name)
 	pthread_spin_unlock(&ipLock);
 	pthread_spin_unlock(&networksLock);
 	
-	printf("ARG: Hopper initialized\n");
+	arglog(LOG_DEBUG, "Hopper initialized\n");
 
 	return 0;
 }
 
 void init_hopper_finish(void)
 {
-	printf("ARG: Starting connection/gateway auth thread\n");
+	arglog(LOG_DEBUG, "Starting connection/gateway auth thread\n");
 	pthread_create(&connectThread, NULL, connect_thread, NULL); // TBD check return
 }
 
 void uninit_hopper(void)
 {
-	printf("ARG: Hopper uninit\n");
+	arglog(LOG_DEBUG, "Hopper uninit\n");
 
 	// No more need to hop and connect
 	if(connectThread != 0)
 	{
-		printf("ARG: Asking connect thread to stop...");
+		arglog(LOG_DEBUG, "Asking connect thread to stop...");
 		pthread_cancel(connectThread);
 		pthread_join(connectThread, NULL);
 		connectThread = 0;
-		printf("done\n");
+		arglog(LOG_DEBUG, "done\n");
 	}
 	
 	pthread_spin_lock(&networksLock);
@@ -110,7 +110,7 @@ void uninit_hopper(void)
 	pthread_spin_destroy(&ipLock);
 	pthread_spin_destroy(&networksLock);
 
-	printf("ARG: Hopper finished\n");
+	arglog(LOG_DEBUG, "Hopper finished\n");
 }
 
 char get_hopper_conf(char *confPath, char *gateName)
@@ -130,7 +130,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	confFile = fopen(confPath, "r");
 	if(confFile == NULL)
 	{
-		printf("Unable to open config file at %s\n", confPath);
+		arglog(LOG_DEBUG, "Unable to open config file at %s\n", confPath);
 		return -1;
 	}
 
@@ -140,7 +140,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		currNet = create_arg_network_info();
 		if(currNet == NULL)
 		{
-			printf("Unable to create arg network info during configuration\n");
+			arglog(LOG_DEBUG, "Unable to create arg network info during configuration\n");
 			return -2;
 		}
 
@@ -169,7 +169,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		
 		if(get_next_line(confFile, line, MAX_CONF_LINE))
 		{
-			printf("Problem reading in base IP from conf for %s\n", currNet->name);
+			arglog(LOG_DEBUG, "Problem reading in base IP from conf for %s\n", currNet->name);
 			remove_arg_network(currNet);
 			break;
 		}
@@ -177,7 +177,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		
 		if(get_next_line(confFile, line, MAX_CONF_LINE))
 		{
-			printf("Problem reading in mask from conf for %s\n", currNet->name);
+			arglog(LOG_DEBUG, "Problem reading in mask from conf for %s\n", currNet->name);
 			remove_arg_network(currNet);
 			break;
 		}
@@ -190,7 +190,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		if((ret = mpi_read_file( &currNet->rsa.N, 16, confFile)) != 0 ||
 			(ret = mpi_read_file( &currNet->rsa.E, 16, confFile)) != 0 )
 		{
-			printf("Unable to read in public key for %s (returned %i)\n", currNet->name, ret);
+			arglog(LOG_DEBUG, "Unable to read in public key for %s (returned %i)\n", currNet->name, ret);
 			remove_arg_network(currNet);
 			break;
 		}
@@ -203,7 +203,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	// Which one is our head? Find it, move to beginning, and rearrange
 	// all relevant pointers.
-	printf("Locating configuration for %s\n", gateName);
+	arglog(LOG_DEBUG, "Locating configuration for %s\n", gateName);
 
 	currNet = gateInfo;
 	while(currNet != NULL)
@@ -213,7 +213,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 			// Found, make currNet the head of list (if not already)
 			if(currNet != gateInfo)
 			{
-				printf("ARG: Rearranging ARG network list\n");
+				arglog(LOG_DEBUG, "Rearranging ARG network list\n");
 
 				if(currNet->next != NULL)
 					currNet->next->prev = currNet->prev;
@@ -238,11 +238,11 @@ char get_hopper_conf(char *confPath, char *gateName)
 	if(currNet == NULL)
 	{
 		// Didn't find a match
-		printf("ARG: Misconfiguration, unable to find which gate we are\n");
+		arglog(LOG_DEBUG, "Misconfiguration, unable to find which gate we are\n");
 		return -4;
 	}
 
-	printf("ARG: Configured as %s\n", gateInfo->name);
+	arglog(LOG_DEBUG, "Configured as %s\n", gateInfo->name);
 
 	// Private key. Must be named the same as our gate
 	dirPathEnd = strrchr(confPath, '/');
@@ -254,12 +254,12 @@ char get_hopper_conf(char *confPath, char *gateName)
 	strncpy(privKeyPath + strlen(privKeyPath), gateInfo->name, MAX_NAME_SIZE);
 	strcpy(privKeyPath + strlen(privKeyPath), ".priv");	
 
-	printf("Private key expected at at %s\n", privKeyPath);
+	arglog(LOG_DEBUG, "Private key expected at at %s\n", privKeyPath);
 	
 	privKeyFile = fopen(privKeyPath, "r");
 	if(privKeyFile == NULL)
 	{
-		printf("Unable to open private key file at %s\n", confPath);
+		arglog(LOG_DEBUG, "Unable to open private key file at %s\n", confPath);
 		return -5;
 	}
 
@@ -272,7 +272,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		( ret = mpi_read_file( &gateInfo->rsa.DQ, 16, privKeyFile ) ) != 0 ||
 		( ret = mpi_read_file( &gateInfo->rsa.QP, 16, privKeyFile ) ) != 0 )
 	{
-		printf("Failed to load private key for ourselves (error %i)\n", ret);
+		arglog(LOG_DEBUG, "Failed to load private key for ourselves (error %i)\n", ret);
 		fclose(privKeyFile);
 		return -5;
 	}
@@ -282,12 +282,12 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	if((ret = rsa_check_privkey(&gateInfo->rsa)) != 0)
 	{
-		printf("Private key check failed, error %i\n", ret);
+		arglog(LOG_DEBUG, "Private key check failed, error %i\n", ret);
 		return -5;
 	}
 
 	// Hop and symmetric key
-	printf("ARG: Generating hop and symmetric encryption keys\n");
+	arglog(LOG_DEBUG, "Generating hop and symmetric encryption keys\n");
 	get_random_bytes(gateInfo->iv, sizeof(gateInfo->iv));
 	get_random_bytes(gateInfo->hopKey, sizeof(gateInfo->hopKey));
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
@@ -297,7 +297,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	
 	if(cipher_get_block_size(&gateInfo->cipher) != AES_BLOCK_SIZE)
 	{
-		printf("WARNING!!! Cipher block size (%i) is not the same as compiled AES_BLOCK_SIZE (%i)\n",
+		arglog(LOG_DEBUG, "WARNING!!! Cipher block size (%i) is not the same as compiled AES_BLOCK_SIZE (%i)\n",
 			cipher_get_block_size(&gateInfo->cipher), AES_BLOCK_SIZE);
 	}
 
@@ -306,7 +306,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	gateInfo->hopInterval = HOP_TIME;
 
 	// Set IP based on configuration
-	printf("ARG: Setting initial IP\n");
+	arglog(LOG_DEBUG, "Setting initial IP\n");
 	update_ips(gateInfo);
 
 	return 0;
@@ -318,7 +318,7 @@ void *connect_thread(void *data)
 
 	long int offset = 0;
 
-	printf("ARG: Connect thread running\n");
+	arglog(LOG_DEBUG, "Connect thread running\n");
 
 	sleep(INITIAL_CONNECT_WAIT);
 
@@ -330,7 +330,7 @@ void *connect_thread(void *data)
 			offset = current_time_offset(&gate->lastDataUpdate);
 			if(gate->connected && offset > MAX_UPDATE_TIME * 1000)
 			{
-				printf("No update from %s in %li seconds, disconnecting\n", gate->name, offset / 1000);
+				arglog(LOG_DEBUG, "No update from %s in %li seconds, disconnecting\n", gate->name, offset / 1000);
 				gate->connected = 0;
 			}
 			
@@ -344,7 +344,7 @@ void *connect_thread(void *data)
 		sleep(CONNECT_WAIT_TIME / 4);
 	}
 	
-	printf("ARG: Connect thread dying\n");
+	arglog(LOG_DEBUG, "Connect thread dying\n");
 
 	return 0;
 }
@@ -356,7 +356,7 @@ struct arg_network_info *create_arg_network_info(void)
 	newInfo = (struct arg_network_info*)malloc(sizeof(struct arg_network_info));
 	if(newInfo == NULL)
 	{
-		printf("ARG: Unable to allocate space for ARG network info\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for ARG network info\n");
 		return NULL;
 	}
 
@@ -400,11 +400,11 @@ struct arg_network_info *remove_arg_network(struct arg_network_info *network)
 
 void remove_all_associated_arg_networks(void)
 {
-	printf("ARG: Removing all associated ARG networks\n");
+	arglog(LOG_DEBUG, "Removing all associated ARG networks\n");
 
 	if(gateInfo == NULL)
 	{
-		printf("ARG: Attempt to remove associated networks when hopper not initialized\n");
+		arglog(LOG_DEBUG, "Attempt to remove associated networks when hopper not initialized\n");
 		return;
 	}
 
@@ -421,7 +421,7 @@ uint8_t *current_ip(void)
 	ipCopy = (uint8_t*)malloc(ADDR_SIZE);
 	if(ipCopy == NULL)
 	{
-		printf("ARG: Unable to allocate space for saving off IP address.\n");
+		arglog(LOG_DEBUG, "Unable to allocate space for saving off IP address.\n");
 		return NULL;
 	}
 
@@ -445,13 +445,13 @@ char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 
 	update_ips(gate);
 
-	/*printf("Request: ");
+	/*arglog(LOG_DEBUG, "Request: ");
 	printIP(4, ip);
-	printf(" Could be ");
+	arglog(LOG_DEBUG, " Could be ");
 	printIP(4, gate->currIP);
-	printf(" or ");
+	arglog(LOG_DEBUG, " or ");
 	printIP(4, gate->prevIP);
-	printf("\n");*/
+	arglog(LOG_DEBUG, "\n");*/
 
 	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
 		ret = 1;
@@ -497,7 +497,7 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 		break;
 	
 	default:
-		printf("ARG: Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
+		arglog(LOG_DEBUG, "Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
 		return -1;	
 	}
 
@@ -526,7 +526,7 @@ void update_ips(struct arg_network_info *gate)
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
-	//printf("UPDATE IPS for %s: Hop interval %lu, offset %li, key ", gate->name, gate->hopInterval, time_offset(&gate->timeBase, &currTime));
+	//arglog(LOG_DEBUG, "UPDATE IPS for %s: Hop interval %lu, offset %li, key ", gate->name, gate->hopInterval, time_offset(&gate->timeBase, &currTime));
 	//printRaw(sizeof(gate->hopKey), gate->hopKey);
 
 	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, time_offset(&gate->timeBase, &currTime)); 
@@ -563,7 +563,7 @@ void set_external_ip(uint8_t *addr)
 	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 	if(sockfd == -1)
 	{
-		printf("Unable to create socket to set external IP address\n");
+		arglog(LOG_DEBUG, "Unable to create socket to set external IP address\n");
 		return;
 	}
  
@@ -571,7 +571,7 @@ void set_external_ip(uint8_t *addr)
 	strncpy(ifr.ifr_name, EXT_DEV_NAME, IFNAMSIZ);
 	if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0)
 	{
-		printf("Unable to get flags to set external IP address\n");
+		arglog(LOG_DEBUG, "Unable to get flags to set external IP address\n");
 		return;
 	}
 	
@@ -587,7 +587,7 @@ void set_external_ip(uint8_t *addr)
 		ifr.IRFFLAGS |= IFF_UP;
 		if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0)
 		{
-			printf("External interface down, unable to set IP: %i\n", errno);
+			arglog(LOG_DEBUG, "External interface down, unable to set IP: %i\n", errno);
 			return;
 		}
 	}
@@ -600,7 +600,7 @@ void set_external_ip(uint8_t *addr)
 	// Set interface address
 	if (ioctl(sockfd, SIOCSIFADDR, &ifr) < 0)
 	{
-		printf("Unable to set IP address on external interface\n");
+		arglog(LOG_DEBUG, "Unable to set IP address on external interface\n");
 		return;
 	}	
 	#undef IRFFLAGS		
