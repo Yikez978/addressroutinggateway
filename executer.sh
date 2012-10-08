@@ -16,7 +16,7 @@ SCRIPT=`basename $0`
 function run-make {
 	if [[ "$LOCAL" == "$1" ]]
 	then
-		push-to $GATES - ../*
+		push-to $GATES - *
 		run-on $GATES - run-make
 	else
 		./autogen.sh && make clean && make || return 1
@@ -75,25 +75,25 @@ function set-latency {
 	if [[ "$LOCAL" == "$1" ]]
 	then
 		push-to $LATENCY - 
-		run-on $LATENCY - set-latency
+		run-on $LATENCY - set-latency "$2"
 	else
 		[[ "$1" == "delay" ]] || return 0
 
-		if [ "$#" == "1" ]
-		then
-			toExt=$1
-			toA=$1
-			toB=$1
-		elif [ "$#" == "2" ]
+		if [ "$#" == "2" ]
 		then
 			toExt=$2
-			toA=$1
-			toB=$1
+			toA=$2
+			toB=$2
 		elif [ "$#" == "3" ]
 		then
 			toExt=$3
-			toA=$1
+			toA=$2
 			toB=$2
+		elif [ "$#" == "4" ]
+		then
+			toExt=$4
+			toA=$2
+			toB=$3
 		else
 			echo 'Usage: set-latency <gate a> <gate b> <ext>'
 			return 1
@@ -177,6 +177,19 @@ function install-vmware-tools {
 	return 0
 }
 
+function run {
+	if [[ "$LOCAL" == "$1" ]]
+	then
+		push-to $ALL -  
+		shift
+		run-on $ALL - run "$@"
+	else
+		shift
+		$@
+	fi
+	return 0
+}
+
 # Helpers for getting needed stuff to test network
 function push-to {
 	# Get the list of servers to run on. Lists ends with '-'
@@ -238,9 +251,9 @@ function run-on {
 	fi
 
 	# Run the requested function
-	if [[ "$#" != "1" ]]
+	if [[ "$#" == "0" ]]
 	then
-		echo No function given to call $# $@
+		echo No function given to call $@
 		return 1
 	fi
 
@@ -248,7 +261,7 @@ function run-on {
 	for s in $systems
 	do
 		echo -e "\t$s"
-		if ! ssh "$s" "$PUSHDIR/$SCRIPT" $1
+		if ! ssh "$s" "$PUSHDIR/$SCRIPT" $@
 		then
 			echo Unable to run $s:$PUSHDIR
 		fi
