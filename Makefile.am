@@ -24,7 +24,7 @@ arg_SOURCES = uthash.h \
 arg-local : stop
 
 remote : 
-	scripts/executor.sh run-make
+	scripts/executer.sh run-make
 
 # Default test to do whatever it is we want to do most often
 # for now, just do local test
