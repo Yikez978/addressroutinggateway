@@ -245,11 +245,18 @@ function clean-pushed {
 	fi
 }
 
+# "Help." Well, at least hints on the commands
+function help {
+	echo Usage: $0 \<function\>
+	echo Functions available:
+	grep '^function' "$0" | grep -v help | grep -v main | awk '{print "\t"$2}' | sort
+}
+
 # Main controller
 function main {
 	if [[ "$#" == "0" ]]
 	then
-		echo Usage: $0 \<function\>
+		help
 		return 1
 	fi
 
