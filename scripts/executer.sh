@@ -1,6 +1,9 @@
 #!/bin/bash
 PUSHDIR="~/pushed"
+
 LOCAL="ramlap"
+IS_LOCAL=1
+
 GATES="gateA gateB"
 EXT="ext1"
 PROT="protA1 protB1"
@@ -10,13 +13,27 @@ ALL="$GATES $EXT $PROT $DELAY"
 
 SCRIPT=`basename $0`
 
+# Tests
+function start-tests {
+	if [[ $IS_LOCAL ]]
+	then
+		start-arg
+
+		run-on $PROT - ping 172.100.0.1 '&'
+	else
+		echo This should only be run from local
+	fi
+	return 0
+}
+
 # Building
 # Run-make does a full build on _all_ gates and saves the binary to ~
-# Intended for setting up tests
+# Intended for setting up tests, ssh into the gateway should be used for development
+# Usage: run-make
 function run-make {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES - *
+		push-to $GATES - ../*
 		run-on $GATES - run-make
 	else
 		./autogen.sh && make clean && make || return 1
@@ -28,20 +45,25 @@ function run-make {
 }
 
 # Gate control
+# Builds ARG from scratch and runs it on all gateways
+# Usage: start-arg
 function start-arg {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES
+		run-make
 		run-on $GATES - start-arg
 	else
 		[[ "$1" == "gate" ]] || return 0
-		cd ~/src && sudo ./arg conf/arg.conf `hostname`
+		cd ..
+		sudo ./arg arg.conf `hostname` 
 	fi
 	return 0
 }
 
+# Stops ARG on all gateways, first gracefully then forcefully
+# Usage: stop-arg
 function stop-arg {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $GATES
 		run-on $GATES - stop-arg
@@ -71,8 +93,13 @@ function stop-arg {
 }
 
 # Network setup changes
+# Changes the latency on the delay box to the given value. 
+# Latency values are given with their units, e.g., 30ms, 1s, etc
+# Usage: set-latency <delay to all>
+#        set-latency <delay to gates> <delay to external>
+#        set-latency <delay to gate A> <delay to B> <delay to ext>
 function set-latency {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $LATENCY - 
 		run-on $LATENCY - set-latency "$2"
@@ -108,8 +135,10 @@ function set-latency {
 }
 
 # The basics
+# Reboots all servers
+# Usage: reboot
 function reboot {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -
 		run-on $ALL - reboot
@@ -119,8 +148,10 @@ function reboot {
 	return 0
 }
 
+# Shuts down all servers
+# Usage: shutdown
 function shutdown {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -
 		run-on $ALL - shutdown
@@ -130,8 +161,10 @@ function shutdown {
 	return 0
 }
 
+# Enables IPv4 forwarding on the gateways
+# Usage: enable-forwarding
 function enable-forwarding {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
@@ -142,8 +175,10 @@ function enable-forwarding {
 	return 0
 }
 
+# Disables IPv4 forwarding on the gateways
+# Usage: disable-forwarding
 function disable-forwarding {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
@@ -154,8 +189,10 @@ function disable-forwarding {
 	return 0
 }
 
+# Installs VMware tools on all servers. The CD must already be inserted
+# Usage: install-vmware-tools
 function install-vmware-tools {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -  
 		run-on $ALL - install-vmware-tools
@@ -177,8 +214,10 @@ function install-vmware-tools {
 	return 0
 }
 
+# Runs the given command line on all servers. Any command may be used, arguments are allowed
+# Usage: run <cmd>
 function run {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -  
 		shift
@@ -191,6 +230,8 @@ function run {
 }
 
 # Helpers for getting needed stuff to test network
+# Pushes the given files and this script to the given servers
+# Usage: push-to <server> [<server> ...] [- <file> ...]
 function push-to {
 	# Get the list of servers to run on. Lists ends with '-'
 	systems=""
@@ -229,6 +270,8 @@ function push-to {
 	return 0
 }
 
+# Runs the given function on the servers given
+# Usage: run-on <server> [<server> ...] - <function>
 function run-on {
 	# Get the list of servers to run on. Lists ends with '-'
 	systems=""
@@ -270,8 +313,10 @@ function run-on {
 	return 0
 }
 
+# Removes all files in the 'pushed' directory on every server
+# Usage: clean-pushed
 function clean-pushed {
-	if [[ "$LOCAL" == "$1" ]]
+	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -  
 		run-on $ALL - clean-pushed
@@ -281,36 +326,54 @@ function clean-pushed {
 	return 0
 }
 
-# "Help." Well, at least hints on the commands
+# Gives hints on the commands
+# Usage: help [<function>]
 function help {
-	echo Usage: $0 \<function\>
-	echo Functions available:
-	grep '^function' "$0" | grep -v help | grep -v main | awk '{print "\t"$2}' | sort
+	if [[ "$#" == "1" ]]
+	then
+		echo Usage: $0 \<function\>
+		echo Functions available:
+		grep '^function' "$0" | grep -v 'function _' | awk '{print "\t"$2}'
+		echo
+		echo For details, try \'help '<function>'\'
+		help $1 help
+	else
+		echo Help for $2:
+		grep --before-context=5 "^function $2" "$0" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+	fi
 	return 0
 }
 
 # Main controller
-function main {
+function _main {
 	# Move into the directory with this script so we have 
 	# a frame of reference for paths
 	cd `dirname "${BASH_SOURCE[0]}"`
-	
+
 	# Help?
 	if [[ "$#" == "0" ]]
 	then
-		help
+		help local
 		return 1
 	fi
 
 	# Determine what type of host we are
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
-	echo Running as a $TYPE
+	if [[ "$LOCAL" == "$TYPE" ]]
+	then
+		TYPE="local"
+		IS_LOCAL=1
+	else
+		IS_LOCAL=
+	fi
+	
+	echo Running as $TYPE
 
 	# Call actual functionality
 	func=$1
 	shift
-	echo Executing helper script $func
+	echo Executing $func
 	"$func" "$TYPE" "$@"
 }
-main "$@"
+_main "$@"
 
