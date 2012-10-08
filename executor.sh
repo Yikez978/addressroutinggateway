@@ -10,23 +10,41 @@ ALL="$GATES $EXT $PROT $DELAY"
 
 SCRIPT=`basename $0`
 
+# Building
+# Run-make does a full build on _all_ gates and saves the binary to ~
+# Intended for setting up tests
+function run-make {
+	if [[ "$LOCAL" == "$1" ]]
+	then
+		push-to $GATES - ../*
+		run-on $GATES - run-make
+	else
+		./autogen.sh && make clean && make || return 1
+		mv arg ~
+		mv conf/* ~
+		clean-pushed
+	fi
+	return 0
+}
+
 # Gate control
 function start-arg {
 	if [[ "$LOCAL" == "$1" ]]
 	then
-		push-to $GATES - ../arg ../conf/*
+		push-to $GATES
 		run-on $GATES - start-arg
 	else
 		[[ "$1" == "gate" ]] || return 0
-		sudo ./arg arg.conf `hostname`
+		cd ~/src && sudo ./arg conf/arg.conf `hostname`
 	fi
+	return 0
 }
 
 function stop-arg {
 	if [[ "$LOCAL" == "$1" ]]
 	then
-		push-to $GATES - ../arg ../conf/*
-		run-on $GATES - start-arg
+		push-to $GATES
+		run-on $GATES - stop-arg
 	else
 		# Send it kill signal
 		echo Sending signal
@@ -48,8 +66,8 @@ function stop-arg {
 
 		# Force it to die
 		sudo killall -KILL arg
-		return 0
 	fi
+	return 0
 }
 
 # Network setup changes
@@ -85,9 +103,8 @@ function set-latency {
 		sudo tc qdisc replace dev eth1 root netem delay "$toExt"
 		sudo tc qdisc replace dev eth2 root netem delay "$toA"
 		sudo tc qdisc replace dev eth3 root netem delay "$toB"
-
-		return 0
 	fi
+	return 0
 }
 
 # The basics
@@ -97,8 +114,9 @@ function reboot {
 		push-to $ALL -
 		run-on $ALL - reboot
 	else
-		sudo shutdown -r 1
+		sudo reboot
 	fi
+	return 0
 }
 
 function shutdown {
@@ -107,8 +125,9 @@ function shutdown {
 		push-to $ALL -
 		run-on $ALL - shutdown
 	else
-		sudo shutdown -h 1
+		sudo shutdown -h 0
 	fi
+	return 0
 }
 
 function enable-forwarding {
@@ -120,6 +139,7 @@ function enable-forwarding {
 		[[ "$1" == "gate" ]] || return 0
 		echo 1 > /proc/sys/net/ipv4/ip_forward
 	fi
+	return 0
 }
 
 function disable-forwarding {
@@ -131,6 +151,7 @@ function disable-forwarding {
 		[[ "$1" == "gate" ]] || return 0
 		echo 0 > /proc/sys/net/ipv4/ip_forward
 	fi
+	return 0
 }
 
 function install-vmware-tools {
@@ -153,6 +174,7 @@ function install-vmware-tools {
 		rm -r VMware*.tar.gz
 		sudo shutdown -r 1 &	
 	fi
+	return 0
 }
 
 # Helpers for getting needed stuff to test network
@@ -178,13 +200,13 @@ function push-to {
 	fi
 
 	# And now push files
-	files="SCRIPT" "$@"
+	files="$SCRIPT $@"
 
 	echo Pushing to...
 	for s in $systems
 	do
 		echo -e "\t$s"
-		if ! scp -r "$files" "$s:$PUSHDIR"
+		if ! scp -r $files "$s:$PUSHDIR"
 		then
 			echo Unable to push to $s:$PUSHDIR
 			continue
@@ -241,8 +263,9 @@ function clean-pushed {
 		push-to $ALL -  
 		run-on $ALL - clean-pushed
 	else
-		rm -rif *
+		rm -rf *
 	fi
+	return 0
 }
 
 # "Help." Well, at least hints on the commands
@@ -250,10 +273,16 @@ function help {
 	echo Usage: $0 \<function\>
 	echo Functions available:
 	grep '^function' "$0" | grep -v help | grep -v main | awk '{print "\t"$2}' | sort
+	return 0
 }
 
 # Main controller
 function main {
+	# Move into the directory with this script so we have 
+	# a frame of reference for paths
+	cd `dirname "${BASH_SOURCE[0]}"`
+	
+	# Help?
 	if [[ "$#" == "0" ]]
 	then
 		help
@@ -263,10 +292,6 @@ function main {
 	# Determine what type of host we are
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
 	echo Running as a $TYPE
-	
-	# Move into the directory with this script so we have 
-	# a frame of reference for paths
-	cd `dirname "${BASH_SOURCE[0]}"`
 
 	# Call actual functionality
 	func=$1
