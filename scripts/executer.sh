@@ -1,6 +1,7 @@
 #!/bin/bash
 PUSHDIR="~/pushed"
 PULLDIR="pulled"
+RESULTSDIR="../results"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -12,18 +13,51 @@ LATENCY="delay1"
 
 ALL="$GATES $EXT $PROT"
 
-# Begins the tests!
-# Usage: start-tests
-function start-tests {
-	if [[ $IS_LOCAL ]]
+# Begins the tests! Runs for <time> seconds with <delay> latency (see set-latency),
+# with ARG hopping every <hop rate> milliseconds.
+# Usage: start-tests <time> <delay> <hop rate>
+function run-tests {
+	if [[ ! $IS_LOCAL ]]
 	then
-		start-arg
-
-		run-on $PROT - ping 172.100.0.1 '&'
-	else
-		echo This should only be run from local
+		echo Must be run from local
+		return
 	fi
-	return 0
+
+	if [[ "$#" != 4 ]]
+	then
+		echo Not enough arguments given
+		help $1 run-tests
+		return
+	fi
+
+	echo Setting latency to $3
+	set-latency $1 $3
+	
+	echo Starting collection
+	start-collection $1
+
+	echo Beginning experiment with hop rate $4
+	start-arg $1 $4
+	start-generators $1
+
+	echo Running for $2 seconds
+	sleep $2
+
+	d="$RESULTSDIR/`date +%Y-%m-%d-%H:%M:%S`-l$3-hr$4ms"
+	echo Pulling logs to $d
+	retrieve-logs $1 "$d"
+
+	mkdir -p "$d"
+
+	echo Analyze
+	
+	return
+}
+
+# Starts traffic generators on the network
+# Usage: start-generators
+function start-generators {
+	return
 }
 
 # Adds the helper script and cronjob that allows runcmd-*.sh files
@@ -51,18 +85,6 @@ function add-cmdrun-cron {
 	fi
 }
 
-function testbitches {
-	if [[ $IS_LOCAL ]]
-	then
-		push-to gateA
-		run-on gateA - testbitches
-	else
-		sudo tcpdump -i eth1 -n -x not arp -w test.pcap &
-		disown $!
-	fi
-	return 0
-}
-
 # Starts tcpdump running on all hosts on the test network
 # Usage: start-collection
 function start-collection {
@@ -77,8 +99,8 @@ function start-collection {
 		if [[ "$1" == "gate" ]]
 		then
 			# Have two interfaces to capture on for gates
-			file1="test-`date +%Y-%m-%d-%H:%M:%S-inner`.pcap"
-			file2="test-`date +%Y-%m-%d-%H:%M:%S-outer`.pcap" 
+			file1="test-`date +%Y-%m-%d-%H:%M:%S`-inner.pcap"
+			file2="test-`date +%Y-%m-%d-%H:%M:%S`-outer.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
 			sudo tcpdump -i eth1 -w "$file1" -n -x not arp &
@@ -108,10 +130,19 @@ function stop-collection {
 }
 
 # Downloads the logs (pcap, ARG gateway, and traffic generator) to the local system
-# Usage: retreive-logs
-function retreive-logs {
+# Saves to the given directory
+# Usage: retrieve-logs <dir>
+function retrieve-logs {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	clean-pulled $1
 	pull-from $ALL - *.pcap
-	return 0
+	mv "$PULLDIR/*" "$2"
+	return
 }
 
 # Building
@@ -129,7 +160,7 @@ function run-make {
 		mv conf/* ~
 		clean-pushed
 	fi
-	return 0
+	return
 }
 
 # Gate control
@@ -141,11 +172,11 @@ function start-arg {
 		run-make
 		run-on $GATES - start-arg
 	else
-		[[ "$1" == "gate" ]] || return 0
+		[[ "$1" == "gate" ]] || return
 		cd ..
 		sudo ./arg arg.conf `hostname` 
 	fi
-	return 0
+	return
 }
 
 # Stops ARG on all gateways, first gracefully then forcefully
@@ -166,7 +197,7 @@ function stop-arg {
 			# Check for the process
 			if [[ `ps -A | grep arg` == "" ]]
 			then
-				return 0
+				return
 			fi
 			
 			# Wait
@@ -177,7 +208,7 @@ function stop-arg {
 		# Force it to die
 		sudo killall -KILL arg
 	fi
-	return 0
+	return
 }
 
 # Network setup changes
@@ -192,7 +223,7 @@ function set-latency {
 		push-to $LATENCY - 
 		run-on $LATENCY - set-latency "$2"
 	else
-		[[ "$1" == "delay" ]] || return 0
+		[[ "$1" == "delay" ]] || return
 
 		if [ "$#" == "2" ]
 		then
@@ -219,7 +250,7 @@ function set-latency {
 		sudo tc qdisc replace dev eth2 root netem delay "$toA"
 		sudo tc qdisc replace dev eth3 root netem delay "$toB"
 	fi
-	return 0
+	return
 }
 
 # The basics
@@ -233,7 +264,7 @@ function reboot {
 	else
 		sudo reboot
 	fi
-	return 0
+	return
 }
 
 # Shuts down all servers
@@ -246,7 +277,7 @@ function shutdown {
 	else
 		sudo shutdown -h 0
 	fi
-	return 0
+	return
 }
 
 # Enables IPv4 forwarding on the gateways
@@ -257,10 +288,10 @@ function enable-forwarding {
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
 	else
-		[[ "$1" == "gate" ]] || return 0
+		[[ "$1" == "gate" ]] || return
 		echo 1 > /proc/sys/net/ipv4/ip_forward
 	fi
-	return 0
+	return
 }
 
 # Disables IPv4 forwarding on the gateways
@@ -271,10 +302,10 @@ function disable-forwarding {
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
 	else
-		[[ "$1" == "gate" ]] || return 0
+		[[ "$1" == "gate" ]] || return
 		echo 0 > /proc/sys/net/ipv4/ip_forward
 	fi
-	return 0
+	return
 }
 
 # Installs VMware tools on all servers. The CD must already be inserted
@@ -299,7 +330,7 @@ function install-vmware-tools {
 		rm -r VMware*.tar.gz
 		sudo shutdown -r 1 &	
 	fi
-	return 0
+	return
 }
 
 # Runs the given command line on all servers. Any command may be used, arguments are allowed
@@ -314,7 +345,7 @@ function run {
 		shift
 		$@
 	fi
-	return 0
+	return
 }
 
 # Helpers for getting needed stuff to test network
@@ -355,7 +386,7 @@ function push-to {
 		fi
 	done
 
-	return 0
+	return
 }
 
 # Retreives the given file(s) from the given systems
@@ -408,7 +439,7 @@ function pull-from {
 		fi
 	done
 
-	return 0
+	return
 }
 
 # Runs the given function on the servers given
@@ -445,13 +476,10 @@ function run-on {
 	for s in $systems
 	do
 		echo -e "\t$s"
-		if ! ssh "$s" "$PUSHDIR/$SCRIPT" $@
-		then
-			echo Unable to run $s:$PUSHDIR
-		fi
+		ssh "$s" "$PUSHDIR/$SCRIPT" $@ 2>&1 | grep -v 'closed by remote host'
 	done
 
-	return 0
+	return
 }
 
 # Removes all files in the 'pushed' directory on every server
@@ -464,7 +492,20 @@ function clean-pushed {
 	else
 		rm -rf *
 	fi
-	return 0
+	return
+}
+
+# Removes all files in the 'pulled' directory on local system
+# Usage: clean-pulled
+function clean-pulled {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+	
+	rm -rf "$PULLDIR/*"
+	return
 }
 
 # Gives hints on the commands
@@ -474,15 +515,15 @@ function help {
 	then
 		echo Usage: $0 \<function\>
 		echo Functions available:
-		grep '^function' "$0" | grep -v 'function _' | awk '{print "\t"$2}'
+		grep '^function' "$SCRIPT" | grep -v 'function _' | awk '{print "\t"$2}'
 		echo
 		echo For details, try \'help '<function>'\'
 		help $1 help
 	else
 		echo Help for $2:
-		grep --before-context=5 "^function $2" "$0" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+		grep --before-context=5 "^function $2" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
-	return 0
+	return
 }
 
 # Main controller
