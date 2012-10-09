@@ -1,5 +1,6 @@
 #!/bin/bash
 PUSHDIR="~/pushed"
+PULLDIR="pulled"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -9,11 +10,10 @@ EXT="ext1"
 PROT="protA1 protB1"
 LATENCY="delay1"
 
-ALL="$GATES $EXT $PROT $DELAY"
+ALL="$GATES $EXT $PROT"
 
-SCRIPT=`basename $0`
-
-# Tests
+# Begins the tests!
+# Usage: start-tests
 function start-tests {
 	if [[ $IS_LOCAL ]]
 	then
@@ -23,6 +23,94 @@ function start-tests {
 	else
 		echo This should only be run from local
 	fi
+	return 0
+}
+
+# Adds the helper script and cronjob that allows runcmd-*.sh files
+# to be added to ~/pushed and be run by cron. Commands get called
+# every 1 minute and are only called _once_
+# Usage: add-cmdrun-cron
+function add-cmdrun-cron {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL $LATENCY - runcmd.sh
+		run-on $ALL $LATENCY - add-cmdrun-cron
+	else
+		# Move to correct place
+		mv runcmd.sh ~
+		chmod +x ~/runcmd.sh
+
+		# Check crontab
+		if [[ `crontab -l 2>&1 | grep runcmd` == "" ]]
+		then
+			echo Put this line into the cron:
+			echo '* * * * * ~/runcmd.sh'
+			echo Got it? 
+			read
+		fi
+	fi
+}
+
+function testbitches {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to gateA
+		run-on gateA - testbitches
+	else
+		sudo tcpdump -i eth1 -n -x not arp -w test.pcap &
+		disown $!
+	fi
+	return 0
+}
+
+# Starts tcpdump running on all hosts on the test network
+# Usage: start-collection
+function start-collection {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL -
+		run-on $ALL - start-collection
+	else
+		# Stop any other currently running dumps
+		stop-collection
+
+		if [[ "$1" == "gate" ]]
+		then
+			# Have two interfaces to capture on for gates
+			file1="test-`date +%Y-%m-%d-%H:%M:%S-inner`.pcap"
+			file2="test-`date +%Y-%m-%d-%H:%M:%S-outer`.pcap" 
+			echo Starting traffic collection to $file1 and $file2
+			
+			sudo tcpdump -i eth1 -w "$file1" -n -x not arp &
+			disown $!
+			sudo tcpdump -i eth2 -w "$file2" -n -x not arp &
+			disown $!
+		else
+			# Dump traffic on just the one
+			filename="test-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
+			echo Starting traffic collection to $filename
+			sudo tcpdump -i eth1 -w "$filename" -n not arp &
+			disown $!
+		fi
+	fi
+}
+
+# Stops tcpdumps running on all systems
+# Usage: stop-collection
+function stop-collection {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL
+		run-on $ALL - stop-collection
+	else
+		sudo killall tcpdump
+	fi
+}
+
+# Downloads the logs (pcap, ARG gateway, and traffic generator) to the local system
+# Usage: retreive-logs
+function retreive-logs {
+	pull-from $ALL - *.pcap
 	return 0
 }
 
@@ -140,8 +228,8 @@ function set-latency {
 function reboot {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $ALL -
-		run-on $ALL - reboot
+		push-to $ALL $LATENCY -
+		run-on $ALL $LATENCY - reboot
 	else
 		sudo reboot
 	fi
@@ -153,8 +241,8 @@ function reboot {
 function shutdown {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $ALL -
-		run-on $ALL - shutdown
+		push-to $ALL $LATENCY -
+		run-on $ALL $LATENCY - shutdown
 	else
 		sudo shutdown -h 0
 	fi
@@ -194,8 +282,8 @@ function disable-forwarding {
 function install-vmware-tools {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $ALL -  
-		run-on $ALL - install-vmware-tools
+		push-to $ALL $LATENCY -  
+		run-on $ALL $LATENCY - install-vmware-tools
 	else
 		# Mount CD and pull off tools
 		sudo mount /dev/cdrom /media/cdrom
@@ -233,7 +321,7 @@ function run {
 # Pushes the given files and this script to the given servers
 # Usage: push-to <server> [<server> ...] [- <file> ...]
 function push-to {
-	# Get the list of servers to run on. Lists ends with '-'
+	# Get the list of servers to push to. Lists ends with '-'
 	systems=""
 	while (( "$#" ))
 	do
@@ -263,6 +351,59 @@ function push-to {
 		if ! scp -r $files "$s:$PUSHDIR"
 		then
 			echo Unable to push to $s:$PUSHDIR
+			continue
+		fi
+	done
+
+	return 0
+}
+
+# Retreives the given file(s) from the given systems
+# Usage: pull-from <server> [<server> ...] - <file> [<file> ...]
+function pull-from {
+	# Get the list of servers to pull from. Lists ends with '-'
+	systems=""
+	while (( "$#" ))
+	do
+		if [[ "$1" == "-" ]]
+		then
+			shift
+			break
+		fi
+
+		systems="$systems $1"
+		shift
+	done
+
+	if [[ "$systems" == "" ]]
+	then
+		echo No systems supplied
+		return 1
+	fi
+
+	# And now pull files
+	if [[ "$#" == "1" ]]
+	then
+		files="$@"
+	else
+		files=""
+		for f in $@
+		do
+			files="$files,$f"
+			shift 
+		done
+		files="\\\\{${files:1}\\\\}"
+	fi
+
+	echo Pulling from...
+	mkdir -p "$PULLDIR"
+	for s in $systems
+	do
+		echo -e "\t$s"
+		# TBD, this is probably not right... need to get multiple files. How?
+		if ! scp -r "$s:$PUSHDIR/$files" "$PULLDIR"
+		then
+			echo Unable to pull from $s:$PUSHDIR
 			continue
 		fi
 	done
@@ -348,7 +489,16 @@ function help {
 function _main {
 	# Move into the directory with this script so we have 
 	# a frame of reference for paths
-	cd `dirname "${BASH_SOURCE[0]}"`
+	SOURCE="${BASH_SOURCE[0]}"
+	DIR="$( dirname "$SOURCE" )"
+	while [ -h "$SOURCE" ]
+	do 
+		SOURCE="$(readlink "$SOURCE")"
+		[[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+		DIR="$( cd -P "$( dirname "$SOURCE"  )" && pwd )"
+	done
+	cd -P "$( dirname "$SOURCE" )"
+	SCRIPT=`basename $SOURCE`
 
 	# Help?
 	if [[ "$#" == "0" ]]
@@ -374,6 +524,19 @@ function _main {
 	shift
 	echo Executing $func
 	"$func" "$TYPE" "$@"
+	if [[ "$?" == "127" ]]
+	then
+		echo $func does not appear to exist. Your options are:
+		help "$TYPE"
+	fi
+
+	# For god-only-knows-why, ssh loves to keep us alive with our background (but detached!) processes
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Committing patricide...
+		kill $PPID
+	fi
 }
 _main "$@"
+exit $?
 
