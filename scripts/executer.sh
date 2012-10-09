@@ -30,6 +30,8 @@ function run-tests {
 		return
 	fi
 
+	stop-tests $1
+
 	echo Setting latency to $3
 	set-latency $1 $3
 	
@@ -54,35 +56,24 @@ function run-tests {
 	return
 }
 
+# Ensures all components of a test are dead (gateways, collectors, etc)
+# Usage: stop-tests
+function stop-tests {
+	stop-generators $1
+	stop-collection $1
+	stop-arg $1
+}
+
 # Starts traffic generators on the network
 # Usage: start-generators
 function start-generators {
 	return
 }
 
-# Adds the helper script and cronjob that allows runcmd-*.sh files
-# to be added to ~/pushed and be run by cron. Commands get called
-# every 1 minute and are only called _once_
-# Usage: add-cmdrun-cron
-function add-cmdrun-cron {
-	if [[ $IS_LOCAL ]]
-	then
-		push-to $ALL $LATENCY - runcmd.sh
-		run-on $ALL $LATENCY - add-cmdrun-cron
-	else
-		# Move to correct place
-		mv runcmd.sh ~
-		chmod +x ~/runcmd.sh
-
-		# Check crontab
-		if [[ `crontab -l 2>&1 | grep runcmd` == "" ]]
-		then
-			echo Put this line into the cron:
-			echo '* * * * * ~/runcmd.sh'
-			echo Got it? 
-			read
-		fi
-	fi
+# Stops traffic generators on the network
+# Usage: stops-generators
+function stop-generators {
+	return
 }
 
 # Starts tcpdump running on all hosts on the test network
@@ -141,7 +132,10 @@ function retrieve-logs {
 
 	clean-pulled $1
 	pull-from $ALL - *.pcap
+	
+	mkdir -p "$2"
 	mv "$PULLDIR/*" "$2"
+	
 	return
 }
 
@@ -152,29 +146,37 @@ function retrieve-logs {
 function run-make {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES - ../*
-		run-on $GATES - run-make
+		push-to gateA - ../conf ../*.c ../*.h ../autogen.sh ../configure.ac ../Makefile.am
+		run-on gateA - run-make
+		pull-from gateA - arg
+		mv "$PULLDIR/arg" ..
 	else
+		stop-arg $1
 		./autogen.sh && make clean && make || return 1
-		mv arg ~
-		mv conf/* ~
-		clean-pushed
 	fi
 	return
 }
 
 # Gate control
-# Builds ARG from scratch and runs it on all gateways
-# Usage: start-arg
+# Builds ARG from scratch and runs it on all gateways. Hops
+# every <hop rate> milliseconds.
+# Usage: start-arg <hop rate>
 function start-arg {
 	if [[ $IS_LOCAL ]]
 	then
-		run-make
+		stop-arg $1
+
+		if [ ! -f ../arg ]
+		then
+			echo Rebuilding ARG
+			run-make $1
+		fi
+
+		push-to $GATES - ../arg ../conf
 		run-on $GATES - start-arg
 	else
-		[[ "$1" == "gate" ]] || return
-		cd ..
-		sudo ./arg arg.conf `hostname` 
+		sudo ./arg conf/arg.conf `hostname` &
+		disown $!
 	fi
 	return
 }
@@ -379,17 +381,13 @@ function push-to {
 	for s in $systems
 	do
 		echo -e "\t$s"
-		if ! scp -r $files "$s:$PUSHDIR"
-		then
-			echo Unable to push to $s:$PUSHDIR
-			continue
-		fi
+		scp -r $files "$s:$PUSHDIR"
 	done
 
 	return
 }
 
-# Retreives the given file(s) from the given systems
+# Retrieves the given file(s) from the given systems
 # Usage: pull-from <server> [<server> ...] - <file> [<file> ...]
 function pull-from {
 	# Get the list of servers to pull from. Lists ends with '-'
@@ -508,6 +506,31 @@ function clean-pulled {
 	return
 }
 
+# Adds the helper script and cronjob that allows runcmd-*.sh files
+# to be added to ~/pushed and be run by cron. Commands get called
+# every 1 minute and are only called _once_
+# Usage: add-cmdrun-cron
+function add-cmdrun-cron {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL $LATENCY - runcmd.sh
+		run-on $ALL $LATENCY - add-cmdrun-cron
+	else
+		# Move to correct place
+		mv runcmd.sh ~
+		chmod +x ~/runcmd.sh
+
+		# Check crontab
+		if [[ `crontab -l 2>&1 | grep runcmd` == "" ]]
+		then
+			echo Put this line into the cron:
+			echo '* * * * * ~/runcmd.sh'
+			echo Got it? 
+			read
+		fi
+	fi
+}
+
 # Gives hints on the commands
 # Usage: help [<function>]
 function help {
@@ -558,8 +581,6 @@ function _main {
 		IS_LOCAL=
 	fi
 	
-	echo Running as $TYPE
-
 	# Call actual functionality
 	func=$1
 	shift
