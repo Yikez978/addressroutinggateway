@@ -112,24 +112,6 @@ void arglog(int level, char *fmt, ...)
 	}
 }
 
-char get_next_line(FILE *f, char *line, int max)
-{
-	int len = 0;
-	for(;;)
-	{
-		if(fgets(line, max, f) == NULL)
-			return -1;
-
-		if(line[0] != '\n' && line[0] != '\r')
-		{
-			len = strnlen(line, max);
-			if(line[len - 1] == '\n')
-				line[len - 1] = '\0';
-			return 0;
-		}
-	}
-}
-
 void current_time(struct timespec *out)
 {
 	clock_gettime(CLOCK_MONOTONIC, out);

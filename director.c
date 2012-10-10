@@ -171,9 +171,7 @@ void direct_inbound(const struct packet_data *packet)
 	{
 		if(packet->arg == NULL)
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Inbound Reject: Bad Protocol\n");
-			#endif
 			return;
 		}
 
@@ -181,15 +179,11 @@ void direct_inbound(const struct packet_data *packet)
 		{
 			if(process_admin_msg(packet, gate) == 0)
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Accept: admin\n");
-				#endif
 			}
 			else
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Reject: Invalid admin\n");
-				#endif
 			}
 		}
 		else
@@ -197,32 +191,24 @@ void direct_inbound(const struct packet_data *packet)
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Reject: Dest IP Incorrect\n");
-				#endif
 				return;
 			}
 			
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Reject: Source IP Incorrect\n");
-				#endif
 				return;
 			}
 
 			// Unwrap and drop into network, assuming everything checks out
 			if(do_arg_unwrap(packet, gate) == 0)
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Accept: Unwrapped\n");
-				#endif
 			}
 			else
 			{
-				#ifdef DISP_RESULTS
 				arglog(LOG_RESULTS, "Inbound Reject: Failed to unwrap\n");
-				#endif
 			}
 		}
 	}
@@ -232,15 +218,11 @@ void direct_inbound(const struct packet_data *packet)
 		// Pass off to the NAT handler
 		if(do_nat_inbound_rewrite(packet) == 0)
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Inbound Accept: Rewrite\n");
-			#endif
 		}
 		else
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Inbound Reject: NAT\n");
-			#endif
 		}
 	}
 	
@@ -257,15 +239,11 @@ void direct_outbound(const struct packet_data *packet)
 		// Destined for an ARG network
 		if(do_arg_wrap(packet, gate) == 0)
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Outbound Accept: Wrap\n");
-			#endif
 		}
 		else
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Outbound Reject: Failed to wrap\n");
-			#endif
 		}
 	}
 	else
@@ -274,15 +252,11 @@ void direct_outbound(const struct packet_data *packet)
 		// if needed
 		if(do_nat_outbound_rewrite(packet) == 0)
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Outbound: Accept: Rewrite\n");
-			#endif
 		}
 		else
 		{
-			#ifdef DISP_RESULTS
 			arglog(LOG_RESULTS, "Outbound Reject: NAT\n");
-			#endif
 		}
 	}
 }

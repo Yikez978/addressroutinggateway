@@ -5,6 +5,8 @@ AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -ggdb
 # Everything will get built into here
 bin_PROGRAMS = arg
 arg_SOURCES = uthash.h \
+	settings.h \
+	settings.c \
 	packet.h \
 	packet.c \
 	utility.h \
@@ -29,10 +31,10 @@ remote :
 # Default test to do whatever it is we want to do most often
 # for now, just do local test
 testA : stop arg
-	sudo ./arg conf/arg.conf GateA
+	sudo ./arg conf/arg.conf gateA
 
 testB : stop arg
-	sudo ./arg conf/arg.conf GateB
+	sudo ./arg conf/arg.conf gateB
 
 test : start
 

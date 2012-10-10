@@ -45,5 +45,33 @@
 #define HOP_KEY_SIZE 16
 #define SHA1_HASH_SIZE 20
 
+struct arg_network_info;
+
+typedef struct gate_list {
+	char name[MAX_CONF_LINE];
+	struct gate_list *next;
+} gate_list;
+
+typedef struct config_data {
+	char file[MAX_CONF_LINE];
+	char dir[MAX_CONF_LINE];
+	
+	char ourGateName[MAX_CONF_LINE];
+
+	struct gate_list *gate;
+	long hopRate;
+} config_data;
+
+char read_config(struct config_data *conf);
+void release_config(struct config_data *conf);
+
+char read_public_key(struct config_data *conf, struct arg_network_info *gate);
+char read_private_key(struct config_data *conf, struct arg_network_info *gate);
+
+// Reads until finding a not-blank line (COMPLETELY blank, not whitespace skipping)
+// Line has \n removed if needed
+// Returns 0 if line is found, 1 if not (eof, probably)
+char get_next_line(FILE *f, char *line, int max);
+
 #endif
 
