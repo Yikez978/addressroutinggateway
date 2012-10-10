@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="~/pushed"
 PULLDIR="pulled"
-RESULTSDIR="../results"
+RESULTSDIR="results"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -16,7 +16,7 @@ ALL="$GATES $EXT $PROT"
 # Begins the tests! Runs for <time> seconds with <delay> latency (see set-latency),
 # with ARG hopping every <hop rate> milliseconds.
 # Usage: start-tests <time> <delay> <hop rate>
-function run-tests {
+function start-tests {
 	if [[ ! $IS_LOCAL ]]
 	then
 		echo Must be run from local
@@ -31,6 +31,8 @@ function run-tests {
 	fi
 
 	stop-tests $1
+	clean-pushed $1
+	clean-pulled $1
 
 	echo Setting latency to $3
 	set-latency $1 $3
@@ -45,8 +47,11 @@ function run-tests {
 	echo Running for $2 seconds
 	sleep $2
 
-	d="$RESULTSDIR/`date +%Y-%m-%d-%H:%M:%S`-l$3-hr$4ms"
-	echo Pulling logs to $d
+	echo Ending test
+	stop-tests $1
+
+	d="`date +%Y-%m-%d-%H:%M:%S`-l$3-hr$4ms"
+	echo Pulling logs into $RESULTSDIR/$d
 	retrieve-logs $1 "$d"
 
 	mkdir -p "$d"
@@ -90,8 +95,8 @@ function start-collection {
 		if [[ "$1" == "gate" ]]
 		then
 			# Have two interfaces to capture on for gates
-			file1="test-`date +%Y-%m-%d-%H:%M:%S`-inner.pcap"
-			file2="test-`date +%Y-%m-%d-%H:%M:%S`-outer.pcap" 
+			file1="`hostname`-inner-`date +%Y-%m-%d-%H:%M:%S`.pcap"
+			file2="`hostname`-outer-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
 			sudo tcpdump -i eth1 -w "$file1" -n -x not arp &
@@ -100,11 +105,12 @@ function start-collection {
 			disown $!
 		else
 			# Dump traffic on just the one
-			filename="test-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
+			filename="`hostname`-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
 			echo Starting traffic collection to $filename
 			sudo tcpdump -i eth1 -w "$filename" -n not arp &
-			disown $!
+			disown $! 
 		fi
+		sleep 1
 	fi
 }
 
@@ -121,7 +127,7 @@ function stop-collection {
 }
 
 # Downloads the logs (pcap, ARG gateway, and traffic generator) to the local system
-# Saves to the given directory
+# Saves to the given directory name within $RESULTSDIR
 # Usage: retrieve-logs <dir>
 function retrieve-logs {
 	if [[ ! $IS_LOCAL ]]
@@ -133,8 +139,8 @@ function retrieve-logs {
 	clean-pulled $1
 	pull-from $ALL - *.pcap
 	
-	mkdir -p "$2"
-	mv "$PULLDIR/*" "$2"
+	mkdir -p "$RESULTSDIR"
+	mv "$PULLDIR" "$RESULTSDIR/$2"
 	
 	return
 }
@@ -146,10 +152,11 @@ function retrieve-logs {
 function run-make {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to gateA - ../conf ../*.c ../*.h ../autogen.sh ../configure.ac ../Makefile.am
+		push-to gateA - conf *.c *.h autogen.sh configure.ac Makefile.am
 		run-on gateA - run-make
 		pull-from gateA - arg
-		mv "$PULLDIR/arg" ..
+		mv "$PULLDIR/arg" .
+		clean-pulled $1
 	else
 		stop-arg $1
 		./autogen.sh && make clean && make || return 1
@@ -166,13 +173,13 @@ function start-arg {
 	then
 		stop-arg $1
 
-		if [ ! -f ../arg ]
+		if [ ! -f arg ]
 		then
 			echo Rebuilding ARG
 			run-make $1
 		fi
 
-		push-to $GATES - ../arg ../conf
+		push-to $GATES - arg conf
 		run-on $GATES - start-arg
 	else
 		sudo ./arg conf/arg.conf `hostname` &
@@ -330,7 +337,8 @@ function install-vmware-tools {
 		# Clean up slightly
 		sudo umount /media/cdrom
 		rm -r VMware*.tar.gz
-		sudo shutdown -r 1 &	
+		
+		reboot $1
 	fi
 	return
 }
@@ -474,7 +482,7 @@ function run-on {
 	for s in $systems
 	do
 		echo -e "\t$s"
-		ssh "$s" "$PUSHDIR/$SCRIPT" $@ 2>&1 | grep -v 'closed by remote host'
+		ssh "$s" "$PUSHDIR/`basename $SCRIPT`" $@ 2>&1 | grep -v 'closed by remote host'
 	done
 
 	return
@@ -562,7 +570,6 @@ function _main {
 		DIR="$( cd -P "$( dirname "$SOURCE"  )" && pwd )"
 	done
 	cd -P "$( dirname "$SOURCE" )"
-	SCRIPT=`basename $SOURCE`
 
 	# Help?
 	if [[ "$#" == "0" ]]
@@ -575,9 +582,12 @@ function _main {
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
 	if [[ "$LOCAL" == "$TYPE" ]]
 	then
+		cd ..
+		SCRIPT="scripts/`basename $SOURCE`"
 		TYPE="local"
 		IS_LOCAL=1
 	else
+		SCRIPT=`basename $SOURCE`
 		IS_LOCAL=
 	fi
 	
@@ -595,7 +605,7 @@ function _main {
 	# For god-only-knows-why, ssh loves to keep us alive with our background (but detached!) processes
 	if [[ ! $IS_LOCAL ]]
 	then
-		echo Committing patricide...
+		#echo Committing patricide...
 		kill $PPID
 	fi
 }
