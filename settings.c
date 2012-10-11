@@ -136,19 +136,12 @@ void release_config(struct config_data *conf)
 char read_public_key(struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
-	int len;
 	char line[MAX_CONF_LINE] = "";
 	char path[MAX_CONF_LINE] = "";
 	FILE *keyFile = NULL;
 
-	// Build path of public key file
-	len = strnlen(conf->dir, sizeof(path));
-	strncpy(path, conf->dir, len);
-	path[len] = '/';
-	strncpy(path + len + 1, gate->name, sizeof(path) - len);
-	strcpy(path + len + 1 + strlen(gate->name), ".pub");
-
 	// Read in key
+	snprintf(path, sizeof(path), "%s/%s.pub", conf->dir, gate->name);
 	keyFile = fopen(path, "r");
 	if(keyFile == NULL)
 	{
@@ -173,7 +166,7 @@ char read_public_key(struct config_data *conf, struct arg_network_info *gate)
 	}
 	inet_pton(AF_INET, line, gate->mask);
 	
-	// Then teh actual numbers for the key
+	// Then the actual numbers for the key
 	if((ret = mpi_read_file(&gate->rsa.N, 16, keyFile)) != 0 ||
 		(ret = mpi_read_file(&gate->rsa.E, 16, keyFile)) != 0)
 	{
@@ -191,17 +184,11 @@ char read_public_key(struct config_data *conf, struct arg_network_info *gate)
 char read_private_key(struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
-	int len;
 	FILE *privKeyFile = NULL;
 	char path[MAX_CONF_LINE] = "";
 
-	// Build path of private key file
-	len = strnlen(conf->dir, sizeof(path));
-	strncpy(path, conf->dir, len);
-	path[len] = '/';
-	strncpy(path + len + 1, gate->name, sizeof(path) - len);
-	strcpy(path + len + 1 + strlen(gate->name), ".priv");
-
+	// Open private key
+	snprintf(path, sizeof(path), "%s/%s.priv", conf->dir, gate->name);
 	privKeyFile = fopen(path, "r");
 	if(privKeyFile == NULL)
 	{
@@ -209,7 +196,6 @@ char read_private_key(struct config_data *conf, struct arg_network_info *gate)
 		return -1;
 	}
 
-	// Now the actual private key
 	if( ( ret = mpi_read_file( &gate->rsa.N , 16, privKeyFile ) ) != 0 ||
 		( ret = mpi_read_file( &gate->rsa.E , 16, privKeyFile ) ) != 0 ||
 		( ret = mpi_read_file( &gate->rsa.D , 16, privKeyFile ) ) != 0 ||

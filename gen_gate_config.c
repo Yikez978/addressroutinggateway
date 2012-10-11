@@ -24,7 +24,6 @@ int main( int argc, char *argv[] )
 	char baseIP[20];
 	char mask[20];
 
-	int len;
 	char pubKeyName[MAX_CONF_LINE];
 	char privKeyName[MAX_CONF_LINE];
 
@@ -76,11 +75,7 @@ int main( int argc, char *argv[] )
     }
 
 	// Write public data
-	len = strlen(name);
-	strncpy(pubKeyName, name, sizeof(pubKeyName));
-	pubKeyName[len] = '.';
-	strcpy(pubKeyName + len, ".pub");
-    
+	snprintf(pubKeyName, sizeof(pubKeyName), "%s.pub", name);
 	printf( " ok\n  . Exporting the public  key in %s....", pubKeyName );
     fflush( stdout );
 
@@ -102,10 +97,8 @@ int main( int argc, char *argv[] )
     }
 
 	// Write private key file
-	strncpy(privKeyName, name, sizeof(privKeyName));
-	privKeyName[len] = '.';
-	strcpy(privKeyName + len, ".priv");
-    
+	snprintf(privKeyName, sizeof(pubKeyName), "%s.priv", name);
+	
 	printf( " ok\n  . Exporting the private key in %s...", privKeyName );
     fflush( stdout );
 

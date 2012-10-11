@@ -87,7 +87,7 @@ void *receive_thread(void *tData)
 		return (void*)-2;
 	}
 
-	// Filter outbound traffic (we only want to get traffic incoming to this card)
+	// Filter outbound traffic (we only want to get traffic coming to this card)
 	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
 	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
 	snprintf(filter, sizeof(filter), "not arp and %s net %s mask %s",
@@ -135,7 +135,7 @@ void *receive_thread(void *tData)
 		if(wireData == NULL)
 			continue;
 
-		// Point packet to skip the 
+		// Point packet to skip the data link layer
 		packet.linkLayerLen = 0;
 		packet.data = wireData + frameHeadLen;
 		packet.len = header.caplen - frameHeadLen - frameTailLen;
