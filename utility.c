@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "utility.h"
+#include "settings.h"
 
 static int logLevel = LOG_DEBUG;
 
@@ -83,6 +84,14 @@ void arglog(int level, char *fmt, ...)
 	int fullLen = 40;
 	char *line = NULL;
 	struct timespec curr;
+
+	#ifndef DISP_RESULTS
+	if(level == LOG_RESULTS)
+	{
+		// Make the check always fail
+		level = logLevel + 1;
+	}
+	#endif
 
 	if(level <= logLevel)
 	{

@@ -17,12 +17,6 @@
 #include "protocol.h"
 #include "settings.h"
 
-// State bits used in arg_network_info
-#define HOP_STATE_AUTH      0x01
-#define HOP_STATE_CONNECTED 0x02
-
-#define MAX_NAME_SIZE 20
-
 // Structure to hold data on associated ARG networks
 // All times here are given in jiffies for the current system, unless
 // otherwise specified

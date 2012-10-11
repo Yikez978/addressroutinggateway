@@ -11,11 +11,11 @@ void printIP(int len, const void *buf);
 
 // Simple log stuff
 enum {
+	LOG_RESULTS,
 	LOG_FATAL,
 	LOG_ALERT,
 	LOG_INFO,
 	LOG_DEBUG,
-	LOG_RESULTS,
 };
 
 int set_log_level(int level);

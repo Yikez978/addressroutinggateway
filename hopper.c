@@ -133,6 +133,13 @@ char get_hopper_conf(char *confPath, char *gateName)
 	currGateName = conf.gate;
 	while(currGateName)
 	{
+		// TBD, remove. gateA doesn't get to know about gateC
+		if(strcmp(gateName, "gateA") == 0 && strcmp(currGateName->name, "gateC") == 0)
+		{
+			currGateName = currGateName->next;
+			continue;
+		}
+
 		// New node!
 		prevNet = currNet;
 		currNet = create_arg_network_info();
@@ -157,6 +164,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		// and IP address/mask in a bit
 		strncpy(currNet->name, currGateName->name, sizeof(currNet->name));
 		read_public_key(&conf, currNet);
+		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
 
 		currGateName = currGateName->next;
 	}
@@ -205,8 +213,11 @@ char get_hopper_conf(char *confPath, char *gateName)
 	arglog(LOG_DEBUG, "Configured as %s\n", gateInfo->name);
 
 	// Private key
-	read_private_key(&conf, gateInfo);
-	mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
+	if(read_private_key(&conf, gateInfo))
+	{
+		arglog(LOG_FATAL, "Private key check failed\n");
+		return -5;
+	}
 
 	// Hop and symmetric key
 	arglog(LOG_DEBUG, "Generating hop and symmetric encryption keys\n");
@@ -215,7 +226,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
 
 	cipher_setkey(&gateInfo->cipher, gateInfo->symKey, sizeof(gateInfo->symKey) * 8, POLARSSL_DECRYPT);
-	md_hmac_starts(&gateInfo->md, gateInfo->symKey, sizeof(gateInfo->symKey)); // TBD use separate key for hmac?
+	md_hmac_starts(&gateInfo->md, gateInfo->symKey, sizeof(gateInfo->symKey));
 	
 	if(cipher_get_block_size(&gateInfo->cipher) != AES_BLOCK_SIZE)
 	{
@@ -267,7 +278,7 @@ void *connect_thread(void *data)
 			gate = gate->next;
 		}
 
-		sleep(CONNECT_WAIT_TIME / 4);
+		sleep(CONNECT_WAIT_TIME);
 	}
 	
 	arglog(LOG_DEBUG, "Connect thread dying\n");
@@ -422,7 +433,11 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 	case ARG_CONN_DATA_RESP_MSG:
 		process_arg_conn_data_resp(gateInfo, srcGate, packet);
 		break;
-	
+
+	case ARG_TRUST_DATA_MSG:
+		process_arg_trust(gateInfo, srcGate, packet);
+		break;
+
 	default:
 		arglog(LOG_DEBUG, "Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
 		return -1;	
@@ -477,7 +492,6 @@ void update_ips(struct arg_network_info *gate)
 		current_time(&gate->ipCacheExpiration);
 		time_plus(&gate->ipCacheExpiration,
 			gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
-		printf("Next update for %s occurs on %lu\n", gate->name, gate->ipCacheExpiration.tv_sec);
 	}
 }
 

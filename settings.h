@@ -4,14 +4,14 @@
 #define INT_DEV_NAME "eth2"
 #define EXT_DEV_NAME "eth1"
 
-// Number of milliseconds between hops
-#define HOP_TIME 5000
+// Disable the fine packet accepted/rejected messages
+#define DISP_RESULTS
 
 // Number of seconds before an auth request times out and must be initiated again
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 30
+#define CONNECT_WAIT_TIME 60
 
 // Maximum number of seconds to wait for new data before declaring a gate disconnected
 #define MAX_UPDATE_TIME 300
@@ -29,6 +29,9 @@
 // Sequence numbers may have to wrap if they reach 2^32. How far from the boundary will we
 // accept a sudden reversion to the beginnig?
 #define SEQ_NUM_WRAP_ALLOWANCE 10
+
+// Maximum length of a name (including null for a gate)
+#define MAX_NAME_SIZE 10
 
 #define MAX_PACKET_SIZE UINT16_MAX
 #define MAX_CONF_LINE 300

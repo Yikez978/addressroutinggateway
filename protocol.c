@@ -29,7 +29,7 @@ char start_time_sync(struct arg_network_info *local, struct arg_network_info *re
 
 char start_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME | ARG_DO_CONN;
+	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME | ARG_DO_CONN | ARG_DO_TRUST;
 	return do_next_action(local, remote);
 }
 
@@ -40,6 +40,8 @@ char do_next_action(struct arg_network_info *local, struct arg_network_info *rem
 		return send_arg_conn_data(local, remote, 0);
 	else if(state & ARG_DO_AUTH)
 		return send_arg_ping(local, remote);
+	else if(state & ARG_DO_TRUST)
+		return send_all_trust(local, remote);
 	else
 		return 0;
 }
@@ -279,6 +281,171 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 	return status;
 }
 
+// Trust packets. Allow gateways we know to tell us about ones they know
+char send_all_trust(struct arg_network_info *local,
+					struct arg_network_info *remote)
+{
+	struct arg_network_info *curr = NULL;
+	char ret = 0;
+
+	arglog(LOG_DEBUG, "Sending all trust data from %s\n", local->name);
+
+	// Send data an each gate we know about to remote. Obviously,
+	// skip ourselves and the remote
+	curr = local;
+	while(curr)
+	{
+		curr = curr->next;
+	
+		if(curr == NULL)
+			break;
+		if(curr == local)
+			continue;
+		if(curr == remote)
+			continue;
+
+		if(send_arg_trust(local, remote, curr))
+			ret = 1;
+	}
+
+	return ret;
+}
+
+char send_arg_trust(struct arg_network_info *local,
+					struct arg_network_info *remote,
+					struct arg_network_info *gate)
+{
+	struct argmsg *msg = NULL;
+	struct arg_trust_data *trust = NULL;
+	int ret = 0;
+
+	arglog(LOG_DEBUG, "Sending trust information about %s to %s\n", gate->name, remote->name);
+
+	// Build message
+	msg = create_arg_msg(sizeof(struct arg_trust_data));
+	if(msg == NULL)
+	{
+		arglog(LOG_ALERT, "Unable to allocate space to send trust data\n");
+		return -2;
+	}
+
+	trust = (struct arg_trust_data*)msg->data;
+	strncpy(trust->name, gate->name, sizeof(trust->name));
+	memcpy(trust->baseIP, gate->baseIP, sizeof(trust->baseIP));
+	memcpy(trust->mask, gate->mask, sizeof(trust->mask));
+	if((ret = mpi_write_binary(&gate->rsa.N, trust->n, sizeof(trust->n))))
+	{
+		arglog(LOG_ALERT, "Failed to write N to trust data, got error %i\n", ret);
+		free_arg_msg(msg);
+		return -2;
+	}
+	if((ret = mpi_write_binary(&gate->rsa.E, trust->e, sizeof(trust->e))))
+	{
+		arglog(LOG_ALERT, "Failed to write E to trust data, got error %i\n", ret);
+		free_arg_msg(msg);
+		return -2;
+	}
+
+	pthread_spin_lock(&remote->lock);
+
+	// Send
+	if(send_arg_packet(local, remote, ARG_TRUST_DATA_MSG, msg) < 0)
+		arglog(LOG_ALERT, "Failed to send ARG trust data\n");
+
+	pthread_spin_unlock(&remote->lock);
+
+	free_arg_msg(msg);
+
+	return 0;
+}
+
+char process_arg_trust(struct arg_network_info *local,
+						struct arg_network_info *remote,
+						const struct packet_data *packet)
+{
+	char status = 0;
+	int ret = 0;
+	struct argmsg *msg = NULL;
+	struct arg_trust_data *trust = NULL;
+
+	struct arg_network_info *newGate = NULL;
+	struct arg_network_info *curr = NULL;
+
+	arglog(LOG_DEBUG, "Received trust data from %s\n", remote->name);
+	
+	if(process_arg_packet(local, remote, packet, &msg))
+	{
+		arglog(LOG_DEBUG, "Stopping trust data processing\n");
+		return -1;
+	}
+
+	if(msg->len == sizeof(struct arg_trust_data))
+	{
+		// See if we already know about this gate
+		trust = (struct arg_trust_data*)msg->data;
+		curr = local;
+		while(curr != NULL)
+		{
+			if(mask_array_cmp(sizeof(trust->baseIP), curr->mask, curr->baseIP, trust->baseIP) == 0)
+			{
+				arglog(LOG_ALERT, "Already know about %s\n", trust->name);
+				free_arg_msg(msg);
+				return -2;
+			}
+			
+			curr = curr->next;
+		}
+		
+		// Create a new gate
+		newGate = create_arg_network_info();
+		
+		strncpy(newGate->name, trust->name, sizeof(newGate->name));
+		memcpy(newGate->baseIP, trust->baseIP, sizeof(newGate->baseIP));
+		memcpy(newGate->mask, trust->mask, sizeof(newGate->mask));
+		if((ret = mpi_read_binary(&newGate->rsa.N, trust->n, sizeof(trust->n))))
+		{
+			arglog(LOG_ALERT, "Failed to read N from trust data, got error %i\n", ret);
+			remove_arg_network(newGate);
+			free_arg_msg(msg);
+			return -2;
+		}
+		if((ret = mpi_read_binary(&newGate->rsa.E, trust->e, sizeof(trust->e))))
+		{
+			arglog(LOG_ALERT, "Failed to read E from trust data, got error %i\n", ret);
+			remove_arg_network(newGate);
+			free_arg_msg(msg);
+			return -2;
+		}
+		
+		newGate->rsa.len = (mpi_msb(&newGate->rsa.N) + 7) >> 3;	
+		mask_array(sizeof(newGate->baseIP), newGate->baseIP, newGate->mask, newGate->baseIP);
+
+		// Hook it up
+		pthread_spin_lock(&local->lock);
+		newGate->next = local->next;
+		newGate->prev = local;
+		local->next = newGate;
+		pthread_spin_unlock(&local->lock);
+
+		arglog(LOG_INFO, "Added %s as a new gate\n", newGate->name);
+		send_arg_conn_data(local, newGate, 0);
+	}
+	else
+	{
+		arglog(LOG_DEBUG, "Trust data not properly sized\n");
+		status = -2;
+	}
+	
+	free_arg_msg(msg);
+
+	// All done with a connection
+	remote->proto.state &= ~ARG_DO_TRUST;
+	do_next_action(local, remote);
+	
+	return status;
+}
+
+// "Normal" packets between gateways
 char send_arg_wrapped(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
@@ -409,8 +576,14 @@ char send_arg_packet(struct arg_network_info *local,
 	// Encrypt
 	if(msg != NULL)
 	{
-		if(type == ARG_WRAPPED_MSG)
+		if(type == ARG_WRAPPED_MSG || type == ARG_TRUST_DATA_MSG)
 		{
+			if(!remote->connected)
+			{
+				arglog(LOG_ALERT, "Attempt to send symmetrically-encrypted data to unconnected gateway\n");
+				return -1;
+			}
+
 			// Symmetric encryption with remote symmetric key
 			memcpy(nounce, remote->iv, sizeof(nounce));
 			for(i = 0; i < sizeof(packet->arg->seq); i++)
@@ -529,7 +702,8 @@ char process_arg_packet(struct arg_network_info *local,
 	else
 	{
 		// Fail, sequence numbers should always advance (except for wrap-around)
-		arglog(LOG_DEBUG, "Sequence number not monotonic (got %u, should be > %u)\n", ntohl(packet->arg->seq), remote->proto.inSeqNum);
+		arglog(LOG_DEBUG, "Sequence number not monotonic (got %u, should be > %u)\n",
+			ntohl(packet->arg->seq), remote->proto.inSeqNum);
 		return -2;
 	}
 	
@@ -546,11 +720,18 @@ char process_arg_packet(struct arg_network_info *local,
 	memset(newPacket->arg->sig, 0, sizeof(newPacket->arg->sig));
 	if(newPacket->arg->type == ARG_WRAPPED_MSG)
 	{
+		if(!remote->connected)
+		{
+			arglog(LOG_DEBUG, "%s is not connected, discarding packet\n", remote->name);
+			free_packet(newPacket);
+			return -3;
+		}
+		
 		// Check hmac with remote symmetric key
 		md_hmac_starts(&remote->md, remote->symKey, sizeof(remote->symKey));
 		md_hmac_update(&remote->md, (uint8_t*)newPacket->arg, ntohs(newPacket->arg->len));
 		md_hmac_finish(&remote->md, newPacket->arg->sig);
-
+		
 		if(memcmp(newPacket->arg->sig, packet->arg->sig, sizeof(newPacket->arg->sig)))
 		{
 			arglog(LOG_DEBUG, "Unable to verify hmac\n");
@@ -582,7 +763,7 @@ char process_arg_packet(struct arg_network_info *local,
 			return -3;
 		}
 
-		if(newPacket->arg->type == ARG_WRAPPED_MSG)
+		if(newPacket->arg->type == ARG_WRAPPED_MSG || newPacket->arg->type == ARG_TRUST_DATA_MSG)
 		{
 			// Symmetric decrypt using local symmetric key
 			memcpy(nounce, local->iv, sizeof(nounce));

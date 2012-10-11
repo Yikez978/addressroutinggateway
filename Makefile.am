@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS}
 AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -ggdb
 
 # Everything will get built into here
-bin_PROGRAMS = arg
+bin_PROGRAMS = arg gen_gate_config
 arg_SOURCES = uthash.h \
 	settings.h \
 	settings.c \
@@ -22,6 +22,9 @@ arg_SOURCES = uthash.h \
 	director.h \
 	director.c \
 	init.c
+
+gen_gate_config_SOURCES = settings.h \
+	gen_gate_config.c
 
 arg-local : stop
 
