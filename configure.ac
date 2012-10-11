@@ -12,6 +12,7 @@ AM_PROG_CC_C_O
 # Basic stuff we always need
 AC_CHECK_HEADERS([inttypes.h stdint.h], [break;])
 AC_CHECK_HEADERS([stdlib.h strings.h  sys/time.h unistd.h arpa/inet.h])
+AC_CHECK_HEADERS([dirent.h])
 
 # Required dependencies
 # real-time library

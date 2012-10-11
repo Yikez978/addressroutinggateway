@@ -23,7 +23,9 @@ Makefile
 Makefile.in
 aclocal.m4
 arg
+gen_gate_config
 autom4te.cache
 compile
 pulled
+results
 

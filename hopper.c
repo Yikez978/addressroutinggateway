@@ -115,27 +115,32 @@ void uninit_hopper(void)
 
 char get_hopper_conf(char *confPath, char *gateName)
 {
-	int ret = 0;
-
-	FILE *confFile = NULL;
-	char line[MAX_CONF_LINE+1];
-	
-	char *dirPathEnd;
-	FILE *privKeyFile = NULL;
-	char privKeyPath[MAX_NAME_SIZE + 100] = "";
+	struct gate_list *currGateName = NULL;
 
 	struct arg_network_info *currNet = NULL;
 	struct arg_network_info *prevNet = NULL;
 
-	confFile = fopen(confPath, "r");
-	if(confFile == NULL)
+	struct config_data conf;
+
+	// Read in main conf
+	strncpy(conf.file, confPath, sizeof(conf.file));
+	if(read_config(&conf))
 	{
-		arglog(LOG_DEBUG, "Unable to open config file at %s\n", confPath);
+		arglog(LOG_ALERT, "Unable to read in main configuration from %s\n", confPath);
 		return -1;
 	}
 
-	while(!feof(confFile))
+	currGateName = conf.gate;
+	while(currGateName)
 	{
+		// TBD, remove. gateA doesn't get to know about gateC
+		if(strcmp(gateName, "gateA") == 0 && strcmp(currGateName->name, "gateC") == 0)
+		{
+			currGateName = currGateName->next;
+			continue;
+		}
+
+		// New node!
 		prevNet = currNet;
 		currNet = create_arg_network_info();
 		if(currNet == NULL)
@@ -143,7 +148,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 			arglog(LOG_DEBUG, "Unable to create arg network info during configuration\n");
 			return -2;
 		}
-
+		
 		// First gate is "us" for now, we rearrange later
 		if(gateInfo == NULL)
 			gateInfo = currNet;
@@ -155,51 +160,14 @@ char get_hopper_conf(char *confPath, char *gateName)
 			currNet->prev = prevNet;
 		}
 
-		// Conf file format is:
-		// name
-		// base ip in dot-notation
-		// mask in dot-notation
-		// repeat for next gate
-		if(get_next_line(confFile, line, MAX_CONF_LINE))
-		{
-			remove_arg_network(currNet);
-			break;
-		}
-		strncpy(currNet->name, line, sizeof(currNet->name));
-		
-		if(get_next_line(confFile, line, MAX_CONF_LINE))
-		{
-			arglog(LOG_DEBUG, "Problem reading in base IP from conf for %s\n", currNet->name);
-			remove_arg_network(currNet);
-			break;
-		}
-		inet_pton(AF_INET, line, currNet->baseIP);
-		
-		if(get_next_line(confFile, line, MAX_CONF_LINE))
-		{
-			arglog(LOG_DEBUG, "Problem reading in mask from conf for %s\n", currNet->name);
-			remove_arg_network(currNet);
-			break;
-		}
-		inet_pton(AF_INET, line, currNet->mask);
-
-		// Fix base ip by masking (just in case)
+		// Get public data for this node. If it's us, we'll get the private key
+		// and IP address/mask in a bit
+		strncpy(currNet->name, currGateName->name, sizeof(currNet->name));
+		read_public_key(&conf, currNet);
 		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
-		
-		// Read in public key
-		if((ret = mpi_read_file( &currNet->rsa.N, 16, confFile)) != 0 ||
-			(ret = mpi_read_file( &currNet->rsa.E, 16, confFile)) != 0 )
-		{
-			arglog(LOG_DEBUG, "Unable to read in public key for %s (returned %i)\n", currNet->name, ret);
-			remove_arg_network(currNet);
-			break;
-		}
 
-		currNet->rsa.len = ( mpi_msb( &currNet->rsa.N ) + 7 ) >> 3;
+		currGateName = currGateName->next;
 	}
-
-	fclose(confFile);
-	confFile = NULL;
 
 	// Which one is our head? Find it, move to beginning, and rearrange
 	// all relevant pointers.
@@ -244,45 +212,10 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	arglog(LOG_DEBUG, "Configured as %s\n", gateInfo->name);
 
-	// Private key. Must be named the same as our gate
-	dirPathEnd = strrchr(confPath, '/');
-	if(dirPathEnd == NULL)
-		dirPathEnd = strrchr(confPath, '\\');
-	if(dirPathEnd != NULL)
-		strncpy(privKeyPath, confPath, dirPathEnd - confPath + 1);
-	
-	strncpy(privKeyPath + strlen(privKeyPath), gateInfo->name, MAX_NAME_SIZE);
-	strcpy(privKeyPath + strlen(privKeyPath), ".priv");	
-
-	arglog(LOG_DEBUG, "Private key expected at at %s\n", privKeyPath);
-	
-	privKeyFile = fopen(privKeyPath, "r");
-	if(privKeyFile == NULL)
+	// Private key
+	if(read_private_key(&conf, gateInfo))
 	{
-		arglog(LOG_DEBUG, "Unable to open private key file at %s\n", confPath);
-		return -5;
-	}
-
-	if( ( ret = mpi_read_file( &gateInfo->rsa.N , 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.E , 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.D , 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.P , 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.Q , 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.DP, 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.DQ, 16, privKeyFile ) ) != 0 ||
-		( ret = mpi_read_file( &gateInfo->rsa.QP, 16, privKeyFile ) ) != 0 )
-	{
-		arglog(LOG_DEBUG, "Failed to load private key for ourselves (error %i)\n", ret);
-		fclose(privKeyFile);
-		return -5;
-	}
-
-	fclose(privKeyFile);
-	privKeyFile = NULL;
-
-	if((ret = rsa_check_privkey(&gateInfo->rsa)) != 0)
-	{
-		arglog(LOG_DEBUG, "Private key check failed, error %i\n", ret);
+		arglog(LOG_FATAL, "Private key check failed\n");
 		return -5;
 	}
 
@@ -293,7 +226,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	get_random_bytes(gateInfo->symKey, sizeof(gateInfo->symKey));
 
 	cipher_setkey(&gateInfo->cipher, gateInfo->symKey, sizeof(gateInfo->symKey) * 8, POLARSSL_DECRYPT);
-	md_hmac_starts(&gateInfo->md, gateInfo->symKey, sizeof(gateInfo->symKey)); // TBD use separate key for hmac?
+	md_hmac_starts(&gateInfo->md, gateInfo->symKey, sizeof(gateInfo->symKey));
 	
 	if(cipher_get_block_size(&gateInfo->cipher) != AES_BLOCK_SIZE)
 	{
@@ -303,11 +236,15 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	// Rest of hop data
 	current_time(&gateInfo->timeBase);
-	gateInfo->hopInterval = HOP_TIME;
+	gateInfo->hopInterval = conf.hopRate;
+	arglog(LOG_DEBUG, "Hop rate set to %lums\n", gateInfo->hopInterval);
 
 	// Set IP based on configuration
 	arglog(LOG_DEBUG, "Setting initial IP\n");
 	update_ips(gateInfo);
+
+	// All done with this
+	release_config(&conf);
 
 	return 0;
 }
@@ -341,7 +278,7 @@ void *connect_thread(void *data)
 			gate = gate->next;
 		}
 
-		sleep(CONNECT_WAIT_TIME / 4);
+		sleep(CONNECT_WAIT_TIME);
 	}
 	
 	arglog(LOG_DEBUG, "Connect thread dying\n");
@@ -370,6 +307,7 @@ struct arg_network_info *create_arg_network_info(void)
 	cipher_init_ctx(&newInfo->cipher, cipher_info_from_string(SYMMETRIC_ALGO));
 	md_init_ctx(&newInfo->md, md_info_from_string(HASH_ALGO));
 
+	newInfo->hopInterval = UINT32_MAX;
 	newInfo->proto.outSeqNum = 1;
 
 	return newInfo;
@@ -495,7 +433,11 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 	case ARG_CONN_DATA_RESP_MSG:
 		process_arg_conn_data_resp(gateInfo, srcGate, packet);
 		break;
-	
+
+	case ARG_TRUST_DATA_MSG:
+		process_arg_trust(gateInfo, srcGate, packet);
+		break;
+
 	default:
 		arglog(LOG_DEBUG, "Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
 		return -1;	
@@ -546,10 +488,10 @@ void update_ips(struct arg_network_info *gate)
 		memcpy(gate->prevIP, gate->currIP, sizeof(gate->currIP));
 		memcpy(gate->currIP, ip, sizeof(gate->currIP));
 
-		// Update cache time. TBD this should probably technically be moved to update on a precise
-		// time, not just hopInterval in the future
+		// Update on exactly when the next hop should occur
 		current_time(&gate->ipCacheExpiration);
-		time_plus(&gate->ipCacheExpiration, gate->hopInterval * .8);
+		time_plus(&gate->ipCacheExpiration,
+			gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
 	}
 }
 

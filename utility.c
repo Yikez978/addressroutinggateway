@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "utility.h"
+#include "settings.h"
 
 static int logLevel = LOG_DEBUG;
 
@@ -84,6 +85,14 @@ void arglog(int level, char *fmt, ...)
 	char *line = NULL;
 	struct timespec curr;
 
+	#ifndef DISP_RESULTS
+	if(level == LOG_RESULTS)
+	{
+		// Make the check always fail
+		level = logLevel + 1;
+	}
+	#endif
+
 	if(level <= logLevel)
 	{
 		current_time(&curr);
@@ -108,24 +117,6 @@ void arglog(int level, char *fmt, ...)
 			va_start(ap, fmt);
 			vprintf(fmt, ap);
 			va_end(ap);
-		}
-	}
-}
-
-char get_next_line(FILE *f, char *line, int max)
-{
-	int len = 0;
-	for(;;)
-	{
-		if(fgets(line, max, f) == NULL)
-			return -1;
-
-		if(line[0] != '\n' && line[0] != '\r')
-		{
-			len = strnlen(line, max);
-			if(line[len - 1] == '\n')
-				line[len - 1] = '\0';
-			return 0;
 		}
 	}
 }

@@ -78,6 +78,8 @@ enum {
 	ARG_CONN_DATA_RESP_MSG,
 	ARG_CONN_DATA_REQ_MSG,
 
+	ARG_TRUST_DATA_MSG,
+
 	ARG_TIME_REQ_MSG,
 	ARG_TIME_RESP_MSG,
 };
@@ -101,6 +103,14 @@ typedef struct arg_conn_data {
 	uint32_t timeOffset;
 } arg_conn_data;
 
+typedef struct arg_trust_data {
+	char name[MAX_NAME_SIZE];
+	uint32_t baseIP[ADDR_SIZE];
+	uint32_t mask[ADDR_SIZE];
+	uint8_t n[130];
+	uint8_t e[10];
+} arg_trust_data;
+
 typedef struct arg_welcome {
 	uint32_t id1;
 	uint32_t id2;
@@ -120,6 +130,7 @@ typedef struct argmsg {
 #define ARG_DO_PING ARG_DO_AUTH
 #define ARG_DO_TIME 0x04
 #define ARG_DO_CONN ARG_DO_TIME
+#define ARG_DO_TRUST 0x08
 
 typedef struct proto_data {
 	char state; // Records actions that need to occur
@@ -157,14 +168,24 @@ char process_arg_pong(struct arg_network_info *local,
 
 // Connect
 char send_arg_conn_data(struct arg_network_info *local,
-						   struct arg_network_info *remote,
-						   char isResponse);
+					   struct arg_network_info *remote,
+					   char isResponse);
 char process_arg_conn_data_resp(struct arg_network_info *local,
 								struct arg_network_info *remote,
 								const struct packet_data *packet);
 char process_arg_conn_data_req(struct arg_network_info *local,
 							   struct arg_network_info *remote,
 							   const struct packet_data *packet);
+
+// Trust
+char send_all_trust(struct arg_network_info *local,
+					struct arg_network_info *remote);
+char send_arg_trust(struct arg_network_info *local,
+							struct arg_network_info *remote,
+							struct arg_network_info *gate);
+char process_arg_trust(struct arg_network_info *local,
+							struct arg_network_info *remote,
+							const struct packet_data *packet);
 
 // Encapsulation
 char send_arg_wrapped(struct arg_network_info *local,

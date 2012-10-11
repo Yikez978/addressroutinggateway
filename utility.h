@@ -12,6 +12,7 @@ void printIP(int len, const void *buf);
 // Simple log stuff
 enum {
 	LOG_RESULTS,
+	LOG_FATAL,
 	LOG_ALERT,
 	LOG_INFO,
 	LOG_DEBUG,
@@ -19,11 +20,6 @@ enum {
 
 int set_log_level(int level);
 void arglog(int level, char *fmt, ...);
-
-// Reads until finding a not-blank line (COMPLETELY blank, not whitespace skipping)
-// Line has \n removed if needed
-// Returns 0 if line is found, 1 if not (eof, probably)
-char get_next_line(FILE *f, char *line, int max);
 
 // Returns the current monotonic time (not real-world time)
 void current_time(struct timespec *out);

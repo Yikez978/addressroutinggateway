@@ -38,11 +38,9 @@ void uninit_nat(void)
 	
 	if(natCleanupThread != 0)
 	{
-		arglog(LOG_DEBUG, "Asking NAT cleanup thread to stop...");
 		pthread_cancel(natCleanupThread);
 		pthread_join(natCleanupThread, NULL);
 		natCleanupThread = 0;
-		arglog(LOG_DEBUG, "done\n");
 	}
 
 	empty_nat_table();
