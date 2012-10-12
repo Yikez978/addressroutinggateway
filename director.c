@@ -12,19 +12,22 @@
 Receive thread data
 ***************************/
 static struct receive_thread_data intData = {
-	.dev = INT_DEV_NAME,
+	.dev = "",
 	.ifaceSide = IFACE_INTERNAL,
 	.handler = direct_outbound,
 };
 static struct receive_thread_data extData = {
-	.dev = EXT_DEV_NAME,
+	.dev = "",
 	.ifaceSide = IFACE_EXTERNAL,
 	.handler = direct_inbound,
 };
 
-char init_director(void)
+char init_director(struct config_data *config)
 {
 	arglog(LOG_DEBUG, "Director init\n");
+
+	strncpy(intData.dev, config->intDev, sizeof(intData.dev));
+	strncpy(extData.dev, config->extDev, sizeof(extData.dev));
 
 	// Enter receive loop, which we then pass off to director
 	pthread_create(&intData.thread, NULL, receive_thread, (void*)&intData); // TBD check returns
@@ -60,7 +63,7 @@ void *receive_thread(void *tData)
 	struct pcap_pkthdr header;
 	int frameHeadLen = 0;
 	int frameTailLen = 0;
-	
+
 	struct bpf_program fp;
 	char filter[MAX_FILTER_LEN];
 	char baseIP[INET_ADDRSTRLEN];

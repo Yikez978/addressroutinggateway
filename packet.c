@@ -45,31 +45,82 @@ char parse_packet(struct packet_data *packet)
 
 		transStart = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl*4);
 
-		if(packet->ipv4->protocol == ARG_PROTO)
+		switch(packet->ipv4->protocol)
 		{
+		case ARG_PROTO:
 			packet->arg = (struct arghdr*)transStart;
 			packet->unknown_data = (uint8_t*)transStart + sizeof(struct arghdr);
-		}
-		else if(packet->ipv4->protocol == TCP_PROTO)
-		{
+			break;
+
+		case TCP_PROTO:
 			packet->tcp = (struct tcphdr*)transStart;
 			packet->unknown_data = (uint8_t*)transStart + sizeof(struct tcphdr);
-		}
-		else if(packet->ipv4->protocol == UDP_PROTO)
-		{
+			break;
+
+		case UDP_PROTO:
 			packet->udp = (struct udphdr*)transStart;
 			packet->unknown_data = (uint8_t*)transStart + sizeof(struct udphdr);
-		}
-		else if(packet->ipv4->protocol == ICMP_PROTO)
-		{
+			break;
+
+		case ICMP_PROTO:
 			packet->icmp = (struct icmphdr*)transStart;
 			packet->unknown_data = (uint8_t*)transStart + sizeof(struct icmphdr);
-		}
-		else
+			break;
+
+		default:
 			packet->unknown_data = (uint8_t*)transStart;
+		}
 	}
 
 	return 0;
+}
+
+void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
+{
+	char sIP[INET_ADDRSTRLEN];
+	char dIP[INET_ADDRSTRLEN];
+
+	if(packet->ipv4 == NULL)
+	{
+		snprintf(buf, buflen, "Unable to generate ID");
+		return;
+	}
+
+	inet_ntop(AF_INET, &packet->ipv4->saddr, sIP, sizeof(sIP));
+	inet_ntop(AF_INET, &packet->ipv4->daddr, dIP, sizeof(dIP));
+
+	switch(packet->ipv4->protocol)
+	{
+	case ARG_PROTO:
+			// ARG: s:<source ip> d:<dest ip> ipcsum:<ip checksum> seq:<seq num> type:<msg type num> sig:<sig/hmac> 
+		snprintf(buf, buflen, "ARG: s:%s:%i d:%s:%i ipcsum:%02x seq:%i type:%i sig:%0*x",
+			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
+			ntohs(packet->arg->seq), packet->arg->type, (int)sizeof(packet->arg->sig), (unsigned int)*packet->arg->sig); 
+		break;
+
+	case TCP_PROTO:
+		// TCP: s:<source ip>:<source port> d:<dest ip>:<dest port> ipcsum:<ip checksum> tcsum:<tcp checksum> seq:<seq num>
+		snprintf(buf, buflen, "TCP: s:%s:%i d:%s:%i ipcsum:%02x tcsum:%02x seq:%i",
+			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
+			packet->tcp->check, ntohl(packet->tcp->seq));
+		break;
+
+	case UDP_PROTO:
+		// UDP: s:<source ip>:<source port> d:<dest ip>:<dest port> ipcsum:<ip checksum> ucsum:<udp checksum>
+		snprintf(buf, buflen, "UDP: s:%s:%i d:%s:%i ipcsum:%02x ucsum:%02x",
+			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
+			packet->udp->check);
+		break;
+
+	case ICMP_PROTO:
+		// ICMP: s:<source ip> d:<dest ip> ipcsum:<ip checksum> type:<type> code:<code> icsum:<icmp checksum>
+		snprintf(buf, buflen, "ICMP: s:%s d:%s ipcsum:%02x type:%i code:%i icsum:%02x",
+			sIP, dIP, packet->ipv4->check, packet->icmp->type, packet->icmp->code, packet->icmp->checksum);
+		break;
+
+	default:
+		snprintf(buf, buflen, "IP: s:%s d:%s ipcsum:%02x", sIP, dIP, packet->ipv4->check);
+	}
 }
 
 struct packet_data *create_packet(int len)

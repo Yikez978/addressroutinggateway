@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include <pthread.h>
 
@@ -215,18 +216,22 @@ void print_nat_table(void)
 
 void print_nat_bucket(const struct nat_entry_bucket *bucket)
 {
-	arglog(LOG_DEBUG, "k:%i e:", bucket->key);
-	printIP(ADDR_SIZE, bucket->extIP);
-	arglog(LOG_DEBUG, ":%i", bucket->extPort);
+	char ip[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, bucket->extIP, ip, sizeof(ip));
+	arglog(LOG_DEBUG, "k:%i e:%s:%i", bucket->key, ip, bucket->extPort);
 }
 
 void print_nat_entry(const struct nat_entry *entry)
 {
-	arglog(LOG_DEBUG, "i:");
-	printIP(ADDR_SIZE, entry->intIP);
-	arglog(LOG_DEBUG, ":%i g:", entry->intPort);
-	printIP(ADDR_SIZE, entry->gateIP);
-	arglog(LOG_DEBUG, ":%i (lu %li ms ago)", entry->gatePort, current_time_offset(&entry->lastUsed));
+	char iIP[INET_ADDRSTRLEN];
+	char gIP[INET_ADDRSTRLEN];
+
+	inet_ntop(AF_INET, entry->intIP, iIP, sizeof(iIP));
+	inet_ntop(AF_INET, entry->gateIP, gIP, sizeof(gIP));
+	
+	arglog(LOG_DEBUG, "i:%s:%i g:%s:%i (lu %li ms ago)",
+		iIP, entry->intPort, gIP, entry->gatePort,
+		current_time_offset(&entry->lastUsed));
 }
 
 struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, const int key)

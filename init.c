@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 
+#include "settings.h"
 #include "hopper.h"
 #include "director.h"
 #include "nat.h"
@@ -19,17 +20,31 @@ void sig_handler(int signum)
 #endif
 
 // Called when the module is initialized
-static int arg_init(char *conf, char *gateName)
+static int arg_init(char *configPath, char *gateName)
 {
+	struct config_data conf;
+	
 	arglog(LOG_DEBUG, "Starting\n");
 
 	// Take care of locks first so that we know they're ALWAYS safe to use
 	init_nat_locks();
 	init_hopper_locks();
 	init_protocol_locks();
+	
+	// Read in main config
+	strncpy(conf.file, configPath, sizeof(conf.file));
+	if(read_config(&conf))
+	{
+		arglog(LOG_ALERT, "Unable to read in main configuration from %s\n", configPath);
+		return -1;
+	}
+
+	// For testing, the command line overrides what the config says our name is
+	if(gateName != NULL)
+		strncpy(conf.ourGateName, gateName, sizeof(conf.ourGateName));
 
 	// Init various components
-	if(init_hopper(conf, gateName))
+	if(init_hopper(&conf))
 	{
 		arglog(LOG_DEBUG, "Unable to initialize hopper\n");
 		
@@ -49,7 +64,7 @@ static int arg_init(char *conf, char *gateName)
 	}
 
 	// Hook network communication to listen for instructions
-	if(init_director())
+	if(init_director(&conf))
 	{
 		arglog(LOG_DEBUG, "Director failed to initialized, disabling subsystems\n");
 		
@@ -64,6 +79,9 @@ static int arg_init(char *conf, char *gateName)
    
 	// Do first attempt to connect to the gateways we know of
 	init_hopper_finish();
+	
+	// No more need for config
+	release_config(&conf);
 
 	return 0;
 }
@@ -78,11 +96,10 @@ static void arg_exit(void)
 
 	// Cleanup any resources as needed
 	uninit_nat();
-	//uninit_hopper();
+	uninit_hopper();
 	
 	arglog(LOG_DEBUG, "Finished\n");
 }
-
 
 int main(int argc, char *argv[])
 {

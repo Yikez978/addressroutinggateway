@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
 
 #include "utility.h"
 #include "settings.h"
@@ -54,20 +55,6 @@ void printAscii(int len, const void *buf)
 	}
 
 	arglog(LOG_DEBUG, "\n");
-}
-
-void printIP(int len, const void *buf)
-{
-	int i = 0;
-	uint8_t *bufC = (uint8_t*)buf;
-
-	for(i = 0; i < len; i++)
-	{
-		arglog(LOG_DEBUG, "%i", bufC[i]);
-
-		if(i < len - 1)
-			arglog(LOG_DEBUG, ".");
-	}
 }
 
 int set_log_level(int level)

@@ -53,6 +53,22 @@ char read_config(struct config_data *conf)
 		return -2;
 	}
 	strncpy(conf->ourGateName, line, sizeof(conf->ourGateName));
+	
+	if(get_next_line(confFile, line, MAX_CONF_LINE))
+	{
+		arglog(LOG_DEBUG, "Problem reading in internal device name from conf\n");
+		fclose(confFile);
+		return -2;
+	}
+	strncpy(conf->intDev, line, sizeof(conf->intDev));
+	
+	if(get_next_line(confFile, line, MAX_CONF_LINE))
+	{
+		arglog(LOG_DEBUG, "Problem reading in external device name from conf\n");
+		fclose(confFile);
+		return -2;
+	}
+	strncpy(conf->extDev, line, sizeof(conf->extDev));
 
 	if(get_next_line(confFile, line, MAX_CONF_LINE))
 	{
@@ -133,7 +149,7 @@ void release_config(struct config_data *conf)
 	}
 }
 
-char read_public_key(struct config_data *conf, struct arg_network_info *gate)
+char read_public_key(const struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
 	char line[MAX_CONF_LINE] = "";
@@ -181,7 +197,7 @@ char read_public_key(struct config_data *conf, struct arg_network_info *gate)
 	return 0;
 }
 
-char read_private_key(struct config_data *conf, struct arg_network_info *gate)
+char read_private_key(const struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
 	FILE *privKeyFile = NULL;

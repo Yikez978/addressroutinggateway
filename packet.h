@@ -52,6 +52,9 @@ typedef struct packet_data
 
 char parse_packet(struct packet_data *packet);
 
+// Creates a string to "uniquely" (hopefully) ID a packet
+void create_packet_id(const struct packet_data *packet, char *buf, int buflen);
+
 struct packet_data *create_packet(int len);
 struct packet_data *copy_packet(const struct packet_data *packet);
 void free_packet(struct packet_data *packet);

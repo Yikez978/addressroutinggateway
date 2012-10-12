@@ -7,7 +7,6 @@
 
 void printRaw(int len, const void *buf);
 void printAscii(int len, const void *buf);
-void printIP(int len, const void *buf);
 
 // Simple log stuff
 enum {

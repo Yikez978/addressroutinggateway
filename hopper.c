@@ -31,7 +31,7 @@ void init_hopper_locks(void)
 	pthread_spin_init(&networksLock, PTHREAD_PROCESS_SHARED);
 }
 
-char init_hopper(char *conf, char *name)
+char init_hopper(const struct config_data *config)
 {
 	int ret;
 
@@ -41,7 +41,7 @@ char init_hopper(char *conf, char *name)
 	pthread_spin_lock(&ipLock);
 	
 	// "Read in" settings
-	if(get_hopper_conf(conf, name))
+	if(get_hopper_conf(config))
 	{
 		arglog(LOG_DEBUG, "Unable to configure hopper\n");
 		
@@ -113,33 +113,17 @@ void uninit_hopper(void)
 	arglog(LOG_DEBUG, "Hopper finished\n");
 }
 
-char get_hopper_conf(char *confPath, char *gateName)
+char get_hopper_conf(const struct config_data *config)
 {
 	struct gate_list *currGateName = NULL;
 
 	struct arg_network_info *currNet = NULL;
 	struct arg_network_info *prevNet = NULL;
 
-	struct config_data conf;
-
-	// Read in main conf
-	strncpy(conf.file, confPath, sizeof(conf.file));
-	if(read_config(&conf))
-	{
-		arglog(LOG_ALERT, "Unable to read in main configuration from %s\n", confPath);
-		return -1;
-	}
-
-	currGateName = conf.gate;
+	// Read in each gate config
+	currGateName = config->gate;
 	while(currGateName)
 	{
-		// TBD, remove. gateA doesn't get to know about gateC
-		if(strcmp(gateName, "gateA") == 0 && strcmp(currGateName->name, "gateC") == 0)
-		{
-			currGateName = currGateName->next;
-			continue;
-		}
-
 		// New node!
 		prevNet = currNet;
 		currNet = create_arg_network_info();
@@ -163,7 +147,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 		// Get public data for this node. If it's us, we'll get the private key
 		// and IP address/mask in a bit
 		strncpy(currNet->name, currGateName->name, sizeof(currNet->name));
-		read_public_key(&conf, currNet);
+		read_public_key(config, currNet);
 		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
 
 		currGateName = currGateName->next;
@@ -171,12 +155,12 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	// Which one is our head? Find it, move to beginning, and rearrange
 	// all relevant pointers.
-	arglog(LOG_DEBUG, "Locating configuration for %s\n", gateName);
+	arglog(LOG_DEBUG, "Locating configuration for %s\n", config->ourGateName);
 
 	currNet = gateInfo;
 	while(currNet != NULL)
 	{
-		if(strncmp(gateName, currNet->name, sizeof(currNet->name)) == 0)
+		if(strncmp(config->ourGateName, currNet->name, sizeof(currNet->name)) == 0)
 		{
 			// Found, make currNet the head of list (if not already)
 			if(currNet != gateInfo)
@@ -213,7 +197,7 @@ char get_hopper_conf(char *confPath, char *gateName)
 	arglog(LOG_DEBUG, "Configured as %s\n", gateInfo->name);
 
 	// Private key
-	if(read_private_key(&conf, gateInfo))
+	if(read_private_key(config, gateInfo))
 	{
 		arglog(LOG_FATAL, "Private key check failed\n");
 		return -5;
@@ -236,15 +220,12 @@ char get_hopper_conf(char *confPath, char *gateName)
 
 	// Rest of hop data
 	current_time(&gateInfo->timeBase);
-	gateInfo->hopInterval = conf.hopRate;
+	gateInfo->hopInterval = config->hopRate;
 	arglog(LOG_DEBUG, "Hop rate set to %lums\n", gateInfo->hopInterval);
 
 	// Set IP based on configuration
 	arglog(LOG_DEBUG, "Setting initial IP\n");
 	update_ips(gateInfo);
-
-	// All done with this
-	release_config(&conf);
 
 	return 0;
 }
@@ -383,14 +364,6 @@ char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 
 	update_ips(gate);
 
-	/*arglog(LOG_DEBUG, "Request: ");
-	printIP(4, ip);
-	arglog(LOG_DEBUG, " Could be ");
-	printIP(4, gate->currIP);
-	arglog(LOG_DEBUG, " or ");
-	printIP(4, gate->prevIP);
-	arglog(LOG_DEBUG, "\n");*/
-
 	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
 		ret = 1;
 	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
@@ -493,59 +466,6 @@ void update_ips(struct arg_network_info *gate)
 		time_plus(&gate->ipCacheExpiration,
 			gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
 	}
-}
-
-void set_external_ip(uint8_t *addr)
-{
-	// Code mostly from http://www.lainoox.com/set-ip-address-c-linux/
-	int sockfd;
-	struct ifreq ifr;
-	struct sockaddr_in sin;
-
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if(sockfd == -1)
-	{
-		arglog(LOG_DEBUG, "Unable to create socket to set external IP address\n");
-		return;
-	}
- 
-	// Get flags
-	strncpy(ifr.ifr_name, EXT_DEV_NAME, IFNAMSIZ);
-	if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0)
-	{
-		arglog(LOG_DEBUG, "Unable to get flags to set external IP address\n");
-		return;
-	}
-	
-	#ifdef ifr_flags
-	# define IRFFLAGS       ifr_flags
-	#else   /* Present on kFreeBSD */
-	# define IRFFLAGS       ifr_flagshigh
-	#endif
- 
-	// If interface is down, bring it up
-	if (ifr.IRFFLAGS | ~(IFF_UP))
-	{
-		ifr.IRFFLAGS |= IFF_UP;
-		if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0)
-		{
-			arglog(LOG_DEBUG, "External interface down, unable to set IP: %i\n", errno);
-			return;
-		}
-	}
- 
-	sin.sin_family = AF_INET;
- 
-	memcpy(&sin.sin_addr.s_addr, addr, sizeof(sin.sin_addr.s_addr));
-	memcpy(&ifr.ifr_addr, &sin, sizeof(struct sockaddr));	
- 
-	// Set interface address
-	if (ioctl(sockfd, SIOCSIFADDR, &ifr) < 0)
-	{
-		arglog(LOG_DEBUG, "Unable to set IP address on external interface\n");
-		return;
-	}	
-	#undef IRFFLAGS		
 }
 
 char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate)

@@ -13,6 +13,8 @@ struct arg_network_info;
 /*******************************
  * Protocol description:
  *
+ * TBD update this comment, it's mostly incorrect
+ *
  * All packets are UDP, port is unimportant. Inside of UDP is:
  * +----------------------------------+
  * | 1 byte  |   1 byte    | 40 bytes |

@@ -1,9 +1,6 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#define INT_DEV_NAME "eth2"
-#define EXT_DEV_NAME "eth1"
-
 // Disable the fine packet accepted/rejected messages
 #define DISP_RESULTS
 
@@ -30,7 +27,7 @@
 // accept a sudden reversion to the beginnig?
 #define SEQ_NUM_WRAP_ALLOWANCE 10
 
-// Maximum length of a name (including null for a gate)
+// Maximum length of a name for a gate (including null)
 #define MAX_NAME_SIZE 10
 
 #define MAX_PACKET_SIZE UINT16_MAX
@@ -61,6 +58,9 @@ typedef struct config_data {
 	
 	char ourGateName[MAX_CONF_LINE];
 
+	char intDev[16];
+	char extDev[16];
+
 	struct gate_list *gate;
 	long hopRate;
 } config_data;
@@ -68,8 +68,8 @@ typedef struct config_data {
 char read_config(struct config_data *conf);
 void release_config(struct config_data *conf);
 
-char read_public_key(struct config_data *conf, struct arg_network_info *gate);
-char read_private_key(struct config_data *conf, struct arg_network_info *gate);
+char read_public_key(const struct config_data *conf, struct arg_network_info *gate);
+char read_private_key(const struct config_data *conf, struct arg_network_info *gate);
 
 // Reads until finding a not-blank line (COMPLETELY blank, not whitespace skipping)
 // Line has \n removed if needed
