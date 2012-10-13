@@ -7,6 +7,7 @@
 #include "settings.h"
 #include "hopper.h"
 #include "director.h"
+#include "arg_error.h"
 #include "nat.h"
 
 // Signal handler
@@ -15,6 +16,7 @@
 
 void sig_handler(int signum)
 {
+	printf("--- Received interrupt ---\n");
 	uninit_director();
 }
 #endif
@@ -36,7 +38,7 @@ static int arg_init(char *configPath, char *gateName)
 	if(read_config(&conf))
 	{
 		arglog(LOG_ALERT, "Unable to read in main configuration from %s\n", configPath);
-		return -1;
+		return -ARG_CONFIG_BAD;
 	}
 
 	// For testing, the command line overrides what the config says our name is
@@ -50,7 +52,7 @@ static int arg_init(char *configPath, char *gateName)
 		
 		uninit_hopper();
 		
-		return -1;
+		return -ARG_CONFIG_BAD;
 	}
 
 	if(init_nat())
@@ -60,7 +62,7 @@ static int arg_init(char *configPath, char *gateName)
 		uninit_nat();
 		uninit_hopper();
 
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 
 	// Hook network communication to listen for instructions
@@ -72,7 +74,7 @@ static int arg_init(char *configPath, char *gateName)
 		//uninit_nat();
 		//uninit_hopper();
 		
-		return -3;
+		return -ARG_CONFIG_BAD;
 	}
 
 	arglog(LOG_DEBUG, "Running\n");

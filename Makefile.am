@@ -5,6 +5,8 @@ AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -ggdb
 # Everything will get built into here
 bin_PROGRAMS = arg gen_gate_config
 arg_SOURCES = uthash.h \
+	arg_error.h \
+	arg_error.c \
 	settings.h \
 	settings.c \
 	packet.h \

@@ -12,6 +12,7 @@
 
 #include "settings.h"
 #include "hopper.h"
+#include "arg_error.h"
 #include "utility.h"
 #include "crypto.h"
 
@@ -49,7 +50,7 @@ char init_hopper(const struct config_data *config)
 		pthread_spin_unlock(&networksLock);
 		uninit_hopper();
 
-		return -1;
+		return -ARG_CONFIG_BAD;
 	}
 
 	entropy_init(&gateInfo->entropy);
@@ -61,7 +62,7 @@ char init_hopper(const struct config_data *config)
 		pthread_spin_unlock(&networksLock);
 		uninit_hopper();
 
-		return -2;
+		return -ARG_INTERNAL_ERROR;
 	}
 
 	pthread_spin_unlock(&ipLock);
@@ -85,11 +86,9 @@ void uninit_hopper(void)
 	// No more need to hop and connect
 	if(connectThread != 0)
 	{
-		arglog(LOG_DEBUG, "Asking connect thread to stop...");
 		pthread_cancel(connectThread);
 		pthread_join(connectThread, NULL);
 		connectThread = 0;
-		arglog(LOG_DEBUG, "done\n");
 	}
 	
 	pthread_spin_lock(&networksLock);
@@ -130,7 +129,7 @@ char get_hopper_conf(const struct config_data *config)
 		if(currNet == NULL)
 		{
 			arglog(LOG_DEBUG, "Unable to create arg network info during configuration\n");
-			return -2;
+			return -ENOMEM;
 		}
 		
 		// First gate is "us" for now, we rearrange later
@@ -191,7 +190,7 @@ char get_hopper_conf(const struct config_data *config)
 	{
 		// Didn't find a match
 		arglog(LOG_DEBUG, "Misconfiguration, unable to find which gate we are\n");
-		return -4;
+		return -ARG_CONFIG_BAD;
 	}
 
 	arglog(LOG_DEBUG, "Configured as %s\n", gateInfo->name);
@@ -200,7 +199,7 @@ char get_hopper_conf(const struct config_data *config)
 	if(read_private_key(config, gateInfo))
 	{
 		arglog(LOG_FATAL, "Private key check failed\n");
-		return -5;
+		return -ARG_CONFIG_BAD;
 	}
 
 	// Hop and symmetric key
@@ -392,28 +391,27 @@ char process_admin_msg(const struct packet_data *packet, struct arg_network_info
 	switch(get_msg_type(packet->arg))
 	{
 	case ARG_PING_MSG:
-		process_arg_ping(gateInfo, srcGate, packet);
+		return process_arg_ping(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_PONG_MSG:
-		process_arg_pong(gateInfo, srcGate, packet);
+		return process_arg_pong(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_CONN_DATA_REQ_MSG:
-		process_arg_conn_data_req(gateInfo, srcGate, packet);
+		return process_arg_conn_data_req(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_CONN_DATA_RESP_MSG:
-		process_arg_conn_data_resp(gateInfo, srcGate, packet);
+		return process_arg_conn_data_resp(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_TRUST_DATA_MSG:
-		process_arg_trust(gateInfo, srcGate, packet);
+		return process_arg_trust(gateInfo, srcGate, packet);
 		break;
 
 	default:
-		arglog(LOG_DEBUG, "Unhandled message type seen (%i)\n", get_msg_type(packet->arg));
-		return -1;	
+		return -ARG_UNHANDLED_TYPE;
 	}
 
 	return 0;

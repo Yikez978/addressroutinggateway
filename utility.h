@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdarg.h>
 
 void printRaw(int len, const void *buf);
 void printAscii(int len, const void *buf);
@@ -17,8 +18,15 @@ enum {
 	LOG_DEBUG,
 };
 
+struct packet_data;
+
 int set_log_level(int level);
 void arglog(int level, char *fmt, ...);
+void varglog(int level, char *fmt, va_list ap);
+void arglog_result(const struct packet_data *inPacket,
+				   const struct packet_data *outPacket,
+				   char is_inbound, char is_accepted,
+				   const char *processor, const char *reason);
 
 // Returns the current monotonic time (not real-world time)
 void current_time(struct timespec *out);

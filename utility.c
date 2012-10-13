@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 
 #include "utility.h"
 #include "settings.h"
+#include "packet.h"
 
 static int logLevel = LOG_DEBUG;
 
@@ -67,6 +67,13 @@ int set_log_level(int level)
 void arglog(int level, char *fmt, ...)
 {
 	va_list ap;
+	va_start(ap, fmt);
+	varglog(level, fmt, ap);
+	va_end(ap);
+}
+
+void varglog(int level, char *fmt, va_list ap)
+{
 	int fmtLen = 0;
 	int fullLen = 40;
 	char *line = NULL;
@@ -91,21 +98,35 @@ void arglog(int level, char *fmt, ...)
 		{
 			// Include timestamp and log level
 			snprintf(line, fullLen, "%lu.%lu LOG%i %s", curr.tv_sec, curr.tv_nsec, level, fmt);
-
-			va_start(ap, fmt);
 			vprintf(line, ap);
-			va_end(ap);
-
 			free(line);
 		}
 		else
 		{
 			// Print without including extra details
-			va_start(ap, fmt);
 			vprintf(fmt, ap);
-			va_end(ap);
 		}
 	}
+}
+
+void arglog_result(const struct packet_data *inPacket,
+				   const struct packet_data *outPacket,
+				   char is_inbound, char is_accepted,
+				   const char *processor, const char *reason)
+{
+	char inPacketID[MAX_PACKET_ID_SIZE] = "";
+	char outPacketID[MAX_PACKET_ID_SIZE] = "";
+
+	if(inPacket)
+		create_packet_id(inPacket, inPacketID, sizeof(inPacketID));
+	if(outPacket)
+		create_packet_id(outPacket, outPacketID, sizeof(outPacketID));
+
+	arglog(LOG_RESULTS, "%s: %s: %s: %s: %s/%s\n",
+		(is_inbound ? "Inbound" : "Outbound"),
+		(is_accepted ? "Accept" : "Reject"),
+		processor, reason,
+		inPacketID, outPacketID);
 }
 
 void current_time(struct timespec *out)

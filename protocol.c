@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <errno.h>
 
 #include <arpa/inet.h>
 #include <pthread.h>
@@ -7,6 +8,7 @@
 #include <polarssl/md.h>
 
 #include "protocol.h"
+#include "arg_error.h"
 #include "crypto.h"
 #include "hopper.h"
 
@@ -49,15 +51,16 @@ char do_next_action(struct arg_network_info *local, struct arg_network_info *rem
 char send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote)
 {
+	int ret;
 	struct argmsg *msg = NULL;
-	
+
 	arglog(LOG_DEBUG, "Sending ping to %s\n", remote->name);
 
 	msg = create_arg_msg(sizeof(remote->proto.pingID));
 	if(msg == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to allocate space to send ping\n");
-		return -1;
+		return -ENOMEM;
 	}
 
 	pthread_spin_lock(&remote->lock);
@@ -65,69 +68,66 @@ char send_arg_ping(struct arg_network_info *local,
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
-	if(send_arg_packet(local, remote, ARG_PING_MSG, msg) == 0)
-		current_time(&remote->proto.pingSentTime);
-	else
-		arglog(LOG_DEBUG, "Failed to send ARG ping\n");
+	// Create and send
+	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg)) < 0)
+		arglog(LOG_DEBUG, "Failed to send ping\n");
 
 	pthread_spin_unlock(&remote->lock);
-
 	free_arg_msg(msg);
 
-	return 0;
+	return ret;
 }
 
 char process_arg_ping(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
-	char status = 0;
+	int ret;
 	struct argmsg *msg = NULL;
 
 	arglog(LOG_DEBUG, "Received ping from %s\n", remote->name);
 	
-	if(process_arg_packet(local, remote, packet, &msg))
+	if((ret = process_arg_packet(local, remote, packet, &msg)))
 	{
-		arglog(LOG_DEBUG, "Stopping pong processing\n");
-		return -1;
+		arglog(LOG_DEBUG, "Stopping ping processing\n");
+		return ret;
 	}
 
 	if(msg->len == sizeof(remote->proto.pingID))
 	{
 		// Echo back their data
-		status = send_arg_packet(local, remote, ARG_PONG_MSG, msg);
+		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg)) < 0)
+			arglog(LOG_DEBUG, "Failed to send pong\n");
 	}
 	else
-	{
-		arglog(LOG_DEBUG, "Not sending pong, data not a proper ping ID\n");
-		status = -2;
-	}
+		ret = -ARG_MSG_SIZE_BAD;
 	
 	free_arg_msg(msg);
-	return status;
+	return ret;
 }
 
 char process_arg_pong(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
+	int ret;
 	char status = 0;
 	struct argmsg *msg = NULL;
 	uint32_t *id = 0;
 	
 	arglog(LOG_DEBUG, "Received pong from %s\n", remote->name);
 	
-	if(process_arg_packet(local, remote, packet, &msg))
+	if((ret = process_arg_packet(local, remote, packet, &msg)) < 0)
 	{
 		arglog(LOG_DEBUG, "Stopping pong processing\n");
-		return -1;
+		return ret;
 	}
 
 	if(msg->data == NULL || msg->len != sizeof(remote->proto.pingID))
 	{
 		arglog(LOG_DEBUG, "Not accepting pong, data not a proper ping ID\n");
 		free_arg_msg(msg);
-		return -2;
+		return -ARG_MSG_SIZE_BAD;
 	}
 
 	pthread_spin_lock(&remote->lock);
@@ -142,6 +142,7 @@ char process_arg_pong(struct arg_network_info *local,
 			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
 			status = 0;
 			arglog(LOG_DEBUG, "Latency to %s: %li ms\n", remote->name, remote->proto.latency);
+			arglog_result(packet, NULL, 1, 1, "Admin", "pong accepted");
 		}
 		else
 		{
@@ -149,13 +150,13 @@ char process_arg_pong(struct arg_network_info *local,
 			// had the wrong ID or it did not have the correct global key
 			// Either way, we don't trust them now
 			arglog(LOG_DEBUG, "The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
-			status = 0;
+			status = -ARG_MSG_ID_BAD;
 		}
 	}
 	else
 	{
 		arglog(LOG_DEBUG, "Not accepting pong, no ping sent\n");
-		status = -3;
+		status = -ARG_MSG_UNEXPECTED;
 	}
 	
 	// All done with a ping/auth
@@ -174,6 +175,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 							struct arg_network_info *remote,
 							char isResponse)
 {
+	int ret;
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL;
 
@@ -184,7 +186,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 	if(msg == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to allocate space to send connect request\n");
-		return -2;
+		return -ENOMEM;
 	}
 
 	connData = (struct arg_conn_data*)msg->data;
@@ -199,14 +201,11 @@ char send_arg_conn_data(struct arg_network_info *local,
 	//arglog(LOG_DEBUG, "We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
 
 	// Send
-	if(send_arg_packet(local, remote,
-			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg) < 0)
-	{
-		arglog(LOG_DEBUG, "Failed to send ARG connection data\n");
-	}
+	if((ret = send_arg_packet(local, remote,
+			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg)) < 0)
+		arglog(LOG_DEBUG, "Failed to send connection data\n");
 
 	pthread_spin_unlock(&remote->lock);
-
 	free_arg_msg(msg);
 
 	return 0;
@@ -227,16 +226,17 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 								struct arg_network_info *remote,
 								const struct packet_data *packet)
 {
+	int ret;
 	char status = 0;
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL; 
 
 	arglog(LOG_DEBUG, "Received connection data from %s\n", remote->name);
 	
-	if(process_arg_packet(local, remote, packet, &msg))
+	if((ret = process_arg_packet(local, remote, packet, &msg)))
 	{
 		arglog(LOG_DEBUG, "Stopping connection data processing\n");
-		return -1;
+		return ret;
 	}
 
 	if(msg->len == sizeof(struct arg_conn_data))
@@ -326,7 +326,7 @@ char send_arg_trust(struct arg_network_info *local,
 	if(msg == NULL)
 	{
 		arglog(LOG_ALERT, "Unable to allocate space to send trust data\n");
-		return -2;
+		return -ENOMEM;
 	}
 
 	trust = (struct arg_trust_data*)msg->data;
@@ -337,13 +337,13 @@ char send_arg_trust(struct arg_network_info *local,
 	{
 		arglog(LOG_ALERT, "Failed to write N to trust data, got error %i\n", ret);
 		free_arg_msg(msg);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	if((ret = mpi_write_binary(&gate->rsa.E, trust->e, sizeof(trust->e))))
 	{
 		arglog(LOG_ALERT, "Failed to write E to trust data, got error %i\n", ret);
 		free_arg_msg(msg);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 
 	pthread_spin_lock(&remote->lock);
@@ -373,10 +373,10 @@ char process_arg_trust(struct arg_network_info *local,
 
 	arglog(LOG_DEBUG, "Received trust data from %s\n", remote->name);
 	
-	if(process_arg_packet(local, remote, packet, &msg))
+	if((ret = process_arg_packet(local, remote, packet, &msg)) < 0)
 	{
 		arglog(LOG_DEBUG, "Stopping trust data processing\n");
-		return -1;
+		return ret;
 	}
 
 	if(msg->len == sizeof(struct arg_trust_data))
@@ -390,7 +390,7 @@ char process_arg_trust(struct arg_network_info *local,
 			{
 				arglog(LOG_ALERT, "Already know about %s\n", trust->name);
 				free_arg_msg(msg);
-				return -2;
+				return 0;
 			}
 			
 			curr = curr->next;
@@ -407,14 +407,14 @@ char process_arg_trust(struct arg_network_info *local,
 			arglog(LOG_ALERT, "Failed to read N from trust data, got error %i\n", ret);
 			remove_arg_network(newGate);
 			free_arg_msg(msg);
-			return -2;
+			return -ARG_CONFIG_BAD;
 		}
 		if((ret = mpi_read_binary(&newGate->rsa.E, trust->e, sizeof(trust->e))))
 		{
 			arglog(LOG_ALERT, "Failed to read E from trust data, got error %i\n", ret);
 			remove_arg_network(newGate);
 			free_arg_msg(msg);
-			return -2;
+			return -ARG_CONFIG_BAD;
 		}
 		
 		newGate->rsa.len = (mpi_msb(&newGate->rsa.N) + 7) >> 3;	
@@ -450,8 +450,9 @@ char send_arg_wrapped(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
-	int status = 0;
+	int ret;
 	struct argmsg msg;
+	struct packet_data *newPacket = NULL;
 
 	pthread_spin_lock(&remote->lock);
 	
@@ -460,42 +461,50 @@ char send_arg_wrapped(struct arg_network_info *local,
 	{
 		arglog(LOG_DEBUG, "Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);
-		return -1;
+		return -ARG_NOT_CONNECTED;
 	}
 	
 	// Create message containing packet data
 	msg.len = packet->len;
 	msg.data = packet->data;
-	status = send_arg_packet(local, remote, ARG_WRAPPED_MSG, &msg);
+	
+	if((ret = create_arg_packet(local, remote, ARG_WRAPPED_MSG, &msg, &newPacket)) < 0)
+	{
+		arglog(LOG_DEBUG, "Unable to wrap packet\n");
+		return ret;
+	}
+	
+	if((ret = send_packet(newPacket)) >= 0)
+		arglog_result(packet, newPacket, 1, 1, "Wrap", "wrapped");
+	else
+		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");
 
 	pthread_spin_unlock(&remote->lock);
 
-	return status;
+	return ret;
 }
 
 char process_arg_wrapped(struct arg_network_info *local,
 						 struct arg_network_info *remote,
 						 const struct packet_data *packet)
 {
+	int ret = 0;
 	struct argmsg *msg = NULL;
 	struct packet_data *newPacket = NULL;
-	int status = 0;
 
 	pthread_spin_lock(&remote->lock);
 	
 	// Must be connected
 	if(!remote->connected)
 	{
-		arglog(LOG_DEBUG, "Refusing to unwrap packet, %s is not authenticated/connected\n", remote->name);
 		pthread_spin_unlock(&remote->lock);
-		return -1;
+		return -ARG_NOT_CONNECTED;
 	}
 
-	if(process_arg_packet(local, remote, packet, &msg))
+	if((ret = process_arg_packet(local, remote, packet, &msg)))
 	{
-		arglog(LOG_DEBUG, "Stopping connection data processing\n");
 		pthread_spin_unlock(&remote->lock);
-		return -2;
+		return ret;
 	}
 	
 	// Just need to send this message on as a packet
@@ -505,25 +514,46 @@ char process_arg_wrapped(struct arg_network_info *local,
 		arglog(LOG_DEBUG, "Unable to create new packet to drop into internal network\n");
 		free_arg_msg(msg);
 		pthread_spin_unlock(&remote->lock);
-		return -3;
+		return -ENOMEM;
 	}
 
 	memcpy(newPacket->data, msg->data, msg->len);
 	parse_packet(newPacket);
-	status = send_packet(newPacket);
+	if((ret = send_packet(newPacket)) >= 0)
+		arglog_result(packet, newPacket, 1, 1, "Unwrap", "unwrapped");
+	else
+		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");
 
 	pthread_spin_unlock(&remote->lock);
 
 	free_arg_msg(msg);
 	free_packet(newPacket);
 
-	return status;
+	return ret;
 }
 
 char send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
-					 int type,
-					 const struct argmsg *msg)
+					 int type, const struct argmsg *msg)
+{
+	int ret = 0;
+	struct packet_data *packet = NULL;
+
+	if((ret = create_arg_packet(local, remote, type, msg, &packet)) < 0)
+		return ret;
+
+	if((ret = send_packet(packet)) >= 0)
+		arglog_result(NULL, packet, 0, 1, "Admin", "sent");
+	else
+		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
+	
+	return ret;
+}
+
+char create_arg_packet(struct arg_network_info *local,
+					 struct arg_network_info *remote,
+					 int type, const struct argmsg *msg,
+					 struct packet_data **packetOut)
 {
 	int i = 0;
 	int blockSize;
@@ -546,7 +576,7 @@ char send_arg_packet(struct arg_network_info *local,
 	if(packet == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to allocate space for ARG packet\n");
-		return -1;
+		return -ENOMEM;
 	}
 	
 	// Ensure IPs are up-to-date
@@ -581,7 +611,7 @@ char send_arg_packet(struct arg_network_info *local,
 			if(!remote->connected)
 			{
 				arglog(LOG_ALERT, "Attempt to send symmetrically-encrypted data to unconnected gateway\n");
-				return -1;
+				return -ARG_NOT_CONNECTED;
 			}
 
 			// Symmetric encryption with remote symmetric key
@@ -614,7 +644,7 @@ char send_arg_packet(struct arg_network_info *local,
 			{
 				arglog(LOG_DEBUG, "Admin packet data must be %lu bytes or less\n", remote->rsa.len);
 				free_packet(packet);
-				return -2;
+				return -ARG_INTERNAL_ERROR;
 			}
 
 			// RSA encryption with destination public key
@@ -647,19 +677,19 @@ char send_arg_packet(struct arg_network_info *local,
 		{
 			arglog(LOG_DEBUG, "Unable to sign, error %i\n", ret);
 			free_packet(packet);
-			return -3;
+			return -ARG_SIGNING_FAILED;
 		}
 	}
 
+	/*
 	// Send!
-	if(send_packet(packet) < 0)
-	{
+	if((ret = send_packet(packet)) < 0)
 		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
-		return -2;
-	}
 
 	free_packet(packet);
+	*/
 
+	*packetOut = packet;
 	return 0;
 }
 
@@ -704,7 +734,7 @@ char process_arg_packet(struct arg_network_info *local,
 		// Fail, sequence numbers should always advance (except for wrap-around)
 		arglog(LOG_DEBUG, "Sequence number not monotonic (got %u, should be > %u)\n",
 			ntohl(packet->arg->seq), remote->proto.inSeqNum);
-		return -2;
+		return -ARG_SEQ_BAD;
 	}
 	
 	// Duplicate packet so we can remove the hash and check
@@ -712,7 +742,7 @@ char process_arg_packet(struct arg_network_info *local,
 	if(newPacket == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to duplicate packet for checking\n");
-		return -1;
+		return -ENOMEM;
 	}
 
 	argLen = ntohs(newPacket->arg->len);
@@ -724,7 +754,7 @@ char process_arg_packet(struct arg_network_info *local,
 		{
 			arglog(LOG_DEBUG, "%s is not connected, discarding packet\n", remote->name);
 			free_packet(newPacket);
-			return -3;
+			return -ARG_NOT_CONNECTED;
 		}
 		
 		// Check hmac with remote symmetric key
@@ -736,7 +766,7 @@ char process_arg_packet(struct arg_network_info *local,
 		{
 			arglog(LOG_DEBUG, "Unable to verify hmac\n");
 			free_packet(newPacket);
-			return -3;
+			return -ARG_SIG_CHECK_FAILED;
 		}
 	}
 	else
@@ -748,7 +778,7 @@ char process_arg_packet(struct arg_network_info *local,
 		{
 			arglog(LOG_DEBUG, "Unable to verify signature, error %i\n", ret);
 			free_packet(newPacket);
-			return -3;
+			return -ARG_SIG_CHECK_FAILED;
 		}
 	}
 
@@ -760,7 +790,7 @@ char process_arg_packet(struct arg_network_info *local,
 		{
 			arglog(LOG_DEBUG, "Unable to allocate space to write decrypted message\n");
 			free_packet(newPacket);
-			return -3;
+			return -ENOMEM;
 		}
 
 		if(newPacket->arg->type == ARG_WRAPPED_MSG || newPacket->arg->type == ARG_TRUST_DATA_MSG)
@@ -794,7 +824,7 @@ char process_arg_packet(struct arg_network_info *local,
 				arglog(LOG_DEBUG, "Unable to decrypt packet contents, error %i\n", ret);
 				free_arg_msg(out);
 				free_packet(newPacket);
-				return -4;
+				return -ARG_DECRYPT_FAILED;
 			}
 
 			out->len = len;
@@ -813,10 +843,10 @@ char process_arg_packet(struct arg_network_info *local,
 	if(recheckSeq)
 	{
 		if(*msg == NULL)
-			return -2;
+			return -ARG_SEQ_BAD;
 		
 		if(memcmp(((struct arg_conn_data*)out->data)->iv, remote->iv, sizeof(remote->iv)) == 0)
-			return -2;
+			return -ARG_SEQ_BAD;
 		
 		remote->proto.inSeqNum = ntohl(packet->arg->seq);
 	}

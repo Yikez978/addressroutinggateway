@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
+#include "arg_error.h"
 #include "settings.h"
 #include "utility.h"
 #include "hopper.h"
@@ -43,14 +45,14 @@ char read_config(struct config_data *conf)
 	if(confFile == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to open config file at %s\n", conf->file);
-		return -1;
+		return -errno;
 	}
 
 	if(get_next_line(confFile, line, MAX_CONF_LINE))
 	{
 		arglog(LOG_DEBUG, "Problem reading in gate name from conf\n");
 		fclose(confFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	strncpy(conf->ourGateName, line, sizeof(conf->ourGateName));
 	
@@ -58,7 +60,7 @@ char read_config(struct config_data *conf)
 	{
 		arglog(LOG_DEBUG, "Problem reading in internal device name from conf\n");
 		fclose(confFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	strncpy(conf->intDev, line, sizeof(conf->intDev));
 	
@@ -66,7 +68,7 @@ char read_config(struct config_data *conf)
 	{
 		arglog(LOG_DEBUG, "Problem reading in external device name from conf\n");
 		fclose(confFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	strncpy(conf->extDev, line, sizeof(conf->extDev));
 
@@ -74,7 +76,7 @@ char read_config(struct config_data *conf)
 	{
 		arglog(LOG_DEBUG, "Problem reading in hop rate from conf\n");
 		fclose(confFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	conf->hopRate = atol(line);
 
@@ -161,24 +163,24 @@ char read_public_key(const struct config_data *conf, struct arg_network_info *ga
 	keyFile = fopen(path, "r");
 	if(keyFile == NULL)
 	{
-		arglog(LOG_DEBUG, "Unable to open public key file at %s\n", path);
-		return -1;
+		arglog(LOG_DEBUG, "Unable to open public key file at %s: %s\n", path, strerror(errno));
+		return -errno;
 	}
 
 	// Start of data is our IP and mask
 	if(get_next_line(keyFile, line, MAX_CONF_LINE))
 	{
-		arglog(LOG_DEBUG, "Problem reading in IP from private file\n");
+		arglog(LOG_DEBUG, "Problem reading in IP from public file\n");
 		fclose(keyFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	inet_pton(AF_INET, line, gate->baseIP); 
 	
 	if(get_next_line(keyFile, line, MAX_CONF_LINE))
 	{
-		arglog(LOG_DEBUG, "Problem reading in mask from private file\n");
+		arglog(LOG_DEBUG, "Problem reading in mask from public file\n");
 		fclose(keyFile);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 	inet_pton(AF_INET, line, gate->mask);
 	
@@ -208,8 +210,8 @@ char read_private_key(const struct config_data *conf, struct arg_network_info *g
 	privKeyFile = fopen(path, "r");
 	if(privKeyFile == NULL)
 	{
-		arglog(LOG_DEBUG, "Unable to open private key file at %s\n", path);
-		return -1;
+		arglog(LOG_DEBUG, "Unable to open private key file at %s: %s\n", path, strerror(errno));
+		return -errno;
 	}
 
 	if( ( ret = mpi_read_file( &gate->rsa.N , 16, privKeyFile ) ) != 0 ||
@@ -232,7 +234,7 @@ char read_private_key(const struct config_data *conf, struct arg_network_info *g
 	if((ret = rsa_check_privkey(&gate->rsa)) != 0)
 	{
 		arglog(LOG_DEBUG, "Private key check failed, error %i\n", ret);
-		return -2;
+		return -ARG_CONFIG_BAD;
 	}
 
 	return 0;

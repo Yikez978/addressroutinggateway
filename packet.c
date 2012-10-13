@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 
 #include "packet.h"
+#include "arg_error.h"
 #include "protocol.h"
 
 char parse_packet(struct packet_data *packet)
@@ -41,7 +42,7 @@ char parse_packet(struct packet_data *packet)
 	if(packet->ipv4 != NULL)
 	{
 		if(packet->ipv4->version != 4)
-			return -1;
+			return -ARG_PACKET_PARSE_ERROR;
 
 		transStart = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl*4);
 
@@ -92,10 +93,10 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	switch(packet->ipv4->protocol)
 	{
 	case ARG_PROTO:
-			// ARG: s:<source ip> d:<dest ip> ipcsum:<ip checksum> seq:<seq num> type:<msg type num> sig:<sig/hmac> 
-		snprintf(buf, buflen, "ARG: s:%s:%i d:%s:%i ipcsum:%02x seq:%i type:%i sig:%0*x",
-			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
-			ntohs(packet->arg->seq), packet->arg->type, (int)sizeof(packet->arg->sig), (unsigned int)*packet->arg->sig); 
+		// ARG: s:<source ip> d:<dest ip> ipcsum:<ip checksum> seq:<seq num> type:<msg type num> sig:<sig/hmac> 
+		snprintf(buf, buflen, "ARG: s:%s d:%s ipcsum:%02x seq:%i type:%i sig:%0*x",
+			sIP, dIP, packet->ipv4->check, ntohl(packet->arg->seq),
+			packet->arg->type, (int)sizeof(packet->arg->sig), (unsigned int)*packet->arg->sig); 
 		break;
 
 	case TCP_PROTO:
@@ -223,7 +224,7 @@ char send_packet(const struct packet_data *packet)
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
 		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
-		return -1;
+		return errno;
 	}
 
 	return 0;

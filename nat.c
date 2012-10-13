@@ -6,6 +6,7 @@
 #include <pthread.h>
 
 #include "nat.h"
+#include "arg_error.h"
 #include "hopper.h"
 #include "uthash.h"
 
@@ -53,9 +54,11 @@ void uninit_nat(void)
 
 char do_nat_inbound_rewrite(const struct packet_data *packet)
 {
+	int ret;
+
 	struct packet_data *newPacket = NULL;
 	const struct iphdr *iph = packet->ipv4;
-	
+
 	uint16_t port = 0;
 	
 	struct nat_entry_bucket *bucket = NULL;
@@ -73,7 +76,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	if(bucket == NULL)
 	{
 		pthread_spin_unlock(&natTableLock);
-		return -1;
+		return -ARG_BUCKET_NOT_FOUND;
 	}
 
 	// Have the correct bucket, now find the entry in the attached list 
@@ -91,7 +94,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	if(e == NULL)
 	{
 		pthread_spin_unlock(&natTableLock);
-		return -2;
+		return -ARG_ENTRY_NOT_FOUND;
 	}
 	
 	// Note that the entry has been used
@@ -103,21 +106,29 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	newPacket = copy_packet(packet);
 	if(newPacket == NULL)
 	{
-		arglog(LOG_DEBUG, "Unable to rewrite packet\n");
-		return -3;
+		arglog(LOG_DEBUG, "Unable to allocate memory for rewriten packet\n");
+		return -ENOMEM;
 	}
 
 	memcpy((void*)&newPacket->ipv4->daddr, e->intIP, ADDR_SIZE);
 	set_dest_port(newPacket, e->intPort);
 
-	send_packet(newPacket);
+	if((ret = send_packet(newPacket)) >= 0)
+	{
+		// Success
+		ret = 0;
+		arglog_result(packet, newPacket, 1, 1, "NAT", "rewrite");
+	}
+
 	free_packet(newPacket);
 
-	return 0;
+	return ret;
 }
 
 char do_nat_outbound_rewrite(const struct packet_data *packet)
 {
+	int ret;
+
 	struct packet_data *newPacket = NULL;
 	const struct iphdr *iph = packet->ipv4;
 	
@@ -140,7 +151,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 		if(bucket == NULL)
 		{
 			pthread_spin_unlock(&natTableLock);
-			return -1;
+			return -ENOMEM;
 		}
 	}
 
@@ -162,7 +173,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 		if(e == NULL)
 		{
 			pthread_spin_unlock(&natTableLock);
-			return -2;
+			return -ENOMEM;
 		}
 	}
 
@@ -176,16 +187,22 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	if(newPacket == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to rewrite packet\n");
-		return -3;
+		return -ENOMEM;
 	}
 	
 	memcpy((void*)&newPacket->ipv4->saddr, e->gateIP, ADDR_SIZE);
 	set_source_port(newPacket, e->gatePort);
 
-	send_packet(newPacket);
+	if((ret = send_packet(newPacket)) >= 0)
+	{
+		// Success
+		ret = 0;
+		arglog_result(packet, newPacket, 0, 1, "NAT", "rewrite");
+	}
+	
 	free_packet(newPacket);
 
-	return 0;
+	return ret;
 }
 
 void print_nat_table(void)
@@ -193,19 +210,19 @@ void print_nat_table(void)
 	struct nat_entry_bucket *b = natTable;
 	struct nat_entry *e = NULL;
 
-	arglog(LOG_DEBUG, "NAT Table:\n");
+	if(b)
+		arglog(LOG_DEBUG, "NAT Table:\n");
+	else
+		arglog(LOG_DEBUG, "NAT Table empty\n");
+
 	while(b != NULL)
 	{
-		arglog(LOG_DEBUG, " Bucket: ");
 		print_nat_bucket(b);
-		arglog(LOG_DEBUG, "\n");
 
 		e = b->first;
 		while(e != NULL)
 		{
-			arglog(LOG_DEBUG, "  Entry: ");
 			print_nat_entry(e);
-			arglog(LOG_DEBUG, "\n");
 
 			e = e->next;
 		}
@@ -218,7 +235,7 @@ void print_nat_bucket(const struct nat_entry_bucket *bucket)
 {
 	char ip[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, bucket->extIP, ip, sizeof(ip));
-	arglog(LOG_DEBUG, "k:%i e:%s:%i", bucket->key, ip, bucket->extPort);
+	arglog(LOG_DEBUG, " Bucket: k:%i e:%s:%i\n", bucket->key, ip, bucket->extPort);
 }
 
 void print_nat_entry(const struct nat_entry *entry)
@@ -229,7 +246,7 @@ void print_nat_entry(const struct nat_entry *entry)
 	inet_ntop(AF_INET, entry->intIP, iIP, sizeof(iIP));
 	inet_ntop(AF_INET, entry->gateIP, gIP, sizeof(gIP));
 	
-	arglog(LOG_DEBUG, "i:%s:%i g:%s:%i (lu %li ms ago)",
+	arglog(LOG_DEBUG, "  Entry: i:%s:%i g:%s:%i (lu %li ms ago)\n",
 		iIP, entry->intPort, gIP, entry->gatePort,
 		current_time_offset(&entry->lastUsed));
 }

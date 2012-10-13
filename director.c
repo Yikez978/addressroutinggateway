@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "utility.h"
 #include "packet.h"
+#include "arg_error.h"
 #include "hopper.h"
 #include "nat.h"
 
@@ -166,7 +167,9 @@ void *receive_thread(void *tData)
 
 void direct_inbound(const struct packet_data *packet)
 {
+	int ret = 0;
 	struct arg_network_info *gate = NULL;
+	char error[MAX_ERROR_STR_LEN];
 	
 	// Is this packet from a connected and authenticated ARG network?
 	gate = get_arg_network(&packet->ipv4->saddr);
@@ -174,19 +177,16 @@ void direct_inbound(const struct packet_data *packet)
 	{
 		if(packet->arg == NULL)
 		{
-			arglog(LOG_RESULTS, "Inbound Reject: Bad Protocol\n");
+			arglog_result(packet, NULL, 1, 0, "Admin", "bad protocol");
 			return;
 		}
 
 		if(is_admin_msg(packet->arg))
 		{
-			if(process_admin_msg(packet, gate) == 0)
+			if((ret = process_admin_msg(packet, gate)) < 0)
 			{
-				arglog(LOG_RESULTS, "Inbound Accept: admin\n");
-			}
-			else
-			{
-				arglog(LOG_RESULTS, "Inbound Reject: Invalid admin\n");
+				arg_strerror_r(ret, error, sizeof(error));
+				arglog_result(packet, NULL, 0, 0, "Admin", error);
 			}
 		}
 		else
@@ -194,24 +194,21 @@ void direct_inbound(const struct packet_data *packet)
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
-				arglog(LOG_RESULTS, "Inbound Reject: Dest IP Incorrect\n");
+				arglog_result(packet, NULL, 1, 0, "Unwrap", "Dest IP Incorrect");
 				return;
 			}
 			
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
-				arglog(LOG_RESULTS, "Inbound Reject: Source IP Incorrect\n");
+				arglog_result(packet, NULL, 1, 0, "Unwrap", "Source IP Incorrect");
 				return;
 			}
 
 			// Unwrap and drop into network, assuming everything checks out
-			if(do_arg_unwrap(packet, gate) == 0)
+			if((ret = do_arg_unwrap(packet, gate) < 0))
 			{
-				arglog(LOG_RESULTS, "Inbound Accept: Unwrapped\n");
-			}
-			else
-			{
-				arglog(LOG_RESULTS, "Inbound Reject: Failed to unwrap\n");
+				arg_strerror_r(ret, error, sizeof(error));
+				arglog_result(packet, NULL, 0, 0, "Unwrap", error);
 			}
 		}
 	}
@@ -219,20 +216,18 @@ void direct_inbound(const struct packet_data *packet)
 	{
 		// From a non-ARG IP
 		// Pass off to the NAT handler
-		if(do_nat_inbound_rewrite(packet) == 0)
+		if((ret = do_nat_inbound_rewrite(packet)) < 0)
 		{
-			arglog(LOG_RESULTS, "Inbound Accept: Rewrite\n");
-		}
-		else
-		{
-			arglog(LOG_RESULTS, "Inbound Reject: NAT\n");
+			arg_strerror_r(ret, error, sizeof(error));
+			arglog_result(packet, NULL, 1, 0, "NAT", error);
 		}
 	}
-	
 }
 
 void direct_outbound(const struct packet_data *packet)
 {
+	char error[MAX_ERROR_STR_LEN];
+	int ret;
 	struct arg_network_info *gate = NULL;
 
 	// Who should handle it?
@@ -240,26 +235,20 @@ void direct_outbound(const struct packet_data *packet)
 	if(gate != NULL)
 	{
 		// Destined for an ARG network
-		if(do_arg_wrap(packet, gate) == 0)
+		if((ret = do_arg_wrap(packet, gate) < 0))
 		{
-			arglog(LOG_RESULTS, "Outbound Accept: Wrap\n");
-		}
-		else
-		{
-			arglog(LOG_RESULTS, "Outbound Reject: Failed to wrap\n");
+			arg_strerror_r(ret, error, sizeof(error));
+			arglog_result(packet, NULL, 0, 0, "Wrap", error);
 		}
 	}
 	else
 	{
 		// Unknown destination. Rewrite via NAT, creating an entry
 		// if needed
-		if(do_nat_outbound_rewrite(packet) == 0)
+		if((ret = do_nat_outbound_rewrite(packet)) < 0)
 		{
-			arglog(LOG_RESULTS, "Outbound: Accept: Rewrite\n");
-		}
-		else
-		{
-			arglog(LOG_RESULTS, "Outbound Reject: NAT\n");
+			arg_strerror_r(ret, error, sizeof(error));
+			arglog_result(packet, NULL, 0, 0, "NAT", error);
 		}
 	}
 }

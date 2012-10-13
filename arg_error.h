@@ -1,0 +1,39 @@
+#ifndef ARG_ERRORS_H
+#define ARG_ERRORS_H
+
+#include <errno.h>
+
+#define MAX_ERROR_STR_LEN 25
+
+enum {
+	ARG_MIN_ERROR = 90,
+
+	// Message errors
+	ARG_SEQ_BAD = ARG_MIN_ERROR,
+	ARG_UNHANDLED_TYPE,
+	ARG_SIG_CHECK_FAILED,
+	ARG_SIGNING_FAILED,
+	ARG_DECRYPT_FAILED,
+	ARG_ENCRYPT_FAILED,
+
+	ARG_MSG_SIZE_BAD,
+	ARG_MSG_UNEXPECTED,
+	ARG_MSG_ID_BAD,
+
+	ARG_PACKET_PARSE_ERROR,
+
+	// NAT errors
+	ARG_BUCKET_NOT_FOUND,
+	ARG_ENTRY_NOT_FOUND,
+
+	// Gateway issues
+	ARG_NOT_CONNECTED,
+	ARG_CONFIG_BAD,
+
+	ARG_INTERNAL_ERROR,
+};
+
+void arg_strerror_r(int errnum, char *buf, int buflen);
+
+#endif
+

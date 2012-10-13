@@ -1,7 +1,10 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-// Disable the fine packet accepted/rejected messages
+/***********************************************
+* Timeouts
+***********************************************/
+// Disable the packet accepted/rejected messages
 #define DISP_RESULTS
 
 // Number of seconds before an auth request times out and must be initiated again
@@ -27,14 +30,16 @@
 // accept a sudden reversion to the beginnig?
 #define SEQ_NUM_WRAP_ALLOWANCE 10
 
+/***********************************************
+* Buffers and lengths
+***********************************************/
 // Maximum length of a name for a gate (including null)
 #define MAX_NAME_SIZE 10
 
-#define MAX_PACKET_SIZE UINT16_MAX
 #define MAX_CONF_LINE 300
 
-#define SYMMETRIC_ALGO "AES-256-CTR"
-#define HASH_ALGO "SHA256"
+#define MAX_PACKET_SIZE UINT16_MAX
+#define MAX_PACKET_ID_SIZE 150
 
 #define RSA_KEY_SIZE 128
 #define RSA_SIG_SIZE 128
@@ -45,6 +50,15 @@
 #define HOP_KEY_SIZE 16
 #define SHA1_HASH_SIZE 20
 
+/***********************************************
+* Misc
+***********************************************/
+#define SYMMETRIC_ALGO "AES-256-CTR"
+#define HASH_ALGO "SHA256"
+
+/***********************************************
+* Configuration/settings manager
+***********************************************/
 struct arg_network_info;
 
 typedef struct gate_list {

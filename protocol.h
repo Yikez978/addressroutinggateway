@@ -200,8 +200,11 @@ char process_arg_wrapped(struct arg_network_info *local,
 // Creates the ARG header for the given data and sends it
 char send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
-					 int type,
-					 const struct argmsg *msg);
+					 int type, const struct argmsg *msg);
+char create_arg_packet(struct arg_network_info *local,
+					 struct arg_network_info *remote,
+					 int type, const struct argmsg *msg,
+					 struct packet_data **packetOut);
 
 // Validates the packet data (from ARG header on) and decrypts it.
 // New space is allocated and placed into out, which must be freed via free_arg_packet()
