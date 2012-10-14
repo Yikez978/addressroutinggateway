@@ -479,6 +479,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 	else
 		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");
 
+	free_packet(newPacket);
 	pthread_mutex_unlock(&remote->lock);
 
 	return ret;
@@ -546,7 +547,9 @@ char send_arg_packet(struct arg_network_info *local,
 		arglog_result(NULL, packet, 0, 1, "Admin", "sent");
 	else
 		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
-	
+
+	free_packet(packet);
+
 	return ret;
 }
 
@@ -680,14 +683,6 @@ char create_arg_packet(struct arg_network_info *local,
 			return -ARG_SIGNING_FAILED;
 		}
 	}
-
-	/*
-	// Send!
-	if((ret = send_packet(packet)) < 0)
-		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
-
-	free_packet(packet);
-	*/
 
 	*packetOut = packet;
 	return 0;
