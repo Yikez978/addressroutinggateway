@@ -31,7 +31,7 @@ typedef struct arg_network_info {
 	struct proto_data proto;
 
 	// Lock
-	pthread_spinlock_t lock;
+	pthread_mutex_t lock;
 
 	// Encryption keys and parameters
 	uint8_t symKey[AES_KEY_SIZE];

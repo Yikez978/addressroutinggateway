@@ -63,7 +63,7 @@ char send_arg_ping(struct arg_network_info *local,
 		return -ENOMEM;
 	}
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
@@ -72,7 +72,7 @@ char send_arg_ping(struct arg_network_info *local,
 	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg)) < 0)
 		arglog(LOG_DEBUG, "Failed to send ping\n");
 
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
 
 	return ret;
@@ -130,7 +130,7 @@ char process_arg_pong(struct arg_network_info *local,
 		return -ARG_MSG_SIZE_BAD;
 	}
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 
 	if(remote->proto.pingID != 0)
 	{
@@ -162,7 +162,7 @@ char process_arg_pong(struct arg_network_info *local,
 	// All done with a ping/auth
 	remote->proto.state &= ~ARG_DO_AUTH;
 	
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 	
 	free_arg_msg(msg);
 	do_next_action(local, remote);
@@ -196,7 +196,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 	connData->hopInterval = htonl(local->hopInterval);
 	connData->timeOffset = htonl(current_time_offset(&local->timeBase));
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 
 	//arglog(LOG_DEBUG, "We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
 
@@ -205,7 +205,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg)) < 0)
 		arglog(LOG_DEBUG, "Failed to send connection data\n");
 
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
 
 	return 0;
@@ -241,7 +241,7 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 
 	if(msg->len == sizeof(struct arg_conn_data))
 	{
-		pthread_spin_lock(&remote->lock);
+		pthread_mutex_lock(&remote->lock);
 		
 		connData = (struct arg_conn_data*)msg->data;
 		
@@ -264,7 +264,7 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 		remote->connected = 1;
 		current_time(&remote->lastDataUpdate);
 		
-		pthread_spin_unlock(&remote->lock);
+		pthread_mutex_unlock(&remote->lock);
 	}
 	else
 	{
@@ -346,13 +346,13 @@ char send_arg_trust(struct arg_network_info *local,
 		return -ARG_CONFIG_BAD;
 	}
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 
 	// Send
 	if(send_arg_packet(local, remote, ARG_TRUST_DATA_MSG, msg) < 0)
 		arglog(LOG_ALERT, "Failed to send ARG trust data\n");
 
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 
 	free_arg_msg(msg);
 
@@ -421,11 +421,11 @@ char process_arg_trust(struct arg_network_info *local,
 		mask_array(sizeof(newGate->baseIP), newGate->baseIP, newGate->mask, newGate->baseIP);
 
 		// Hook it up
-		pthread_spin_lock(&local->lock);
+		pthread_mutex_lock(&local->lock);
 		newGate->next = local->next;
 		newGate->prev = local;
 		local->next = newGate;
-		pthread_spin_unlock(&local->lock);
+		pthread_mutex_unlock(&local->lock);
 
 		arglog(LOG_INFO, "Added %s as a new gate\n", newGate->name);
 		send_arg_conn_data(local, newGate, 0);
@@ -454,13 +454,13 @@ char send_arg_wrapped(struct arg_network_info *local,
 	struct argmsg msg;
 	struct packet_data *newPacket = NULL;
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 	
 	// Must be connected
 	if(!remote->connected)
 	{
 		arglog(LOG_DEBUG, "Refusing to wrap packet, %s is not authenticated/connected\n", remote->name);
-		pthread_spin_unlock(&remote->lock);
+		pthread_mutex_unlock(&remote->lock);
 		return -ARG_NOT_CONNECTED;
 	}
 	
@@ -479,7 +479,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 	else
 		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");
 
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 
 	return ret;
 }
@@ -492,18 +492,18 @@ char process_arg_wrapped(struct arg_network_info *local,
 	struct argmsg *msg = NULL;
 	struct packet_data *newPacket = NULL;
 
-	pthread_spin_lock(&remote->lock);
+	pthread_mutex_lock(&remote->lock);
 	
 	// Must be connected
 	if(!remote->connected)
 	{
-		pthread_spin_unlock(&remote->lock);
+		pthread_mutex_unlock(&remote->lock);
 		return -ARG_NOT_CONNECTED;
 	}
 
 	if((ret = process_arg_packet(local, remote, packet, &msg)))
 	{
-		pthread_spin_unlock(&remote->lock);
+		pthread_mutex_unlock(&remote->lock);
 		return ret;
 	}
 	
@@ -513,7 +513,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 	{
 		arglog(LOG_DEBUG, "Unable to create new packet to drop into internal network\n");
 		free_arg_msg(msg);
-		pthread_spin_unlock(&remote->lock);
+		pthread_mutex_unlock(&remote->lock);
 		return -ENOMEM;
 	}
 
@@ -524,7 +524,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 	else
 		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");
 
-	pthread_spin_unlock(&remote->lock);
+	pthread_mutex_unlock(&remote->lock);
 
 	free_arg_msg(msg);
 	free_packet(newPacket);

@@ -14,13 +14,13 @@
 NAT table data
 **********************/
 static struct nat_entry_bucket *natTable = NULL;
-static pthread_spinlock_t natTableLock;
+static pthread_mutex_t natTableLock;
 
 static pthread_t natCleanupThread;
 
 void init_nat_locks(void)
 {
-	pthread_spin_init(&natTableLock, 0);
+	pthread_mutex_init(&natTableLock, NULL);
 }
 
 char init_nat(void)
@@ -47,7 +47,7 @@ void uninit_nat(void)
 
 	empty_nat_table();
 
-	pthread_spin_destroy(&natTableLock);
+	pthread_mutex_destroy(&natTableLock);
 
 	arglog(LOG_DEBUG, "NAT finished\n");
 }
@@ -66,7 +66,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	int key = 0;
 
 	// Read lock!
-	pthread_spin_lock(&natTableLock);
+	pthread_mutex_lock(&natTableLock);
 
 	// Find entry in table by finding the bucket then
 	// searching through the associated list
@@ -75,7 +75,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 
 	if(bucket == NULL)
 	{
-		pthread_spin_unlock(&natTableLock);
+		pthread_mutex_unlock(&natTableLock);
 		return -ARG_BUCKET_NOT_FOUND;
 	}
 
@@ -93,14 +93,14 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 
 	if(e == NULL)
 	{
-		pthread_spin_unlock(&natTableLock);
+		pthread_mutex_unlock(&natTableLock);
 		return -ARG_ENTRY_NOT_FOUND;
 	}
 	
 	// Note that the entry has been used
 	update_nat_entry_time(e);
 
-	pthread_spin_unlock(&natTableLock);
+	pthread_mutex_unlock(&natTableLock);
 
 	// Change destination addr to the correct internal IP and port
 	newPacket = copy_packet(packet);
@@ -138,7 +138,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	struct nat_entry *e = NULL;
 	int key = 0;
 
-	pthread_spin_lock(&natTableLock);
+	pthread_mutex_lock(&natTableLock);
 	
 	// Find entry in table by finding the bucket then
 	// searching through the associated list
@@ -150,7 +150,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 		bucket = create_nat_bucket(packet, key);
 		if(bucket == NULL)
 		{
-			pthread_spin_unlock(&natTableLock);
+			pthread_mutex_unlock(&natTableLock);
 			return -ENOMEM;
 		}
 	}
@@ -172,7 +172,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 		e = create_nat_entry(packet, bucket);
 		if(e == NULL)
 		{
-			pthread_spin_unlock(&natTableLock);
+			pthread_mutex_unlock(&natTableLock);
 			return -ENOMEM;
 		}
 	}
@@ -180,7 +180,7 @@ char do_nat_outbound_rewrite(const struct packet_data *packet)
 	// Note that the entry has been used
 	update_nat_entry_time(e);
 
-	pthread_spin_unlock(&natTableLock);
+	pthread_mutex_unlock(&natTableLock);
 	
 	// Change source addr to the correct external IP and port
 	newPacket = copy_packet(packet);
@@ -339,12 +339,12 @@ void empty_nat_table(void)
 {
 	struct nat_entry_bucket *b = natTable;
 	
-	pthread_spin_lock(&natTableLock);
+	pthread_mutex_lock(&natTableLock);
 	
 	while(b != NULL)
 		b = remove_nat_bucket(b);
 	
-	pthread_spin_unlock(&natTableLock);
+	pthread_mutex_unlock(&natTableLock);
 }
 
 struct nat_entry_bucket *remove_nat_bucket(struct nat_entry_bucket *bucket)
@@ -400,9 +400,9 @@ void *nat_cleanup_thread(void *data)
 	{
 		clean_nat_table();
 	
-		pthread_spin_lock(&natTableLock);
+		pthread_mutex_lock(&natTableLock);
 		print_nat_table();
-		pthread_spin_unlock(&natTableLock);
+		pthread_mutex_unlock(&natTableLock);
 	
 		sleep(NAT_CLEAN_TIME);
 	}
@@ -421,7 +421,7 @@ void clean_nat_table(void)
 
 	current_time(&now);
 
-	pthread_spin_lock(&natTableLock);
+	pthread_mutex_lock(&natTableLock);
 
 	while(b != NULL)
 	{
@@ -443,6 +443,6 @@ void clean_nat_table(void)
 			b = (struct nat_entry_bucket*)b->hh.next;
 	}
 
-	pthread_spin_unlock(&natTableLock);
+	pthread_mutex_unlock(&natTableLock);
 }
 

@@ -20,16 +20,16 @@
 IP Hopping data
 **************************/
 static arg_network_info *gateInfo = NULL;
-static pthread_spinlock_t networksLock;
+static pthread_mutex_t networksLock;
 
-static pthread_spinlock_t ipLock;
+static pthread_mutex_t ipLock;
 
 static pthread_t connectThread;
 
 void init_hopper_locks(void)
 {
-	pthread_spin_init(&ipLock, PTHREAD_PROCESS_SHARED);
-	pthread_spin_init(&networksLock, PTHREAD_PROCESS_SHARED);
+	pthread_mutex_init(&ipLock, NULL);
+	pthread_mutex_init(&networksLock, NULL);
 }
 
 char init_hopper(const struct config_data *config)
@@ -38,16 +38,16 @@ char init_hopper(const struct config_data *config)
 
 	arglog(LOG_DEBUG, "Hopper init\n");
 
-	pthread_spin_lock(&networksLock);
-	pthread_spin_lock(&ipLock);
+	pthread_mutex_lock(&networksLock);
+	pthread_mutex_lock(&ipLock);
 	
 	// "Read in" settings
 	if(get_hopper_conf(config))
 	{
 		arglog(LOG_DEBUG, "Unable to configure hopper\n");
 		
-		pthread_spin_unlock(&ipLock);
-		pthread_spin_unlock(&networksLock);
+		pthread_mutex_unlock(&ipLock);
+		pthread_mutex_unlock(&networksLock);
 		uninit_hopper();
 
 		return -ARG_CONFIG_BAD;
@@ -58,15 +58,15 @@ char init_hopper(const struct config_data *config)
 	{
 		arglog(LOG_DEBUG,  "Unable to initialize entropy pool, error %d\n", ret);
 		
-		pthread_spin_unlock(&ipLock);
-		pthread_spin_unlock(&networksLock);
+		pthread_mutex_unlock(&ipLock);
+		pthread_mutex_unlock(&networksLock);
 		uninit_hopper();
 
 		return -ARG_INTERNAL_ERROR;
 	}
 
-	pthread_spin_unlock(&ipLock);
-	pthread_spin_unlock(&networksLock);
+	pthread_mutex_unlock(&ipLock);
+	pthread_mutex_unlock(&networksLock);
 	
 	arglog(LOG_DEBUG, "Hopper initialized\n");
 
@@ -91,8 +91,8 @@ void uninit_hopper(void)
 		connectThread = 0;
 	}
 	
-	pthread_spin_lock(&networksLock);
-	pthread_spin_lock(&ipLock);
+	pthread_mutex_lock(&networksLock);
+	pthread_mutex_lock(&ipLock);
 	
 	// Remove our own information
 	if(gateInfo != NULL)
@@ -103,11 +103,11 @@ void uninit_hopper(void)
 		gateInfo = NULL;
 	}
 	
-	pthread_spin_unlock(&ipLock);
-	pthread_spin_unlock(&networksLock);
+	pthread_mutex_unlock(&ipLock);
+	pthread_mutex_unlock(&networksLock);
 	
-	pthread_spin_destroy(&ipLock);
-	pthread_spin_destroy(&networksLock);
+	pthread_mutex_destroy(&ipLock);
+	pthread_mutex_destroy(&networksLock);
 
 	arglog(LOG_DEBUG, "Hopper finished\n");
 }
@@ -281,7 +281,7 @@ struct arg_network_info *create_arg_network_info(void)
 	memset(newInfo, 0, sizeof(struct arg_network_info));
 
 	// Init things that need it
-	pthread_spin_init(&newInfo->lock, PTHREAD_PROCESS_SHARED);
+	pthread_mutex_init(&newInfo->lock, NULL);
 	rsa_init(&newInfo->rsa, RSA_PKCS_V15, 0);
 
 	cipher_init_ctx(&newInfo->cipher, cipher_info_from_string(SYMMETRIC_ALGO));
@@ -304,7 +304,7 @@ struct arg_network_info *remove_arg_network(struct arg_network_info *network)
 	if(network->prev != NULL)
 		network->prev->next = network->next;
 
-	pthread_spin_destroy(&network->lock);
+	pthread_mutex_destroy(&network->lock);
 
 	rsa_free(&network->rsa);
 	md_free_ctx(&network->md);
@@ -343,9 +343,9 @@ uint8_t *current_ip(void)
 		return NULL;
 	}
 
-	pthread_spin_lock(&ipLock);
+	pthread_mutex_lock(&ipLock);
 	memcpy(ipCopy, gateInfo->currIP, ADDR_SIZE);
-	pthread_spin_unlock(&ipLock);
+	pthread_mutex_unlock(&ipLock);
 
 	return ipCopy;
 }
@@ -359,7 +359,7 @@ char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 {
 	char ret = 0;
 
-	pthread_spin_lock(&gate->lock);
+	pthread_mutex_lock(&gate->lock);
 
 	update_ips(gate);
 
@@ -370,7 +370,7 @@ char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 	else
 		ret = 0;
 	
-	pthread_spin_unlock(&gate->lock);
+	pthread_mutex_unlock(&gate->lock);
 
 	return ret;
 }
