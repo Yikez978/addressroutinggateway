@@ -19,12 +19,12 @@ void printRaw(int len, const void *buf)
 	{
 		// Tag beginning of line
 		if(i % 16 == 0)
-			arglog(LOG_DEBUG, "\n[%4i]  ", i);
+			printf("\n[0x%04x]  ", i);
 		
-		arglog(LOG_DEBUG, "%02x ", bufC[i]);
+		printf("%02x ", bufC[i]);
 	}
 
-	arglog(LOG_DEBUG, "\n");
+	printf("\n");
 }
 
 // Display printable data in buf
@@ -48,13 +48,13 @@ void printAscii(int len, const void *buf)
 
 		// Tag beginning of line?
 		if(shown % 40 == 0)
-			arglog(LOG_DEBUG, "\n[%4i]  ", i);
+			printf("\n[%4i]  ", i);
 		
-		arglog(LOG_DEBUG, "%c", c);
+		printf("%c", c);
 		shown++;
 	}
 
-	arglog(LOG_DEBUG, "\n");
+	printf("\n");
 }
 
 int set_log_level(int level)

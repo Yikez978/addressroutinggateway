@@ -1,10 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <errno.h>
 
+#include <sys/socket.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <netinet/ether.h>
+#include <linux/if_packet.h>
 
 #include "packet.h"
 #include "arg_error.h"
@@ -134,6 +139,49 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	}
 }
 
+char get_mac_addr(const char *dev, uint8_t *mac)
+{
+	int ret;
+	int sockfd;
+	struct ifreq if_mac;
+
+	if((sockfd = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW)) < 0)
+		return -1;
+
+	memset(&if_mac, 0, sizeof(if_mac));
+	strncpy(if_mac.ifr_name, dev, sizeof(if_mac.ifr_name) - 1);
+	if((ret = ioctl(sockfd, SIOCGIFHWADDR, &if_mac)) < 0)
+	{
+		close(sockfd);
+		return ret;
+	}
+
+	memcpy(mac, if_mac.ifr_hwaddr.sa_data, ETH_ALEN);
+
+	close(sockfd);
+
+	return 0;
+}
+
+int get_dev_index(char *dev)
+{
+	int ret;
+	int sockfd;
+	struct ifreq if_idx;
+
+	if((sockfd = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW)) < 0)
+		return -1;
+
+	memset(&if_idx, 0, sizeof(if_idx));
+	strncpy(if_idx.ifr_name, dev, sizeof(if_idx.ifr_name) - 1);
+	if((ret = ioctl(sockfd, SIOCGIFINDEX, &if_idx)) < 0)
+		return ret;
+
+	close(sockfd);
+
+	return if_idx.ifr_ifindex;
+}
+
 struct packet_data *create_packet(int len)
 {
 	struct packet_data *c = NULL;
@@ -202,6 +250,44 @@ void free_packet(struct packet_data *packet)
 	}
 }
 
+char send_packet_on(int dev_index, const struct packet_data *packet)
+{
+	static int sock = 0;
+	struct sockaddr_ll addr;
+
+	arglog(LOG_DEBUG, "Sending packet:");
+	printRaw(packet->len, packet->data);
+
+	if(sock <= 0)
+	{
+		sock = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+		if(sock < 0)
+		{
+			arglog(LOG_DEBUG, "Unable to create raw socket for sending\n");
+			return sock;
+		}
+	}
+
+	if(!packet->eth)
+	{
+		arglog(LOG_ALERT, "Packtes may only be sent on a specific interface when ethernet header is given\n");
+		return -ARG_INTERNAL_ERROR;
+	}
+
+	addr.sll_ifindex = dev_index;
+	addr.sll_halen = ETH_ALEN;
+	memcpy(addr.sll_addr, packet->eth->h_dest, sizeof(addr.sll_addr));
+
+	if(sendto(sock, (uint8_t*)packet->data, packet->len, 0, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+	{
+		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
+		return -errno;
+	}
+
+	return 0;
+
+}
+
 char send_packet(const struct packet_data *packet)
 {
 	static int sock = 0;
@@ -234,13 +320,13 @@ char send_packet(const struct packet_data *packet)
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
 		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
-		return errno;
+		return -errno;
 	}
 
 	return 0;
 }
 
-char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
+char send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t *hwaddr)
 {
 	int ret;
 	struct packet_data *reply = NULL;
@@ -248,7 +334,7 @@ char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
 	if(!packet->arp || ntohs(packet->arp->ea_hdr.ar_op) != ARPOP_REQUEST)
 		return -1;
 
-	reply = create_packet(sizeof(struct ether_arp));
+	reply = create_packet(sizeof(struct ethhdr) + sizeof(struct ether_arp));
 	if(reply == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to create ARP reply\n");
@@ -256,9 +342,13 @@ char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
 	}
 
 	// Build reply
-	reply->ipv4 = NULL;
-	reply->arp = (struct ether_arp*)reply->data;
+	reply->linkLayerLen = sizeof(struct ethhdr);
+	reply->eth = (struct ethhdr*)reply->data;
+	reply->eth->h_proto = htons(ETH_P_ARP);
+	memcpy(reply->eth->h_dest, packet->arp->arp_sha, sizeof(reply->eth->h_dest));
+	memcpy(reply->eth->h_source, hwaddr, sizeof(reply->eth->h_source));
 	
+	parse_packet(reply);
 	reply->arp->ea_hdr.ar_hrd = htons(ARPHRD_ETHER); // Ethernet
 	reply->arp->ea_hdr.ar_pro = htons(ETH_P_IP); // IP 
 	reply->arp->ea_hdr.ar_hln = sizeof(packet->arp->arp_sha); // 6-byte MACs 
@@ -271,10 +361,10 @@ char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
 	memcpy(reply->arp->arp_tpa, packet->arp->arp_spa, sizeof(reply->arp->arp_tpa));
 
 	arglog(LOG_DEBUG, "Sending ARP:\n");
-	printRaw(reply->len, reply);
+	printRaw(reply->len, reply->data);
 
 	// Whew, that was a lot of work
-	if((ret = send_packet(reply)) >= 0)
+	if((ret = send_packet_on(devIndex, reply)) >= 0)
 		arglog(LOG_DEBUG, "Sent ARP reply\n");
 	else
 		arglog(LOG_DEBUG, "ARP reply failed to send\n");
@@ -282,11 +372,6 @@ char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
 	free_packet(reply);
 
 	return ret;
-}
-
-char get_mac_addr(const char *dev, uint8_t *mac)
-{
-	return 0;
 }
 
 uint16_t get_source_port(const struct packet_data *packet)

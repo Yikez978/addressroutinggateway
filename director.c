@@ -70,15 +70,22 @@ void *receive_thread(void *tData)
 	char baseIP[INET_ADDRSTRLEN];
 	char mask[INET_ADDRSTRLEN];
 
+	int devIndex = 0;
 	uint8_t hwaddr[ETH_ALEN];
 
 	uint8_t *wireData = NULL;
 	struct packet_data packet;
 
-	// Cache hardware address of ARP
+	// Cache hardware address for ARP
 	if(get_mac_addr(data->dev, hwaddr) < 0)
 	{
 		arglog(LOG_DEBUG, "Unable to get hardware address of %s\n", data->dev);
+		return (void*)-1;
+	}
+
+	if((devIndex = get_dev_index(data->dev)) < 0)
+	{
+		arglog(LOG_DEBUG, "Unable to get index of device %s\n", data->dev);
 		return (void*)-1;
 	}
 
@@ -158,10 +165,9 @@ void *receive_thread(void *tData)
 		if(wireData == NULL)
 			continue;
 
-		// Point packet to skip the data link layer
-		packet.linkLayerLen = 0;
-		packet.data = wireData + frameHeadLen;
-		packet.len = header.caplen - frameHeadLen - frameTailLen;
+		packet.linkLayerLen = frameHeadLen;
+		packet.data = wireData;
+		packet.len = header.caplen - frameTailLen;
 
 		packet.tstamp.tv_sec = header.ts.tv_sec;
 		packet.tstamp.tv_nsec = header.ts.tv_usec * 1000;
@@ -174,8 +180,9 @@ void *receive_thread(void *tData)
 			// Send back a reply telling them to send their packets here.
 			// The filter ensure we only get ARP packets directed for our
 			// other side, so we don't have to perform any checks here
-			arglog(LOG_DEBUG, "got arp\n");
-			send_arp_reply(&packet, hwaddr);
+			arglog(LOG_DEBUG, "Preparing to send arp...\n");
+			send_arp_reply(&packet, devIndex, hwaddr);
+			arglog(LOG_DEBUG, "Send\n");
 			continue;
 		}
 
