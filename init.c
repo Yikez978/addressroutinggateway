@@ -71,8 +71,8 @@ static int arg_init(char *configPath, char *gateName)
 		arglog(LOG_DEBUG, "Director failed to initialized, disabling subsystems\n");
 		
 		uninit_director();
-		//uninit_nat();
-		//uninit_hopper();
+		uninit_nat();
+		uninit_hopper();
 		
 		return -ARG_CONFIG_BAD;
 	}
