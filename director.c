@@ -180,9 +180,7 @@ void *receive_thread(void *tData)
 			// Send back a reply telling them to send their packets here.
 			// The filter ensure we only get ARP packets directed for our
 			// other side, so we don't have to perform any checks here
-			arglog(LOG_DEBUG, "Preparing to send arp...\n");
 			send_arp_reply(&packet, devIndex, hwaddr);
-			arglog(LOG_DEBUG, "Send\n");
 			continue;
 		}
 

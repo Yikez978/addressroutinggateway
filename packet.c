@@ -255,9 +255,6 @@ char send_packet_on(int dev_index, const struct packet_data *packet)
 	static int sock = 0;
 	struct sockaddr_ll addr;
 
-	arglog(LOG_DEBUG, "Sending packet:");
-	printRaw(packet->len, packet->data);
-
 	if(sock <= 0)
 	{
 		sock = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
@@ -330,6 +327,7 @@ char send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_
 {
 	int ret;
 	struct packet_data *reply = NULL;
+	char ip[INET_ADDRSTRLEN];
 
 	if(!packet->arp || ntohs(packet->arp->ea_hdr.ar_op) != ARPOP_REQUEST)
 		return -1;
@@ -360,12 +358,12 @@ char send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_
 	memcpy(reply->arp->arp_tha, packet->arp->arp_sha, sizeof(reply->arp->arp_tha)); // To the sender of the request
 	memcpy(reply->arp->arp_tpa, packet->arp->arp_spa, sizeof(reply->arp->arp_tpa));
 
-	arglog(LOG_DEBUG, "Sending ARP:\n");
-	printRaw(reply->len, reply->data);
-
 	// Whew, that was a lot of work
 	if((ret = send_packet_on(devIndex, reply)) >= 0)
-		arglog(LOG_DEBUG, "Sent ARP reply\n");
+	{
+		inet_ntop(AF_INET, packet->arp->arp_tpa, ip, sizeof(ip));
+		arglog(LOG_DEBUG, "Sent ARP reply for %s\n", ip);
+	}
 	else
 		arglog(LOG_DEBUG, "ARP reply failed to send\n");
 
