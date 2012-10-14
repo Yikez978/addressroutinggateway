@@ -6,7 +6,7 @@
 
 #include "protocol.h"
 
-#define MAX_FILTER_LEN 100
+#define MAX_FILTER_LEN 150
 
 #define IFACE_EXTERNAL 0
 #define IFACE_INTERNAL 1

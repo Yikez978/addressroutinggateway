@@ -19,18 +19,28 @@ char parse_packet(struct packet_data *packet)
 	packet->udp = NULL;
 	packet->tcp = NULL;
 	packet->icmp = NULL;
+	packet->arp = NULL;
 	packet->arg = NULL;
 
-	if(sizeof(ethhdr) == packet->linkLayerLen)
+	if(sizeof(struct ethhdr) == packet->linkLayerLen)
 	{
 		packet->eth = (struct ethhdr*)packet->data;
 		
-		if(ntohs(packet->eth->type) == 0x0800)
+		if(ntohs(packet->eth->h_proto) == ETH_P_IP)
+		{
 			packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
-		else if(ntohs(packet->eth->type) == 0x86DD)
+			packet->unknown_data = packet->data + sizeof(struct ethhdr);
+		}
+		else if(ntohs(packet->eth->h_proto) == ETH_P_ARP)
+		{
+			packet->arp = (struct ether_arp*)(packet->data + packet->linkLayerLen);
+			packet->unknown_data = (void*)((uint8_t*)packet->arp + sizeof(struct ether_arp));
+		}
+		else if(ntohs(packet->eth->h_proto) == ETH_P_IPV6)
+		{
 			arglog(LOG_DEBUG, "IPv6, sad day\n");
-	
-		packet->unknown_data = packet->data + sizeof(struct ethhdr);
+			packet->unknown_data = packet->data + sizeof(struct ethhdr);
+		}
 	}
 	else
 	{
@@ -227,6 +237,55 @@ char send_packet(const struct packet_data *packet)
 		return errno;
 	}
 
+	return 0;
+}
+
+char send_arp_reply(const struct packet_data *packet, const uint8_t *hwaddr)
+{
+	int ret;
+	struct packet_data *reply = NULL;
+
+	if(!packet->arp || ntohs(packet->arp->ea_hdr.ar_op) != ARPOP_REQUEST)
+		return -1;
+
+	reply = create_packet(sizeof(struct ether_arp));
+	if(reply == NULL)
+	{
+		arglog(LOG_DEBUG, "Unable to create ARP reply\n");
+		return -ENOMEM;
+	}
+
+	// Build reply
+	reply->ipv4 = NULL;
+	reply->arp = (struct ether_arp*)reply->data;
+	
+	reply->arp->ea_hdr.ar_hrd = htons(ARPHRD_ETHER); // Ethernet
+	reply->arp->ea_hdr.ar_pro = htons(ETH_P_IP); // IP 
+	reply->arp->ea_hdr.ar_hln = sizeof(packet->arp->arp_sha); // 6-byte MACs 
+	reply->arp->ea_hdr.ar_pln = ADDR_SIZE; // IP address size
+	reply->arp->ea_hdr.ar_op = htons(ARPOP_REPLY); // ARP Reply
+
+	memcpy(reply->arp->arp_sha, hwaddr, sizeof(reply->arp->arp_sha)); // Our MAC
+	memcpy(reply->arp->arp_spa, packet->arp->arp_tpa, sizeof(reply->arp->arp_spa)); // We're whatever IP they asked for
+	memcpy(reply->arp->arp_tha, packet->arp->arp_sha, sizeof(reply->arp->arp_tha)); // To the sender of the request
+	memcpy(reply->arp->arp_tpa, packet->arp->arp_spa, sizeof(reply->arp->arp_tpa));
+
+	arglog(LOG_DEBUG, "Sending ARP:\n");
+	printRaw(reply->len, reply);
+
+	// Whew, that was a lot of work
+	if((ret = send_packet(reply)) >= 0)
+		arglog(LOG_DEBUG, "Sent ARP reply\n");
+	else
+		arglog(LOG_DEBUG, "ARP reply failed to send\n");
+
+	free_packet(reply);
+
+	return ret;
+}
+
+char get_mac_addr(const char *dev, uint8_t *mac)
+{
 	return 0;
 }
 

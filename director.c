@@ -70,8 +70,17 @@ void *receive_thread(void *tData)
 	char baseIP[INET_ADDRSTRLEN];
 	char mask[INET_ADDRSTRLEN];
 
+	uint8_t hwaddr[ETH_ALEN];
+
 	uint8_t *wireData = NULL;
 	struct packet_data packet;
+
+	// Cache hardware address of ARP
+	if(get_mac_addr(data->dev, hwaddr) < 0)
+	{
+		arglog(LOG_DEBUG, "Unable to get hardware address of %s\n", data->dev);
+		return (void*)-1;
+	}
 
 	// Activate pcap
 	pcap_t *pd = pcap_create(data->dev, ebuf);
@@ -94,10 +103,20 @@ void *receive_thread(void *tData)
 	// Filter outbound traffic (we only want to get traffic coming to this card)
 	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
 	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
-	snprintf(filter, sizeof(filter), "not arp and %s net %s mask %s",
-		(data->ifaceSide == IFACE_EXTERNAL ? "dst" : "src"), baseIP, mask);
-	
-	arglog(LOG_DEBUG, "Using filter: %s\n", filter);
+	if(data->ifaceSide == IFACE_EXTERNAL)
+	{
+		snprintf(filter, sizeof(filter), "not arp and dst net %s mask %s", baseIP, mask);
+	}
+	else
+	{
+		// For the internal card, we also want to get ARP packets that are for
+		// addresses outside our network. We will respond to them with our own MAC
+		snprintf(filter, sizeof(filter), "(arp and not dst net %s mask %s) or "
+										 "(not arp and src net %s mask %s)",
+										baseIP, mask, baseIP, mask);
+	}
+
+	arglog(LOG_DEBUG, "Using filter '%s' on %s\n", filter, data->dev);
     
 	if(pcap_compile(pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
 	{
@@ -150,6 +169,16 @@ void *receive_thread(void *tData)
 		if(parse_packet(&packet))
 			continue;
 		
+		if(packet.arp)
+		{
+			// Send back a reply telling them to send their packets here.
+			// The filter ensure we only get ARP packets directed for our
+			// other side, so we don't have to perform any checks here
+			arglog(LOG_DEBUG, "got arp\n");
+			send_arp_reply(&packet, hwaddr);
+			continue;
+		}
+
 		if(!packet.ipv4)
 			continue;
 
