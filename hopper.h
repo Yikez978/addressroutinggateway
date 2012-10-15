@@ -1,6 +1,8 @@
 #ifndef HOPPER_H
 #define HOPPER_H
 
+#include <stdbool.h>
+
 #include <pthread.h>
 
 #include <polarssl/config.h>
