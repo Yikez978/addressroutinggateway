@@ -162,7 +162,7 @@ int uninit_director(void)
 		extData.pd = NULL;
 	
 		pthread_mutex_unlock(&cancelLock);
-		pthread_mutex_destroy(&cancelLock, NULL);
+		pthread_mutex_destroy(&cancelLock);
 	
 		arglog(LOG_DEBUG, "Director finished\n");
 	}
