@@ -11,6 +11,8 @@
 #include <netinet/ether.h>
 #include <linux/if_packet.h>
 
+#include <polarssl/md5.h>
+
 #include "packet.h"
 #include "arg_error.h"
 #include "protocol.h"
@@ -93,6 +95,7 @@ char parse_packet(struct packet_data *packet)
 
 void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 {
+	/*
 	char sIP[INET_ADDRSTRLEN];
 	char dIP[INET_ADDRSTRLEN];
 
@@ -137,6 +140,12 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	default:
 		snprintf(buf, buflen, "IP: s:%s d:%s ipcsum:%02x", sIP, dIP, packet->ipv4->check);
 	}
+	*/
+
+	uint8_t md5sum[16];
+	md5(packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen, md5sum);
+	for(int i = 0; i < sizeof(md5sum); i++)
+		snprintf(buf + i, buflen - i, "%02x", (int)md5sum[i]);
 }
 
 char get_mac_addr(const char *dev, uint8_t *mac)

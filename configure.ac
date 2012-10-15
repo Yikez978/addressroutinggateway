@@ -6,7 +6,7 @@ AM_INIT_AUTOMAKE([-Wall foreign])
 AM_SILENT_RULES([yes]) # Not available for 2.61, the default on OSX Lion
 AC_CONFIG_FILES([Makefile])
 
-AC_PROG_CC
+AC_PROG_CC_C99
 AM_PROG_CC_C_O
 
 # Basic stuff we always need
