@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <arpa/inet.h>
+#include <unistd.h>
+#include <stdbool.h>
 
 #include "director.h"
 #include "settings.h"
@@ -12,25 +14,54 @@
 /***************************
 Receive thread data
 ***************************/
+bool receiveShouldRun = false;
+
+pthread_mutex_t cancelLock;
+bool cancelSent = false;
+
 static struct receive_thread_data intData = {
+	.pd = NULL,
 	.dev = "",
 	.ifaceSide = IFACE_INTERNAL,
 	.handler = direct_outbound,
 };
 static struct receive_thread_data extData = {
+	.pd = NULL,
 	.dev = "",
 	.ifaceSide = IFACE_EXTERNAL,
 	.handler = direct_inbound,
 };
 
+void init_director_locks(void)
+{
+	pthread_mutex_init(&cancelLock, NULL);
+}
+
 int init_director(struct config_data *config)
 {
+	int ret;
+
 	arglog(LOG_DEBUG, "Director init\n");
 
+	// Initialize data and start pcap stuff
 	strncpy(intData.dev, config->intDev, sizeof(intData.dev));
 	strncpy(extData.dev, config->extDev, sizeof(extData.dev));
 
-	// Enter receive loop, which we then pass off to director
+	arglog(LOG_ALERT, "Internal device is %s, external is %s\n", intData.dev, extData.dev);
+
+	if((ret = init_pcap_driver(&intData.pd, intData.dev, 1)) < 0)
+	{
+		arglog(LOG_FATAL, "Unable to initialize the internal device %s\n", intData.dev);
+		return ret;
+	}
+	if((ret = init_pcap_driver(&extData.pd, extData.dev, 0)) < 0)
+	{
+		arglog(LOG_FATAL, "Unable to initialize the internal device %s\n", intData.dev);
+		return ret;
+	}
+
+	// Enter receive loop
+	receiveShouldRun = true;
 	pthread_create(&intData.thread, NULL, receive_thread, (void*)&intData); // TBD check returns
 	pthread_create(&extData.thread, NULL, receive_thread, (void*)&extData);
 	
@@ -38,79 +69,37 @@ int init_director(struct config_data *config)
 	return 0;
 }
 
-int uninit_director(void)
+int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal)
 {
-	arglog(LOG_DEBUG, "Director uninit\n");
-
-	pthread_cancel(intData.thread);
-	pthread_cancel(extData.thread);
-	join_director();
-
-	arglog(LOG_DEBUG, "Director finished\n");
-	return 0;
-}
-
-void join_director(void)
-{
-	pthread_join(extData.thread, NULL);
-	pthread_join(intData.thread, NULL);
-}
-
-void *receive_thread(void *tData)
-{
-	struct receive_thread_data *data = (struct receive_thread_data*)tData;
-
 	char ebuf[PCAP_ERRBUF_SIZE];
-	struct pcap_pkthdr header;
-	int frameHeadLen = 0;
-	int frameTailLen = 0;
 
 	struct bpf_program fp;
 	char filter[MAX_FILTER_LEN];
 	char baseIP[INET_ADDRSTRLEN];
 	char mask[INET_ADDRSTRLEN];
 
-	int devIndex = 0;
-	uint8_t hwaddr[ETH_ALEN];
-
-	uint8_t *wireData = NULL;
-	struct packet_data packet;
-
-	// Cache hardware address for ARP
-	if(get_mac_addr(data->dev, hwaddr) < 0)
-	{
-		arglog(LOG_DEBUG, "Unable to get hardware address of %s\n", data->dev);
-		return (void*)-1;
-	}
-
-	if((devIndex = get_dev_index(data->dev)) < 0)
-	{
-		arglog(LOG_DEBUG, "Unable to get index of device %s\n", data->dev);
-		return (void*)-1;
-	}
-
 	// Activate pcap
-	pcap_t *pd = pcap_create(data->dev, ebuf);
+	*pd = pcap_create(dev, ebuf);
 	if(pd == NULL)
 	{
-		arglog(LOG_DEBUG, "Unable to initialize create pcap driver on %s: %s\n", data->dev, ebuf);
-		return (void*)-1;
+		arglog(LOG_DEBUG, "Unable to initialize create pcap driver on %s: %s\n", dev, ebuf);
+		return -ARG_CONFIG_BAD;
 	}
 
-	pcap_set_timeout(pd, 250);
-	pcap_set_snaplen(pd, MAX_PACKET_SIZE);
-	pcap_set_promisc(pd, 1);
+	pcap_set_timeout(*pd, 250);
+	pcap_set_snaplen(*pd, MAX_PACKET_SIZE);
+	pcap_set_promisc(*pd, 1);
 
-	if(pcap_activate(pd))
+	if(pcap_activate(*pd))
 	{
-		arglog(LOG_DEBUG, "Unable to activate pcap on %s: %s\n", data->dev, pcap_geterr(pd));
-		return (void*)-2;
+		arglog(LOG_DEBUG, "Unable to activate pcap on %s: %s\n", dev, pcap_geterr(*pd));
+		return -ARG_CONFIG_BAD;
 	}
 
 	// Filter outbound traffic (we only want to get traffic coming to this card)
 	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
 	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
-	if(data->ifaceSide == IFACE_EXTERNAL)
+	if(!is_internal)
 	{
 		// Get ARP traffic about IPs inside our network that doesn't originate from us
 		// and non-ARP traffic that is intended for inside us
@@ -127,27 +116,103 @@ void *receive_thread(void *tData)
 										baseIP, mask, baseIP, mask);
 	}
 
-	arglog(LOG_DEBUG, "Using filter '%s' on %s\n", filter, data->dev);
+	arglog(LOG_DEBUG, "Using filter '%s' on %s\n", filter, dev);
     
-	if(pcap_compile(pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
+	if(pcap_compile(*pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
 	{
-		arglog(LOG_DEBUG, "Unable to compile filter: %s\n", pcap_geterr(pd));
-		pcap_close(pd);
-		return (void*)-3;
+		arglog(LOG_DEBUG, "Unable to compile filter: %s\n", pcap_geterr(*pd));
+		pcap_close(*pd);
+		return -ARG_INTERNAL_ERROR;
 	}
 
-    if(pcap_setfilter(pd, &fp) == -1)
+    if(pcap_setfilter(*pd, &fp) == -1)
 	{
-		arglog(LOG_DEBUG, "Unable to set filter: %s\n", pcap_geterr(pd));
+		arglog(LOG_DEBUG, "Unable to set filter: %s\n", pcap_geterr(*pd));
 		pcap_freecode(&fp);
-		pcap_close(pd);
-		return (void*)-4;
+		pcap_close(*pd);
+		return -ARG_CONFIG_BAD;
 	}
 	
 	pcap_freecode(&fp);
 
+	return 0;
+}
+
+int uninit_director(void)
+{
+	if(pthread_mutex_trylock(&cancelLock) == EBUSY)
+		return 0;
+	
+	if(!cancelSent)
+	{
+		cancelSent = true;
+
+		arglog(LOG_DEBUG, "Director uninit\n");
+
+		// Stop threads
+		pthread_cancel(intData.thread);
+		pthread_cancel(extData.thread);
+		receiveShouldRun = false;
+		join_director();
+
+		// Kill pcap
+		pcap_close(intData.pd);
+		pcap_close(extData.pd);
+		intData.pd = NULL;
+		extData.pd = NULL;
+	
+		pthread_mutex_unlock(&cancelLock);
+		pthread_mutex_destroy(&cancelLock, NULL);
+	
+		arglog(LOG_DEBUG, "Director finished\n");
+	}
+
+	return 0;
+}
+
+void join_director(void)
+{
+	if(extData.thread != 0)
+	{
+		pthread_join(extData.thread, NULL);
+		extData.thread = 0;
+	}
+	if(intData.thread != 0)
+	{
+		pthread_join(intData.thread, NULL);
+		intData.thread = 0;
+	}
+}
+
+void *receive_thread(void *tData)
+{
+	struct receive_thread_data *data = (struct receive_thread_data*)tData;
+
+	struct pcap_pkthdr header;
+	int frameHeadLen = 0;
+	int frameTailLen = 0;
+
+	int devIndex = 0;
+	uint8_t hwaddr[ETH_ALEN];
+
+	uint8_t *wireData = NULL;
+	struct packet_data packet;
+
+	// Cache hardware address for ARP
+	if(get_mac_addr(data->dev, hwaddr) < 0)
+	{
+		arglog(LOG_DEBUG, "Unable to get hardware address of %s\n", data->dev);
+		return (void*)-ARG_CONFIG_BAD;
+	}
+
+	if((devIndex = get_dev_index(data->dev)) < 0)
+	{
+		arglog(LOG_DEBUG, "Unable to get index of device %s\n", data->dev);
+		return (void*)-ARG_CONFIG_BAD;
+	}
+
 	// Cache how far to jump in packets
-	if(pcap_datalink(pd) == DLT_EN10MB)
+	if(pcap_datalink(data->pd) == DLT_EN10MB)
 	{
 		frameHeadLen = LINK_LAYER_SIZE;
 		frameTailLen = 0;
@@ -157,15 +222,15 @@ void *receive_thread(void *tData)
 		frameHeadLen = 0;
 		frameTailLen = 0;
 		arglog(LOG_DEBUG, "Unable to determine data link type\n");
-		return (void*)-3;
+		return (void*)-ARG_CONFIG_BAD;
 	}
 
 	// Receive, parse, and pass on to handler
 	arglog(LOG_DEBUG, "Ready to receive packets on %s\n", data->dev);
 
-	for(;;)
+	while(receiveShouldRun)
 	{
-		wireData = (uint8_t*)pcap_next(pd, &header);
+		wireData = (uint8_t*)pcap_next(data->pd, &header);
 		if(wireData == NULL)
 			continue;
 
@@ -194,9 +259,6 @@ void *receive_thread(void *tData)
 		if(data->handler != NULL)
 			(*data->handler)(&packet);
 	}
-
-	pcap_close(pd);
-	pd = NULL;
 
 	arglog(LOG_DEBUG, "Done receiving packets on %s\n", data->dev);
 

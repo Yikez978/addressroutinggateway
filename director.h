@@ -15,13 +15,17 @@ struct packet_data;
 
 typedef struct receive_thread_data
 {
+	pcap_t *pd;
 	char dev[10];
 	void (*handler)(const struct packet_data*);
 	char ifaceSide;
 	pthread_t thread;
 } receive_thread_data;
 
+void init_director_locks(void);
 int init_director(struct config_data *config);
+int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal);
+
 int uninit_director(void);
 
 void join_director(void);

@@ -16,7 +16,6 @@
 
 void sig_handler(int signum)
 {
-	printf("--- Received interrupt ---\n");
 	uninit_director();
 }
 #endif
@@ -32,7 +31,8 @@ static int arg_init(char *configPath, char *gateName)
 	init_nat_locks();
 	init_hopper_locks();
 	init_protocol_locks();
-	
+	init_director_locks();
+
 	// Read in main config
 	strncpy(conf.file, configPath, sizeof(conf.file));
 	if(read_config(&conf))
