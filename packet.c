@@ -17,7 +17,7 @@
 #include "arg_error.h"
 #include "protocol.h"
 
-char parse_packet(struct packet_data *packet)
+int parse_packet(struct packet_data *packet)
 {
 	void *transStart = NULL;
 	
@@ -148,7 +148,7 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 		snprintf(buf + i, buflen - i, "%02x", (int)md5sum[i]);
 }
 
-char get_mac_addr(const char *dev, uint8_t *mac)
+int get_mac_addr(const char *dev, uint8_t *mac)
 {
 	int ret;
 	int sockfd;
@@ -259,7 +259,7 @@ void free_packet(struct packet_data *packet)
 	}
 }
 
-char send_packet_on(int dev_index, const struct packet_data *packet)
+int send_packet_on(int dev_index, const struct packet_data *packet)
 {
 	static int sock = 0;
 	struct sockaddr_ll addr;
@@ -294,7 +294,7 @@ char send_packet_on(int dev_index, const struct packet_data *packet)
 
 }
 
-char send_packet(const struct packet_data *packet)
+int send_packet(const struct packet_data *packet)
 {
 	static int sock = 0;
 	struct sockaddr_in dest_addr;
@@ -332,7 +332,7 @@ char send_packet(const struct packet_data *packet)
 	return 0;
 }
 
-char send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t *hwaddr)
+int send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t *hwaddr)
 {
 	int ret;
 	struct packet_data *reply = NULL;

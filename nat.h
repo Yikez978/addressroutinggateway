@@ -47,19 +47,19 @@ typedef struct nat_entry_bucket {
 
 // Initializes anything needed by NAT
 void init_nat_locks(void);
-char init_nat(void);
+int init_nat(void);
 void uninit_nat(void);
 
 // Re-writes the given packet based on data in
 // the NAT table and returns true. If it is unable
 // to (i.e., there is no coresponding entry), false is returned.
-char do_nat_inbound_rewrite(const struct packet_data *packet);
+int do_nat_inbound_rewrite(const struct packet_data *packet);
 
 // Re-writes the given packet based on data in
 // the NAT table and returns true. If needed, a new
 // entry is created in the table based on the current IP
 // If it is unable to rewrite, false is returned.
-char do_nat_outbound_rewrite(const struct packet_data *packet);
+int do_nat_outbound_rewrite(const struct packet_data *packet);
 
 // Displays all the data in the NAT table
 void print_nat_table(void);

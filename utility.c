@@ -193,7 +193,7 @@ void mask_array(int len, const void *orig, const void *mask, void *result)
 		*rCast = *oCast & *mCast;
 }
 
-char mask_array_cmp(int len, const void *mask, const void *left, const void *right)
+int mask_array_cmp(int len, const void *mask, const void *left, const void *right)
 {
 	int i = 0;
 	uint8_t *mCast = (uint8_t*)mask;

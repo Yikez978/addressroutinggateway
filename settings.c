@@ -10,7 +10,7 @@
 #include "utility.h"
 #include "hopper.h"
 
-char read_config(struct config_data *conf)
+int read_config(struct config_data *conf)
 {
 	char line[MAX_CONF_LINE];
 	FILE *confFile = NULL;
@@ -151,7 +151,7 @@ void release_config(struct config_data *conf)
 	}
 }
 
-char read_public_key(const struct config_data *conf, struct arg_network_info *gate)
+int read_public_key(const struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
 	char line[MAX_CONF_LINE] = "";
@@ -199,7 +199,7 @@ char read_public_key(const struct config_data *conf, struct arg_network_info *ga
 	return 0;
 }
 
-char read_private_key(const struct config_data *conf, struct arg_network_info *gate)
+int read_private_key(const struct config_data *conf, struct arg_network_info *gate)
 {
 	int ret;
 	FILE *privKeyFile = NULL;
@@ -240,7 +240,7 @@ char read_private_key(const struct config_data *conf, struct arg_network_info *g
 	return 0;
 }
 
-char get_next_line(FILE *f, char *line, int max)
+int get_next_line(FILE *f, char *line, int max)
 {
 	int len = 0;
 	for(;;)

@@ -52,7 +52,7 @@ void mask_array(int len, const void *orig, const void *mask, void *result);
 
 // Compares two arrays (left and right) based on the mask given
 // If equal, 0 is returned. Otherwise, non-0 (undefined beyond that)
-char mask_array_cmp(int len, const void *mask, const void *left, const void *right);
+int mask_array_cmp(int len, const void *mask, const void *left, const void *right);
 
 #endif
 

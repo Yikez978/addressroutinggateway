@@ -23,7 +23,7 @@ void init_nat_locks(void)
 	pthread_mutex_init(&natTableLock, NULL);
 }
 
-char init_nat(void)
+int init_nat(void)
 {
 	arglog(LOG_DEBUG, "NAT init\n");
 
@@ -52,7 +52,7 @@ void uninit_nat(void)
 	arglog(LOG_DEBUG, "NAT finished\n");
 }
 
-char do_nat_inbound_rewrite(const struct packet_data *packet)
+int do_nat_inbound_rewrite(const struct packet_data *packet)
 {
 	int ret;
 
@@ -125,7 +125,7 @@ char do_nat_inbound_rewrite(const struct packet_data *packet)
 	return ret;
 }
 
-char do_nat_outbound_rewrite(const struct packet_data *packet)
+int do_nat_outbound_rewrite(const struct packet_data *packet)
 {
 	int ret;
 

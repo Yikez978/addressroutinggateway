@@ -17,25 +17,25 @@ void init_protocol_locks(void)
 
 }
 
-char start_auth(struct arg_network_info *local, struct arg_network_info *remote)
+int start_auth(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	remote->proto.state |= ARG_DO_AUTH;
 	return do_next_action(local, remote);
 }
 
-char start_time_sync(struct arg_network_info *local, struct arg_network_info *remote)
+int start_time_sync(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME;
 	return do_next_action(local, remote);
 }
 
-char start_connection(struct arg_network_info *local, struct arg_network_info *remote)
+int start_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME | ARG_DO_CONN | ARG_DO_TRUST;
 	return do_next_action(local, remote);
 }
 
-char do_next_action(struct arg_network_info *local, struct arg_network_info *remote)
+int do_next_action(struct arg_network_info *local, struct arg_network_info *remote)
 {
 	char state = remote->proto.state;
 	if(state & ARG_DO_CONN)
@@ -48,7 +48,7 @@ char do_next_action(struct arg_network_info *local, struct arg_network_info *rem
 		return 0;
 }
 
-char send_arg_ping(struct arg_network_info *local,
+int send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote)
 {
 	int ret;
@@ -78,7 +78,7 @@ char send_arg_ping(struct arg_network_info *local,
 	return ret;
 }
 
-char process_arg_ping(struct arg_network_info *local,
+int process_arg_ping(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
@@ -106,7 +106,7 @@ char process_arg_ping(struct arg_network_info *local,
 	return ret;
 }
 
-char process_arg_pong(struct arg_network_info *local,
+int process_arg_pong(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
@@ -171,7 +171,7 @@ char process_arg_pong(struct arg_network_info *local,
 }
 
 // Connect
-char send_arg_conn_data(struct arg_network_info *local,
+int send_arg_conn_data(struct arg_network_info *local,
 							struct arg_network_info *remote,
 							char isResponse)
 {
@@ -211,7 +211,7 @@ char send_arg_conn_data(struct arg_network_info *local,
 	return 0;
 }
 
-char process_arg_conn_data_req(struct arg_network_info *local,
+int process_arg_conn_data_req(struct arg_network_info *local,
 							   struct arg_network_info *remote,
 							   const struct packet_data *packet)
 {
@@ -222,7 +222,7 @@ char process_arg_conn_data_req(struct arg_network_info *local,
 	return send_arg_conn_data(local, remote, 1);
 }
 
-char process_arg_conn_data_resp(struct arg_network_info *local,
+int process_arg_conn_data_resp(struct arg_network_info *local,
 								struct arg_network_info *remote,
 								const struct packet_data *packet)
 {
@@ -282,7 +282,7 @@ char process_arg_conn_data_resp(struct arg_network_info *local,
 }
 
 // Trust packets. Allow gateways we know to tell us about ones they know
-char send_all_trust(struct arg_network_info *local,
+int send_all_trust(struct arg_network_info *local,
 					struct arg_network_info *remote)
 {
 	struct arg_network_info *curr = NULL;
@@ -311,7 +311,7 @@ char send_all_trust(struct arg_network_info *local,
 	return ret;
 }
 
-char send_arg_trust(struct arg_network_info *local,
+int send_arg_trust(struct arg_network_info *local,
 					struct arg_network_info *remote,
 					struct arg_network_info *gate)
 {
@@ -359,7 +359,7 @@ char send_arg_trust(struct arg_network_info *local,
 	return 0;
 }
 
-char process_arg_trust(struct arg_network_info *local,
+int process_arg_trust(struct arg_network_info *local,
 						struct arg_network_info *remote,
 						const struct packet_data *packet)
 {
@@ -446,7 +446,7 @@ char process_arg_trust(struct arg_network_info *local,
 }
 
 // "Normal" packets between gateways
-char send_arg_wrapped(struct arg_network_info *local,
+int send_arg_wrapped(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet)
 {
@@ -485,7 +485,7 @@ char send_arg_wrapped(struct arg_network_info *local,
 	return ret;
 }
 
-char process_arg_wrapped(struct arg_network_info *local,
+int process_arg_wrapped(struct arg_network_info *local,
 						 struct arg_network_info *remote,
 						 const struct packet_data *packet)
 {
@@ -533,7 +533,7 @@ char process_arg_wrapped(struct arg_network_info *local,
 	return ret;
 }
 
-char send_arg_packet(struct arg_network_info *local,
+int send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
 					 int type, const struct argmsg *msg)
 {
@@ -553,7 +553,7 @@ char send_arg_packet(struct arg_network_info *local,
 	return ret;
 }
 
-char create_arg_packet(struct arg_network_info *local,
+int create_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
 					 int type, const struct argmsg *msg,
 					 struct packet_data **packetOut)
@@ -688,7 +688,7 @@ char create_arg_packet(struct arg_network_info *local,
 	return 0;
 }
 
-char process_arg_packet(struct arg_network_info *local,
+int process_arg_packet(struct arg_network_info *local,
 						struct arg_network_info *remote,
 						const struct packet_data *packet,
 						struct argmsg **msg)
@@ -881,17 +881,17 @@ void free_arg_msg(struct argmsg *msg)
 	}
 }
 
-char get_msg_type(const struct arghdr *msg)
+int get_msg_type(const struct arghdr *msg)
 {
 	return msg->type;
 }
 
-char is_wrapped_msg(const struct arghdr *msg)
+bool is_wrapped_msg(const struct arghdr *msg)
 {
 	return get_msg_type(msg) == ARG_WRAPPED_MSG;
 }
 
-char is_admin_msg(const struct arghdr *msg)
+bool is_admin_msg(const struct arghdr *msg)
 {
 	return get_msg_type(msg) != ARG_WRAPPED_MSG;
 }

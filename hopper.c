@@ -32,7 +32,7 @@ void init_hopper_locks(void)
 	pthread_mutex_init(&networksLock, NULL);
 }
 
-char init_hopper(const struct config_data *config)
+int init_hopper(const struct config_data *config)
 {
 	int ret;
 
@@ -112,7 +112,7 @@ void uninit_hopper(void)
 	arglog(LOG_DEBUG, "Hopper finished\n");
 }
 
-char get_hopper_conf(const struct config_data *config)
+int get_hopper_conf(const struct config_data *config)
 {
 	struct gate_list *currGateName = NULL;
 
@@ -350,12 +350,12 @@ uint8_t *current_ip(void)
 	return ipCopy;
 }
 
-char is_valid_local_ip(const uint8_t *ip)
+bool is_valid_local_ip(const uint8_t *ip)
 {
 	return is_valid_ip(gateInfo, ip);
 }
 
-char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
+bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 {
 	char ret = 0;
 
@@ -386,7 +386,7 @@ const uint8_t *gate_mask(void)
 	return gateInfo->mask;
 }
 
-char process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate)
+int process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate)
 {
 	switch(get_msg_type(packet->arg))
 	{
@@ -466,7 +466,7 @@ void update_ips(struct arg_network_info *gate)
 	}
 }
 
-char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate)
+int do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate)
 {
 	// Ignore requests to ourselves
 	if(destGate == gateInfo)
@@ -475,7 +475,7 @@ char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *dest
 	return send_arg_wrapped(gateInfo, destGate, packet);
 }
 
-char do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate)
+int do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate)
 {
 	return process_arg_wrapped(gateInfo, srcGate, packet);
 }
@@ -496,7 +496,7 @@ struct arg_network_info *get_arg_network(void const *ip)
 	return NULL;
 }
 
-char is_arg_ip(void const *ip)
+bool is_arg_ip(void const *ip)
 {
 	return get_arg_network(ip) != NULL;
 }

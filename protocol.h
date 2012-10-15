@@ -2,6 +2,7 @@
 #define ARG_PROTOCOL_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "utility.h"
 #include "crypto.h"
@@ -152,72 +153,72 @@ typedef struct proto_data {
 void init_protocol_locks(void);
 
 // Protocol flow control
-char start_auth(struct arg_network_info *local, struct arg_network_info *remote);
-char start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
-char start_connection(struct arg_network_info *local, struct arg_network_info *remote);
+int start_auth(struct arg_network_info *local, struct arg_network_info *remote);
+int start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
+int start_connection(struct arg_network_info *local, struct arg_network_info *remote);
 
-char do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
+int do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
 
 // Lag detection
-char send_arg_ping(struct arg_network_info *local,
+int send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote);
-char process_arg_ping(struct arg_network_info *local,
+int process_arg_ping(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet);
-char process_arg_pong(struct arg_network_info *local,
+int process_arg_pong(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet);
 
 // Connect
-char send_arg_conn_data(struct arg_network_info *local,
+int send_arg_conn_data(struct arg_network_info *local,
 					   struct arg_network_info *remote,
 					   char isResponse);
-char process_arg_conn_data_resp(struct arg_network_info *local,
+int process_arg_conn_data_resp(struct arg_network_info *local,
 								struct arg_network_info *remote,
 								const struct packet_data *packet);
-char process_arg_conn_data_req(struct arg_network_info *local,
+int process_arg_conn_data_req(struct arg_network_info *local,
 							   struct arg_network_info *remote,
 							   const struct packet_data *packet);
 
 // Trust
-char send_all_trust(struct arg_network_info *local,
+int send_all_trust(struct arg_network_info *local,
 					struct arg_network_info *remote);
-char send_arg_trust(struct arg_network_info *local,
+int send_arg_trust(struct arg_network_info *local,
 							struct arg_network_info *remote,
 							struct arg_network_info *gate);
-char process_arg_trust(struct arg_network_info *local,
+int process_arg_trust(struct arg_network_info *local,
 							struct arg_network_info *remote,
 							const struct packet_data *packet);
 
 // Encapsulation
-char send_arg_wrapped(struct arg_network_info *local,
+int send_arg_wrapped(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet);
-char process_arg_wrapped(struct arg_network_info *local,
+int process_arg_wrapped(struct arg_network_info *local,
 						 struct arg_network_info *remote,
 						 const struct packet_data *packet);
 
 // Creates the ARG header for the given data and sends it
-char send_arg_packet(struct arg_network_info *local,
+int send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
 					 int type, const struct argmsg *msg);
-char create_arg_packet(struct arg_network_info *local,
+int create_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
 					 int type, const struct argmsg *msg,
 					 struct packet_data **packetOut);
 
 // Validates the packet data (from ARG header on) and decrypts it.
 // New space is allocated and placed into out, which must be freed via free_arg_packet()
-char process_arg_packet(struct arg_network_info *local,
+int process_arg_packet(struct arg_network_info *local,
 						struct arg_network_info *remote,
 						const struct packet_data *packet,
 						struct argmsg **msg);
 struct argmsg *create_arg_msg(uint16_t len);
 void free_arg_msg(struct argmsg *msg);
 
-char get_msg_type(const struct arghdr *msg);
-char is_wrapped_msg(const struct arghdr *msg);
-char is_admin_msg(const struct arghdr *msg);
+int get_msg_type(const struct arghdr *msg);
+bool is_wrapped_msg(const struct arghdr *msg);
+bool is_admin_msg(const struct arghdr *msg);
 
 #endif
 

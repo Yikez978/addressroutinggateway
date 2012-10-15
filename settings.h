@@ -79,16 +79,16 @@ typedef struct config_data {
 	long hopRate;
 } config_data;
 
-char read_config(struct config_data *conf);
+int read_config(struct config_data *conf);
 void release_config(struct config_data *conf);
 
-char read_public_key(const struct config_data *conf, struct arg_network_info *gate);
-char read_private_key(const struct config_data *conf, struct arg_network_info *gate);
+int read_public_key(const struct config_data *conf, struct arg_network_info *gate);
+int read_private_key(const struct config_data *conf, struct arg_network_info *gate);
 
 // Reads until finding a not-blank line (COMPLETELY blank, not whitespace skipping)
 // Line has \n removed if needed
 // Returns 0 if line is found, 1 if not (eof, probably)
-char get_next_line(FILE *f, char *line, int max);
+int get_next_line(FILE *f, char *line, int max);
 
 #endif
 

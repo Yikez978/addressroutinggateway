@@ -64,12 +64,12 @@ typedef struct arg_network_info {
 
 // Take care of resources
 void init_hopper_locks(void);
-char init_hopper(const struct config_data *config);
+int init_hopper(const struct config_data *config);
 void init_hopper_finish(void);
 void uninit_hopper(void);
 
 // Retreives and sets known ARG network keys/local gateway keys, etc
-char get_hopper_conf(const struct config_data *config);
+int get_hopper_conf(const struct config_data *config);
 
 // Does the initial connect to all of the gateways we know of
 void *connect_thread(void *data);
@@ -88,15 +88,15 @@ void add_network(void);
 uint8_t *current_ip(void);
 
 // Returns true if the given IP is valid, false otherwise
-char is_valid_local_ip(const uint8_t *ip);
-char is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
+bool is_valid_local_ip(const uint8_t *ip);
+bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
 
 // Returns configuration information
 const uint8_t *gate_base_ip(void);
 const uint8_t *gate_mask(void);
 
 // Processes incoming admin messages by handing them off to the correct protocol handler
-char process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate);
+int process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate);
 
 // Generates the IP address for a given gate, based on the mask, hop key, and time
 void update_ips(struct arg_network_info *gate);
@@ -105,18 +105,18 @@ void update_ips(struct arg_network_info *gate);
 // and signs it.
 // Returns false if the packet is not destined for a known
 // ARG network or another error occurs during processing
-char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate);
+int do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate);
 
 // Unwraps the given packet.
 // Returns false if the signature fails to match or another error
 // occurs during processing
-char do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate);
+int do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate);
 
 // Returns pointer to the ARG network the give IP belongs to
 struct arg_network_info *get_arg_network(void const *ip);
 
 // Returns true if the given IP is an ARG network
-char is_arg_ip(void const *ip);
+bool is_arg_ip(void const *ip);
 
 #endif
 

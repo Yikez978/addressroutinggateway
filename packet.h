@@ -52,7 +52,7 @@ typedef struct packet_data
 	uint8_t *data;
 } packet_data;
 
-char parse_packet(struct packet_data *packet);
+int parse_packet(struct packet_data *packet);
 
 // Creates a string to "uniquely" (hopefully) ID a packet
 void create_packet_id(const struct packet_data *packet, char *buf, int buflen);
@@ -61,12 +61,12 @@ struct packet_data *create_packet(int len);
 struct packet_data *copy_packet(const struct packet_data *packet);
 void free_packet(struct packet_data *packet);
 
-char send_packet(const struct packet_data *packet);
-char send_packet_on(int dev_index, const struct packet_data *packet);
+int send_packet(const struct packet_data *packet);
+int send_packet_on(int dev_index, const struct packet_data *packet);
 
-char send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t *hwaddr);
+int send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t *hwaddr);
 
-char get_mac_addr(const char *dev, uint8_t *mac);
+int get_mac_addr(const char *dev, uint8_t *mac);
 int get_dev_index(char *dev);
 
 uint16_t get_source_port(const struct packet_data *packet);

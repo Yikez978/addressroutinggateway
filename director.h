@@ -21,8 +21,8 @@ typedef struct receive_thread_data
 	pthread_t thread;
 } receive_thread_data;
 
-char init_director(struct config_data *config);
-char uninit_director(void);
+int init_director(struct config_data *config);
+int uninit_director(void);
 
 void join_director(void);
 

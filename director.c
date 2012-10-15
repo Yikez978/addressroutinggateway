@@ -23,7 +23,7 @@ static struct receive_thread_data extData = {
 	.handler = direct_inbound,
 };
 
-char init_director(struct config_data *config)
+int init_director(struct config_data *config)
 {
 	arglog(LOG_DEBUG, "Director init\n");
 
@@ -38,7 +38,7 @@ char init_director(struct config_data *config)
 	return 0;
 }
 
-char uninit_director(void)
+int uninit_director(void)
 {
 	arglog(LOG_DEBUG, "Director uninit\n");
 
