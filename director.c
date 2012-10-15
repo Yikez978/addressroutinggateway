@@ -112,7 +112,11 @@ void *receive_thread(void *tData)
 	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));
 	if(data->ifaceSide == IFACE_EXTERNAL)
 	{
-		snprintf(filter, sizeof(filter), "not arp and dst net %s mask %s", baseIP, mask);
+		// Get ARP traffic about IPs inside our network that doesn't originate from us
+		// and non-ARP traffic that is intended for inside us
+		snprintf(filter, sizeof(filter), "(arp and not src net %s mask %s and dst net %s mask %s) or "
+										 "(not arp and dst net %s mask %s)",
+										 baseIP, mask, baseIP, mask, baseIP, mask);
 	}
 	else
 	{
