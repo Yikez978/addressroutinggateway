@@ -239,7 +239,7 @@ void direct_inbound(const struct packet_data *packet)
 			}
 
 			// Unwrap and drop into network, assuming everything checks out
-			if((ret = do_arg_unwrap(packet, gate) < 0))
+			if((ret = do_arg_unwrap(packet, gate)) < 0)
 			{
 				arg_strerror_r(ret, error, sizeof(error));
 				arglog_result(packet, NULL, 0, 0, "Unwrap", error);
@@ -269,7 +269,7 @@ void direct_outbound(const struct packet_data *packet)
 	if(gate != NULL)
 	{
 		// Destined for an ARG network
-		if((ret = do_arg_wrap(packet, gate) < 0))
+		if((ret = do_arg_wrap(packet, gate)) < 0)
 		{
 			arg_strerror_r(ret, error, sizeof(error));
 			arglog_result(packet, NULL, 0, 0, "Wrap", error);

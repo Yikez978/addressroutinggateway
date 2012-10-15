@@ -465,8 +465,8 @@ char send_arg_wrapped(struct arg_network_info *local,
 	}
 	
 	// Create message containing packet data
-	msg.len = packet->len;
-	msg.data = packet->data;
+	msg.len = packet->len - packet->linkLayerLen;
+	msg.data = packet->data + packet->linkLayerLen;
 	
 	if((ret = create_arg_packet(local, remote, ARG_WRAPPED_MSG, &msg, &newPacket)) < 0)
 	{
@@ -476,8 +476,8 @@ char send_arg_wrapped(struct arg_network_info *local,
 	
 	if((ret = send_packet(newPacket)) >= 0)
 		arglog_result(packet, newPacket, 1, 1, "Wrap", "wrapped");
-	else
-		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");
+	/*else
+		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");*/
 
 	free_packet(newPacket);
 	pthread_mutex_unlock(&remote->lock);
@@ -522,8 +522,8 @@ char process_arg_wrapped(struct arg_network_info *local,
 	parse_packet(newPacket);
 	if((ret = send_packet(newPacket)) >= 0)
 		arglog_result(packet, newPacket, 1, 1, "Unwrap", "unwrapped");
-	else
-		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");
+	/*else
+		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");*/
 
 	pthread_mutex_unlock(&remote->lock);
 

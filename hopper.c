@@ -468,6 +468,10 @@ void update_ips(struct arg_network_info *gate)
 
 char do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate)
 {
+	// Ignore requests to ourselves
+	if(destGate == gateInfo)
+		return 0;
+
 	return send_arg_wrapped(gateInfo, destGate, packet);
 }
 

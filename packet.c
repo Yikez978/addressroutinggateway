@@ -277,7 +277,7 @@ char send_packet_on(int dev_index, const struct packet_data *packet)
 
 	if(sendto(sock, (uint8_t*)packet->data, packet->len, 0, (struct sockaddr*)&addr, sizeof(addr)) < 0)
 	{
-		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
+		arglog(LOG_DEBUG, "Send failed on dev %i: %i\n", dev_index, errno);
 		return -errno;
 	}
 
@@ -316,7 +316,7 @@ char send_packet(const struct packet_data *packet)
 	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, len,
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
-		arglog(LOG_DEBUG, "Send failed: %i\n", errno);
+		arglog(LOG_DEBUG, "Normal send failed: %i\n", errno);
 		return -errno;
 	}
 

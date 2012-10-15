@@ -6,7 +6,7 @@ void arg_strerror_r(int errnum, char *buf, int buflen)
 {
 	if(-errnum < ARG_MIN_ERROR)
 	{
-		strerror_r(errnum, buf, buflen);
+		strerror_r(-errnum, buf, buflen);
 	}
 	else
 	{
