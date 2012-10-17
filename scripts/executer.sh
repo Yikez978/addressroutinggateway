@@ -23,36 +23,36 @@ function start-tests {
 		return
 	fi
 
-	if [[ "$#" != 4 ]]
+	if [[ "$#" != 3 ]]
 	then
 		echo Not enough arguments given
-		help $1 run-tests
+		help run-tests
 		return
 	fi
 
-	stop-tests $1
-	clean-pushed $1
-	clean-pulled $1
+	stop-tests
+	clean-pushed
+	clean-pulled
 
-	echo Setting latency to $3
-	set-latency $1 $3
+	echo Setting latency to $2
+	set-latency $2
 	
 	echo Starting collection
-	start-collection $1
+	start-collection
 
-	echo Beginning experiment with hop rate $4
-	start-arg $1 $4
-	start-generators $1
+	echo Beginning experiment with hop rate $3
+	start-arg $3
+	start-generators
 
-	echo Running for $2 seconds
-	sleep $2
+	echo Running for $1 seconds
+	sleep $1
 
 	echo Ending test
-	stop-tests $1
+	stop-tests
 
-	d="`date +%Y-%m-%d-%H:%M:%S`-l$3-hr$4ms"
+	d="`date +%Y-%m-%d-%H:%M:%S`-l$2-hr$3ms"
 	echo Pulling logs into $RESULTSDIR/$d
-	retrieve-logs $1 "$d"
+	retrieve-logs "$d"
 
 	mkdir -p "$d"
 
@@ -64,9 +64,9 @@ function start-tests {
 # Ensures all components of a test are dead (gateways, collectors, etc)
 # Usage: stop-tests
 function stop-tests {
-	stop-generators $1
-	stop-collection $1
-	stop-arg $1
+	stop-generators
+	stop-collection
+	stop-arg
 }
 
 # Starts traffic generators on the network
@@ -92,7 +92,7 @@ function start-collection {
 		# Stop any other currently running dumps
 		stop-collection
 
-		if [[ "$1" == "gate" ]]
+		if [[ "$TYPE" == "gate" ]]
 		then
 			# Have two interfaces to capture on for gates
 			file1="`hostname`-inner-`date +%Y-%m-%d-%H:%M:%S`.pcap"
@@ -136,16 +136,27 @@ function retrieve-logs {
 		return
 	fi
 
-	clean-pulled $1
+	clean-pulled
 	pull-from $ALL - *.pcap
 	
 	mkdir -p "$RESULTSDIR"
-	mv "$PULLDIR" "$RESULTSDIR/$2"
+	mv "$PULLDIR" "$RESULTSDIR/$1"
 	
 	return
 }
 
-# Building
+# Process a given run's results
+# Usage: process-run <results dir>
+function process-run {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	./scripts/process_run.py 
+}
+
 # Run-make does a full build on _all_ gates and saves the binary to ~
 # Intended for setting up tests, ssh into the gateway should be used for development
 # Usage: run-make
@@ -156,27 +167,26 @@ function run-make {
 		run-on gateA - run-make
 		pull-from gateA - arg
 		mv "$PULLDIR/arg" .
-		clean-pulled $1
+		clean-pulled 
 	else
-		stop-arg $1
+		stop-arg 
 		./autogen.sh && make clean && make || return 1
 	fi
 	return
 }
 
-# Gate control
 # Builds ARG from scratch and runs it on all gateways. Hops
 # every <hop rate> milliseconds.
 # Usage: start-arg <hop rate>
 function start-arg {
 	if [[ $IS_LOCAL ]]
 	then
-		stop-arg $1
+		stop-arg 
 
 		if [ ! -f arg ]
 		then
 			echo Rebuilding ARG
-			run-make $1
+			run-make 
 		fi
 
 		push-to $GATES - arg conf
@@ -230,25 +240,25 @@ function set-latency {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $LATENCY - 
-		run-on $LATENCY - set-latency "$2"
+		run-on $LATENCY - set-latency "$1"
 	else
-		[[ "$1" == "delay" ]] || return
+		[[ "$TYPE" == "delay" ]] || return
 
-		if [ "$#" == "2" ]
+		if [ "$#" == "1" ]
+		then
+			toExt=$1
+			toA=$1
+			toB=$1
+		elif [ "$#" == "2" ]
 		then
 			toExt=$2
-			toA=$2
-			toB=$2
+			toA=$1
+			toB=$1
 		elif [ "$#" == "3" ]
 		then
 			toExt=$3
-			toA=$2
+			toA=$1
 			toB=$2
-		elif [ "$#" == "4" ]
-		then
-			toExt=$4
-			toA=$2
-			toB=$3
 		else
 			echo 'Usage: set-latency <gate a> <gate b> <ext>'
 			return 1
@@ -297,7 +307,7 @@ function enable-forwarding {
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
 	else
-		[[ "$1" == "gate" ]] || return
+		[[ "$TYPE" == "gate" ]] || return
 		echo 1 > /proc/sys/net/ipv4/ip_forward
 	fi
 	return
@@ -311,7 +321,7 @@ function disable-forwarding {
 		push-to $GATES -
 		run-on $GATES - enable-forwarding
 	else
-		[[ "$1" == "gate" ]] || return
+		[[ "$TYPE" == "gate" ]] || return
 		echo 0 > /proc/sys/net/ipv4/ip_forward
 	fi
 	return
@@ -338,7 +348,7 @@ function install-vmware-tools {
 		sudo umount /media/cdrom
 		rm -r VMware*.tar.gz
 		
-		reboot $1
+		reboot
 	fi
 	return
 }
@@ -542,17 +552,17 @@ function add-cmdrun-cron {
 # Gives hints on the commands
 # Usage: help [<function>]
 function help {
-	if [[ "$#" == "1" ]]
+	if [[ "$#" == "0" ]]
 	then
 		echo Usage: $0 \<function\>
 		echo Functions available:
 		grep '^function' "$SCRIPT" | grep -v 'function _' | awk '{print "\t"$2}'
 		echo
 		echo For details, try \'help '<function>'\'
-		help $1 help
+		help help
 	else
-		echo Help for $2:
-		grep --before-context=5 "^function $2" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+		echo Help for $1:
+		grep --before-context=5 "^function $1" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
 	return
 }
@@ -571,13 +581,6 @@ function _main {
 	done
 	cd -P "$( dirname "$SOURCE" )"
 
-	# Help?
-	if [[ "$#" == "0" ]]
-	then
-		help local
-		return 1
-	fi
-
 	# Determine what type of host we are
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
 	if [[ "$LOCAL" == "$TYPE" ]]
@@ -590,12 +593,19 @@ function _main {
 		SCRIPT=`basename $SOURCE`
 		IS_LOCAL=
 	fi
+
+	# Help?
+	if [[ "$#" == "0" ]]
+	then
+		help
+		return 1
+	fi
 	
 	# Call actual functionality
 	func=$1
 	shift
 	echo Executing $func
-	"$func" "$TYPE" "$@"
+	"$func" "$@"
 	if [[ "$?" == "127" ]]
 	then
 		echo $func does not appear to exist. Your options are:
