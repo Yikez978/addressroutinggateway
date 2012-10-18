@@ -72,13 +72,43 @@ function stop-tests {
 # Starts traffic generators on the network
 # Usage: start-generators
 function start-generators {
-	return
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $EXT $PROT - gen_traffic.py
+		run-on $EXT $PROT - start-collection
+	else
+		# What host are we?
+		if [[ "$TYPE" == "ext" ]]
+		then
+			# One UDP and one TCP listener
+			./gen_traffic.py -t udp -l -p 2000 &
+			disown $!
+			./gen_traffic.py -t tcp -l -p 3000 &
+			disown $!
+		elif [[ "$TYPE" == "prot" ]] 
+		then
+			# Talk to the UDP and TCP external hosts
+			for host in 172.100.0.1
+			do
+				./gen_traffic.py -t udp -h "$host" -p 2000 -d .5 &
+				disown $!
+				./gen_traffic.py -t tcp -h "$host" -p 3000 -d .5 &
+				disown $!
+			done
+		fi
+	fi
 }
 
 # Stops traffic generators on the network
 # Usage: stops-generators
 function stop-generators {
-	return
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL - 
+		run-on $ALL - stop-generators
+	else
+		sudo killall gen_traffic.py
+	fi
 }
 
 # Starts tcpdump running on all hosts on the test network
@@ -95,8 +125,8 @@ function start-collection {
 		if [[ "$TYPE" == "gate" ]]
 		then
 			# Have two interfaces to capture on for gates
-			file1="`hostname`-inner-`date +%Y-%m-%d-%H:%M:%S`.pcap"
-			file2="`hostname`-outer-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
+			file1="`hostname`-inner.pcap"
+			file2="`hostname`-outer.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
 			sudo tcpdump -i eth1 -w "$file1" -n -x not arp &
@@ -105,7 +135,7 @@ function start-collection {
 			disown $!
 		else
 			# Dump traffic on just the one
-			filename="`hostname`-`date +%Y-%m-%d-%H:%M:%S`.pcap" 
+			filename="`hostname`.pcap" 
 			echo Starting traffic collection to $filename
 			sudo tcpdump -i eth1 -w "$filename" -n not arp &
 			disown $! 
