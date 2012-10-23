@@ -95,57 +95,55 @@ int parse_packet(struct packet_data *packet)
 
 void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 {
-	/*
 	char sIP[INET_ADDRSTRLEN];
 	char dIP[INET_ADDRSTRLEN];
 
+	// Can only work with IPv4 packets
 	if(packet->ipv4 == NULL)
 	{
 		snprintf(buf, buflen, "Unable to generate ID");
 		return;
 	}
 
+	// Hash content of IP packet (everything after the IP header)
+	uint8_t md5sumRaw[16];
+	char md5sum[33] = "";
+	md5(packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen, md5sumRaw);
+	for(int i = 0; i < sizeof(md5sumRaw); i++)
+		sprintf(md5sum + (2 * i), "%02x", (int)md5sumRaw[i]);
+	md5sum[sizeof(md5sum) - 1] = '\0';
+
+	// Add rest of label for the IP packet
 	inet_ntop(AF_INET, &packet->ipv4->saddr, sIP, sizeof(sIP));
 	inet_ntop(AF_INET, &packet->ipv4->daddr, dIP, sizeof(dIP));
 
 	switch(packet->ipv4->protocol)
 	{
 	case ARG_PROTO:
-		// ARG: s:<source ip> d:<dest ip> ipcsum:<ip checksum> seq:<seq num> type:<msg type num> sig:<sig/hmac> 
-		snprintf(buf, buflen, "ARG: s:%s d:%s ipcsum:%02x seq:%i type:%i sig:%0*x",
-			sIP, dIP, packet->ipv4->check, ntohl(packet->arg->seq),
-			packet->arg->type, (int)sizeof(packet->arg->sig), (unsigned int)*packet->arg->sig); 
+		// ARG: s:<source ip> d:<dest ip> hash:<content hash>
+		snprintf(buf, buflen, "ARG: s:%s d:%s hash:%s", sIP, dIP, md5sum); 
 		break;
 
 	case TCP_PROTO:
-		// TCP: s:<source ip>:<source port> d:<dest ip>:<dest port> ipcsum:<ip checksum> tcsum:<tcp checksum> seq:<seq num>
-		snprintf(buf, buflen, "TCP: s:%s:%i d:%s:%i ipcsum:%02x tcsum:%02x seq:%i",
-			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
-			packet->tcp->check, ntohl(packet->tcp->seq));
+		// TCP: s:<source ip>:<source port> d:<dest ip>:<dest port> hash:<content hash>
+		snprintf(buf, buflen, "TCP: s:%s:%i d:%s:%i hash:%s",
+			sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
 		break;
 
 	case UDP_PROTO:
-		// UDP: s:<source ip>:<source port> d:<dest ip>:<dest port> ipcsum:<ip checksum> ucsum:<udp checksum>
-		snprintf(buf, buflen, "UDP: s:%s:%i d:%s:%i ipcsum:%02x ucsum:%02x",
-			sIP, get_source_port(packet), dIP, get_dest_port(packet), packet->ipv4->check,
-			packet->udp->check);
+		// UDP: s:<source ip>:<source port> d:<dest ip>:<dest port> hash:<content hash>
+		snprintf(buf, buflen, "UDP: s:%s:%i d:%s:%i hash:%s",
+			sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
 		break;
 
 	case ICMP_PROTO:
-		// ICMP: s:<source ip> d:<dest ip> ipcsum:<ip checksum> type:<type> code:<code> icsum:<icmp checksum>
-		snprintf(buf, buflen, "ICMP: s:%s d:%s ipcsum:%02x type:%i code:%i icsum:%02x",
-			sIP, dIP, packet->ipv4->check, packet->icmp->type, packet->icmp->code, packet->icmp->checksum);
+		// ICMP: s:<source ip> d:<dest ip> hash:<content hash>
+		snprintf(buf, buflen, "ICMP: s:%s d:%s hash:%s", sIP, dIP, md5sum);
 		break;
 
 	default:
-		snprintf(buf, buflen, "IP: s:%s d:%s ipcsum:%02x", sIP, dIP, packet->ipv4->check);
+		snprintf(buf, buflen, "IP: s:%s d:%s hash:%s", sIP, dIP, md5sum);
 	}
-	*/
-
-	uint8_t md5sum[16];
-	md5(packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen, md5sum);
-	for(int i = 0; i < sizeof(md5sum); i++)
-		snprintf(buf + i, buflen - i, "%02x", (int)md5sum[i]);
 }
 
 int get_mac_addr(const char *dev, uint8_t *mac)
@@ -379,6 +377,38 @@ int send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t
 	free_packet(reply);
 
 	return ret;
+}
+
+void ip_csum(struct packet_data *packet)
+{
+}
+
+unsigned short csum(unsigned short *ptr, int nbytes)
+{
+	// Taken from http://www.binarytides.com/raw-sockets-c-code-on-linux/
+    register long sum;
+    unsigned short oddbyte;
+    register short answer;
+
+    sum=0;
+    while(nbytes > 1)
+	{
+        sum += *ptr++;
+        nbytes -=2;
+    }
+
+    if(nbytes == 1)
+	{
+        oddbyte = 0;
+        *((u_char*)&oddbyte) = *(u_char*)ptr;
+        sum += oddbyte;
+    }
+
+    sum = (sum>>16) + (sum & 0xffff);
+    sum = sum + (sum>>16);
+    answer = (short)~sum;
+
+    return answer;
 }
 
 uint16_t get_source_port(const struct packet_data *packet)

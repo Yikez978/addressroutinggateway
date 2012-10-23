@@ -26,7 +26,7 @@ function start-tests {
 	if [[ "$#" != 3 ]]
 	then
 		echo Not enough arguments given
-		help run-tests
+		help start-tests
 		return
 	fi
 
@@ -54,8 +54,6 @@ function start-tests {
 	echo Pulling logs into $RESULTSDIR/$d
 	retrieve-logs "$d"
 
-	mkdir -p "$d"
-
 	echo Analyze
 	
 	return
@@ -74,8 +72,8 @@ function stop-tests {
 function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $EXT $PROT - gen_traffic.py
-		run-on $EXT $PROT - start-collection
+		push-to $EXT $PROT - scripts/gen_traffic.py
+		run-on $EXT $PROT - start-generators
 	else
 		# What host are we?
 		if [[ "$TYPE" == "ext" ]]
@@ -107,7 +105,8 @@ function stop-generators {
 		push-to $ALL - 
 		run-on $ALL - stop-generators
 	else
-		sudo killall gen_traffic.py
+		#sudo killall gen_traffic.py
+		sudo killall python
 	fi
 }
 
@@ -612,6 +611,7 @@ function _main {
 	cd -P "$( dirname "$SOURCE" )"
 
 	# Determine what type of host we are
+	# For local, we move back up to the parent, giving us nice access to all of the source
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
 	if [[ "$LOCAL" == "$TYPE" ]]
 	then
