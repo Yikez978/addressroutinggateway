@@ -112,6 +112,10 @@ int do_nat_inbound_rewrite(const struct packet_data *packet)
 
 	memcpy((void*)&newPacket->ipv4->daddr, e->intIP, ADDR_SIZE);
 	set_dest_port(newPacket, e->intPort);
+	
+	// Fix checksums
+	udp_csum(newPacket);
+	tcp_csum(newPacket);
 
 	if((ret = send_packet(newPacket)) >= 0)
 	{
@@ -192,6 +196,10 @@ int do_nat_outbound_rewrite(const struct packet_data *packet)
 	
 	memcpy((void*)&newPacket->ipv4->saddr, e->gateIP, ADDR_SIZE);
 	set_source_port(newPacket, e->gatePort);
+
+	// Fix checksums
+	udp_csum(newPacket);
+	tcp_csum(newPacket);
 
 	if((ret = send_packet(newPacket)) >= 0)
 	{

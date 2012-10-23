@@ -30,6 +30,9 @@
 // accept a sudden reversion to the beginnig?
 #define SEQ_NUM_WRAP_ALLOWANCE 10
 
+// Actually compute new UDP, TCP, and IP checksums as needed. If disabled, checksums are set to 0
+#define COMPUTE_CHECKSUMS
+
 /***********************************************
 * Buffers and lengths
 ***********************************************/

@@ -2,6 +2,7 @@
 #define PACKET_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include <netinet/ip.h>
 #include <netinet/udp.h>
@@ -68,6 +69,10 @@ int send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t
 
 int get_mac_addr(const char *dev, uint8_t *mac);
 int get_dev_index(char *dev);
+
+void tcp_csum(struct packet_data *packet);
+void udp_csum(struct packet_data *packet);
+void csum_with_psuedo(struct packet_data *packet);
 
 uint16_t get_source_port(const struct packet_data *packet);
 uint16_t get_dest_port(const struct packet_data *packet);
