@@ -381,85 +381,20 @@ int send_arp_reply(const struct packet_data *packet, int devIndex, const uint8_t
 
 void tcp_csum(struct packet_data *packet)
 {
-	if(!packet->tcp || !packet->ipv4)
-		return;
-	
 	#ifdef COMPUTE_CHECKSUMS
-
-	// TBD compute tcp checksum
-
-	#else
-	packet->tcp->check = 0;
+	csum_with_psuedo(packet);
 	#endif
 }
 
 void udp_csum(struct packet_data *packet)
 {
-	if(!packet->udp || !packet->ipv4)
+	if(!packet->udp)
 		return;
 	
-	// Checksum is done with check set to 0
-	packet->udp->check = 0;
-
 	#ifdef COMPUTE_CHECKSUMS
-
-	// TBD not working
-	arglog(LOG_DEBUG, "Summing UDP packet:");
-	printRaw(packet->len - packet->linkLayerLen, packet->data + packet->linkLayerLen);
-
-	// Because we need to include the psuedo header and packets may be fairly long,
-	// manually add up each part, rather than consolidating down. May help memory usage
-	// and speed for large packets
-	uint32_t sum = 0;
-	
-	// UDP itself
-	uint16_t *curr = (uint16_t*)packet->udp;
-	int i = ntohs(packet->udp->len);
-
-	//i = sizeof(test);
-	//curr = (uint16_t*)test;
-	
-	while(i > 1)
-	{
-		printf("%04x|", *curr);
-		
-		sum += (uint32_t)ntohs(*curr);
-		
-		arglog(LOG_DEBUG, "Result %i: %08x", i, sum);
-		printRaw(sizeof(sum), &sum);
-		i -= 2;
-		curr++;
-	}
-
-	if(i == 1)
-		sum += (uint32_t)ntohs(*curr) & 0xFF00;
-
-	printf("\n");
-	
-	arglog(LOG_DEBUG, "UDP sum: %08x\n", sum);
-	
-	// IPs
-	arglog(LOG_DEBUG, "First 16 of source: %x\n", ntohs(packet->ipv4->saddr & 0xFFFF));
-	sum += ntohs((packet->ipv4->saddr >> 16) & 0xFFFF);
-	arglog(LOG_DEBUG, "Second 16 of source: %x\n", ntohs((packet->ipv4->saddr >> 16) & 0xFFFF));
-	sum += ntohs(packet->ipv4->saddr & 0xFFFF);
-	
-	sum += ntohs((packet->ipv4->daddr >> 16) & 0xFFFF);
-	sum += ntohs(packet->ipv4->daddr & 0xFFFF);
-
-	// Protocol and length
-	sum += (uint32_t)packet->ipv4->protocol;
-	sum += (uint32_t)ntohs(packet->udp->len);
-
-	arglog(LOG_DEBUG, "Sum before carry: %08x\n", sum);
-
-	// Finalize sum and complement. First two steps carry in any overflow
-	sum = (sum >> 16) + (sum & 0xFFFF);
-	sum = (sum >> 16) + (sum & 0xFFFF);
-	arglog(LOG_DEBUG, "Sum after carry: %08x\n", sum);
-
-	packet->udp->check = ~((uint16_t)htons(sum));
-	
+	csum_with_psuedo(packet);
+	#else
+	packet->udp->check = 0;
 	#endif
 }
 
@@ -467,10 +402,6 @@ void csum_with_psuedo(struct packet_data *packet)
 {
 	if(!packet->ipv4 || (!packet->tcp && !packet->udp))
 		return;
-
-	// TBD not working
-	arglog(LOG_DEBUG, "Summing UDP packet:");
-	printRaw(packet->len - packet->linkLayerLen, packet->data + packet->linkLayerLen);
 
 	// Because we need to include the psuedo header and packets may be fairly long,
 	// manually add up each part, rather than consolidating down. May help memory usage
