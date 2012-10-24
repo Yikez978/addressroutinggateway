@@ -34,6 +34,8 @@ function start-tests {
 	clean-pushed
 	clean-pulled
 
+	run-make
+
 	echo Setting latency to $2
 	set-latency $2
 	
@@ -67,7 +69,8 @@ function stop-tests {
 	stop-arg
 }
 
-# Starts traffic generators on the network
+# Starts traffic generators on the network. Intended just for testing.
+# Full tests will call start-generator directly
 # Usage: start-generators
 function start-generators {
 	if [[ $IS_LOCAL ]]
@@ -78,21 +81,49 @@ function start-generators {
 		# What host are we?
 		if [[ "$TYPE" == "ext" ]]
 		then
+			filename="generator-`hostname`-"
+
 			# One UDP and one TCP listener
-			./gen_traffic.py -t udp -l -p 2000 &
-			disown $!
-			./gen_traffic.py -t tcp -l -p 3000 &
-			disown $!
+			start-generator tcp 2000 
+			start-generator udp 2000 
 		elif [[ "$TYPE" == "prot" ]] 
 		then
 			# Talk to the UDP and TCP external hosts
-			for host in 172.100.0.1
-			do
-				./gen_traffic.py -t udp -h "$host" -p 2000 -d .5 &
-				disown $!
-				./gen_traffic.py -t tcp -h "$host" -p 3000 -d .5 &
-				disown $!
-			done
+			start-generator tcp 2000 172.100.0.1 .5
+			start-generator udp 2000 172.100.0.1 .5
+		fi
+	fi
+}
+
+# Starts a single generator on the current or--if local--given host
+# Usage: start-generator [<host>] <type> <port> [<host> <delay>]
+#	type - tcp or udp
+#	host - If given, generator connects to the given host. If not, generator enters listening mode
+#	delay - Listeners always send instantly. Senders send one packet every <delay> seconds (may be decimal)
+function start-generator {
+	if [[ $IS_LOCAL ]]
+	then
+		tohost=$1
+		push-to $tohost - scripts/gen_traffic.py
+		shift
+		run-on $tohost - start-generator $@
+	else
+		if [[ "$#" == 2 ]]
+		then
+			# Listen
+			echo $1 listener created on port $2
+			filename="`hostname`-listen-$1:$2.log"
+			./gen_traffic.py -l -t "$1" -p "$2" -o "$filename" &
+			disown $!
+		elif [[ "$#" == 4 ]]
+		then
+			# Send
+			echo $1 sender created to $3:$2 with $4 second delay
+			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
+			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" -o "$filename" &
+			disown $!
+		else
+			help start-generator
 		fi
 	fi
 }
@@ -128,9 +159,9 @@ function start-collection {
 			file2="`hostname`-outer.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
-			sudo tcpdump -i eth1 -w "$file1" -n -x not arp &
+			sudo tcpdump -i eth1 -w "$file1" -n not arp &
 			disown $!
-			sudo tcpdump -i eth2 -w "$file2" -n -x not arp &
+			sudo tcpdump -i eth2 -w "$file2" -n not arp &
 			disown $!
 		else
 			# Dump traffic on just the one
@@ -166,7 +197,8 @@ function retrieve-logs {
 	fi
 
 	clean-pulled
-	pull-from $ALL - *.pcap
+	pull-from $ALL - '*.pcap'
+	pull-from $ALL - '*.log'
 	
 	mkdir -p "$RESULTSDIR"
 	mv "$PULLDIR" "$RESULTSDIR/$1"
@@ -218,10 +250,22 @@ function start-arg {
 			run-make 
 		fi
 
+		# Generate config file for each gate
+		for g in $GATES
+		do
+			f="conf/main-$g.conf"
+			echo Writing gateway configuration file $f
+
+			echo $g > "$f"
+			echo eth2 >> "$f"
+			echo eth1 >> "$f"
+			echo "$1"ms >> "$f"
+		done
+
 		push-to $GATES - arg conf
-		run-on $GATES - start-arg
+		run-on $GATES - start-arg $@
 	else
-		sudo ./arg conf/arg.conf `hostname` &
+		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" &
 		disown $!
 	fi
 	return
@@ -591,7 +635,7 @@ function help {
 		help help
 	else
 		echo Help for $1:
-		grep --before-context=5 "^function $1" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+		grep --before-context=5 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
 	return
 }
@@ -639,7 +683,7 @@ function _main {
 	if [[ "$?" == "127" ]]
 	then
 		echo $func does not appear to exist. Your options are:
-		help "$TYPE"
+		help
 	fi
 
 	# For god-only-knows-why, ssh loves to keep us alive with our background (but detached!) processes

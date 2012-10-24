@@ -36,10 +36,10 @@ remote :
 # Default test to do whatever it is we want to do most often
 # for now, just do local test
 testA : stop arg
-	sudo ./arg conf/arg.conf gateA
+	sudo ./arg conf/main-gateA.conf 
 
 testB : stop arg
-	sudo ./arg conf/arg.conf gateB
+	sudo ./arg conf/main-gateB.conf
 
 test : start
 

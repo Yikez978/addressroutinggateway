@@ -117,13 +117,16 @@ int main(int argc, char *argv[])
 	//sigaction (SIGTERM, &action, NULL);
 	#endif
 
-	if(argc != 3)
+	if(argc != 2 && argc != 3)
 	{
-		arglog(LOG_DEBUG, "Usage: %s <conf path> <gate name>\n", argv[0]);
+		arglog(LOG_DEBUG, "Usage: %s <conf path> [<gate name>]\n", argv[0]);
 		return 1;
 	}
 
-	arg_init(argv[1], argv[2]);
+	if(argc == 2)
+		arg_init(argv[1], NULL);
+	else
+		arg_init(argv[1], argv[2]);
 	
 	// Run, waiting patiently
 	join_director();
