@@ -92,7 +92,6 @@ int read_config(struct config_data *conf)
 	}
 
 	conf->gate = NULL;
-	dent = readdir(confDir);
 	for(;;)
 	{
 		dent = readdir(confDir);

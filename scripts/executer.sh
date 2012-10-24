@@ -209,8 +209,9 @@ function retrieve-logs {
 	pull-from $ALL - '*.log'
 	
 	mkdir -p "$RESULTSDIR"
+	rm "$PULLDIR/config.log"
 	mv "$PULLDIR" "$RESULTSDIR/$1"
-	
+
 	return
 }
 
