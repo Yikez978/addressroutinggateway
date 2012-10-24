@@ -34,7 +34,7 @@ function start-tests {
 	clean-pushed
 	clean-pulled
 
-	run-make
+	#run-make
 
 	echo Setting latency to $2
 	set-latency $2
@@ -47,7 +47,15 @@ function start-tests {
 	start-generators
 
 	echo Running for $1 seconds
-	sleep $1
+	eraseline="\r                        \r"
+	i=$1
+	while (( $i ))
+	do
+		echo -ne "$eraseline$i seconds remaining"
+		sleep 1
+		i=`expr $i - 1`
+	done
+	echo -e "$eraselineDone running tests"
 
 	echo Ending test
 	stop-tests
