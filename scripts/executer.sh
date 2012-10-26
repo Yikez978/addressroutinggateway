@@ -97,8 +97,8 @@ function start-generators {
 		elif [[ "$TYPE" == "prot" ]] 
 		then
 			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 .5
-			start-generator udp 2000 172.100.0.1 .5
+			start-generator tcp 2000 172.100.0.1 .2
+			start-generator udp 2000 172.100.0.1 .2
 		fi
 	fi
 }
@@ -145,7 +145,7 @@ function stop-generators {
 		run-on $ALL - stop-generators
 	else
 		#sudo killall gen_traffic.py
-		sudo killall python
+		_stop-process python
 	fi
 }
 
@@ -190,7 +190,7 @@ function stop-collection {
 		push-to $ALL
 		run-on $ALL - stop-collection
 	else
-		sudo killall tcpdump
+		_stop-process tcpdump
 	fi
 }
 
@@ -209,7 +209,7 @@ function retrieve-logs {
 	pull-from $ALL - '*.log'
 	
 	mkdir -p "$RESULTSDIR"
-	rm "$PULLDIR/config.log"
+	rm -f "$PULLDIR/config.log"
 	mv "$PULLDIR" "$RESULTSDIR/$1"
 
 	return
@@ -289,25 +289,7 @@ function stop-arg {
 		run-on $GATES - stop-arg
 	else
 		# Send it kill signal
-		echo Sending signal
-		sudo killall -INT arg
-
-		# Wait for up to 5 seconds for it to stop
-		for i in {1..10}
-		do
-			# Check for the process
-			if [[ `ps -A | grep arg` == "" ]]
-			then
-				return
-			fi
-			
-			# Wait
-			echo Waiting for ARG to die
-			sleep .5
-		done
-
-		# Force it to die
-		sudo killall -KILL arg
+		_stop-process arg
 	fi
 	return
 }
@@ -409,6 +391,32 @@ function disable-forwarding {
 	return
 }
 
+# Requests the given process stop via SIGINT first, then forces it to die after 5 seconds
+# Usage: _stop-process <proc name>
+function _stop-process {
+	# Interrupt
+	echo Sending interrupt signal to $1
+	sudo killall -INT "$1"
+
+	# Wait for up to 5 seconds for it to stop
+	for i in {1..10}
+	do
+		# Check for the process
+		if [[ `ps -fA | grep "$1"` == "" ]]
+		then
+			return
+		fi
+		
+		# Wait
+		echo Waiting for $1 to die
+		sleep .5
+	done
+
+	# Kill
+	echo Sending kill signal to $1
+	sudo killall -KILL "$1"
+}
+
 # Installs VMware tools on all servers. The CD must already be inserted
 # Usage: install-vmware-tools
 function install-vmware-tools {
@@ -441,10 +449,9 @@ function run {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL -  
-		shift
 		run-on $ALL - run "$@"
 	else
-		shift
+		echo Calling the command: $@
 		$@
 	fi
 	return

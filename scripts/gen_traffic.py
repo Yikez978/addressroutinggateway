@@ -20,8 +20,13 @@ MAX_PACKET_SIZE = 1400
 def log(msg):
 	print('{} {} {}'.format(time.time(), 'LOG4', msg))
 
-def log_timestamp(host):
-	log('START: {}: Starting at {}'.format(host, time.strftime('%d %b %Y %H:%M:%S')))
+def log_timestamp():
+	log('START: Starting at {}'.format(time.strftime('%d %b %Y %H:%M:%S')))
+
+def log_local_addr(addr):
+	ip, port = addr
+	ip = socket.gethostbyname(socket.gethostname())
+	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
 def log_send(ip, port, buf):
 	m = hashlib.md5()
@@ -55,6 +60,8 @@ def tcp_sender(ip, port, delay=1, size=None):
 			log('Retrying connection to {}:{}'.format(ip, port))
 
 	s.settimeout(1)
+	
+	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -92,6 +99,8 @@ def tcp_receiver(port, echo=False, size=None):
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	s.bind(('', port))
 	s.listen(1)
+
+	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -144,6 +153,8 @@ def udp_sender(ip, port, delay=1, size=None):
 
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.settimeout(1)
+	
+	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -179,6 +190,8 @@ def udp_receiver(port, echo=False, size=None):
 	
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.bind(('', port))
+	
+	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -219,7 +232,6 @@ def main(argv):
 	parser.add_argument('-s', '--size', type=int, help='Size of packets to send. \
 			Unspecified creates randomly-sized packets. Ignored if echoing')
 	
-
 	parser.add_argument('-o', '--output', default=None, help='Logs to the given file, rather than stdout')
 
 	args = parser.parse_args(argv[1:])
@@ -231,23 +243,25 @@ def main(argv):
 		sys.stdout = output_file
 
 	# What should we run?
-	if args.type.lower() == 'tcp':
-		if args.listen:
-			tcp_receiver(args.port, echo=args.echo, size=args.size)
+	try:
+		log_timestamp()
+		if args.type.lower() == 'tcp':
+			if args.listen:
+				tcp_receiver(args.port, echo=args.echo, size=args.size)
+			else:
+				tcp_sender(args.host, args.port, delay=args.delay, size=args.size)
+		elif args.type.lower() == 'udp':
+			if args.listen:
+				udp_receiver(args.port, echo=args.echo, size=args.size)
+			else:
+				udp_sender(args.host, args.port, delay=args.delay, size=args.size)
 		else:
-			tcp_sender(args.host, args.port, delay=args.delay, size=args.size)
-	elif args.type.lower() == 'udp':
-		if args.listen:
-			udp_receiver(args.port, echo=args.echo, size=args.size)
-		else:
-			udp_sender(args.host, args.port, delay=args.delay, size=args.size)
-	else:
-		log('Type {} not yet handled'.format(args.type))
-
-	# Close log file
-	if output_file is not None:
-		sys.stdout = sys.__stdout__
-		output_file.close()
+			log('Type {} not yet handled'.format(args.type))
+	finally:
+		# Close log file
+		if output_file is not None:
+			sys.stdout = sys.__stdout__
+			output_file.close()
 
 	return 0
 

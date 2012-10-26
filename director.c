@@ -40,6 +40,8 @@ void init_director_locks(void)
 int init_director(struct config_data *config)
 {
 	int ret;
+	char baseIP[INET_ADDRSTRLEN];
+	char mask[INET_ADDRSTRLEN];
 
 	arglog(LOG_DEBUG, "Director init\n");
 
@@ -59,6 +61,11 @@ int init_director(struct config_data *config)
 		arglog(LOG_FATAL, "Unable to initialize the internal device %s\n", intData.dev);
 		return ret;
 	}
+
+	// TBD internal address (doing the base again right now)
+	inet_ntop(AF_INET, gate_base_ip(), baseIP, sizeof(baseIP));
+	inet_ntop(AF_INET, gate_mask(), mask, sizeof(mask));	
+	arglog(LOG_ALERT, "Internal IP: %s, external IP: %s, external mask: %s\n", baseIP, baseIP, mask);
 
 	// Enter receive loop
 	receiveShouldRun = true;
@@ -82,7 +89,7 @@ int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal)
 	*pd = pcap_create(dev, ebuf);
 	if(pd == NULL)
 	{
-		arglog(LOG_DEBUG, "Unable to initialize create pcap driver on %s: %s\n", dev, ebuf);
+		arglog(LOG_FATAL, "Unable to initialize create pcap driver on %s: %s\n", dev, ebuf);
 		return -ARG_CONFIG_BAD;
 	}
 
@@ -92,7 +99,7 @@ int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal)
 
 	if(pcap_activate(*pd))
 	{
-		arglog(LOG_DEBUG, "Unable to activate pcap on %s: %s\n", dev, pcap_geterr(*pd));
+		arglog(LOG_FATAL, "Unable to activate pcap on %s: %s\n", dev, pcap_geterr(*pd));
 		return -ARG_CONFIG_BAD;
 	}
 
@@ -120,14 +127,14 @@ int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal)
     
 	if(pcap_compile(*pd, &fp, filter, 1, PCAP_NETMASK_UNKNOWN) == -1)
 	{
-		arglog(LOG_DEBUG, "Unable to compile filter: %s\n", pcap_geterr(*pd));
+		arglog(LOG_FATAL, "Unable to compile filter: %s\n", pcap_geterr(*pd));
 		pcap_close(*pd);
 		return -ARG_INTERNAL_ERROR;
 	}
 
     if(pcap_setfilter(*pd, &fp) == -1)
 	{
-		arglog(LOG_DEBUG, "Unable to set filter: %s\n", pcap_geterr(*pd));
+		arglog(LOG_FATAL, "Unable to set filter: %s\n", pcap_geterr(*pd));
 		pcap_freecode(&fp);
 		pcap_close(*pd);
 		return -ARG_CONFIG_BAD;
