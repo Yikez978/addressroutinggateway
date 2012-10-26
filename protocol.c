@@ -475,7 +475,7 @@ int send_arg_wrapped(struct arg_network_info *local,
 	}
 	
 	if((ret = send_packet(newPacket)) >= 0)
-		arglog_result(packet, newPacket, 1, 1, "Wrap", "wrapped");
+		arglog_result(packet, newPacket, 1, 1, "Hopper", "wrapped");
 	/*else
 		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");*/
 
@@ -521,7 +521,7 @@ int process_arg_wrapped(struct arg_network_info *local,
 	memcpy(newPacket->data, msg->data, msg->len);
 	parse_packet(newPacket);
 	if((ret = send_packet(newPacket)) >= 0)
-		arglog_result(packet, newPacket, 1, 1, "Unwrap", "unwrapped");
+		arglog_result(packet, newPacket, 1, 1, "Hopper", "unwrapped");
 	/*else
 		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");*/
 

@@ -28,6 +28,9 @@ int parse_packet(struct packet_data *packet)
 	packet->icmp = NULL;
 	packet->arp = NULL;
 	packet->arg = NULL;
+	
+	packet->unknown_data = NULL;
+	packet->unknown_len = 0;
 
 	if(sizeof(struct ethhdr) == packet->linkLayerLen)
 	{
@@ -36,7 +39,7 @@ int parse_packet(struct packet_data *packet)
 		if(ntohs(packet->eth->h_proto) == ETH_P_IP)
 		{
 			packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
-			packet->unknown_data = packet->data + sizeof(struct ethhdr);
+			packet->unknown_data = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl * 4);
 		}
 		else if(ntohs(packet->eth->h_proto) == ETH_P_ARP)
 		{
@@ -45,14 +48,14 @@ int parse_packet(struct packet_data *packet)
 		}
 		else if(ntohs(packet->eth->h_proto) == ETH_P_IPV6)
 		{
-			arglog(LOG_DEBUG, "IPv6, sad day\n");
-			packet->unknown_data = packet->data + sizeof(struct ethhdr);
+			arglog(LOG_ALERT, "IPv6, sad day. Not handled\n");
 		}
 	}
 	else
 	{
 		// Assume IP
 		packet->ipv4 = (struct iphdr*)(packet->data + packet->linkLayerLen);
+		packet->unknown_data = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl * 4);
 	}
 
 	// Parse IP packets further
@@ -89,6 +92,9 @@ int parse_packet(struct packet_data *packet)
 			packet->unknown_data = (uint8_t*)transStart;
 		}
 	}
+	
+	// Ensure this length is correct
+	packet->unknown_len = packet->len - (packet->unknown_data - packet->data);
 
 	return 0;
 }
@@ -105,10 +111,10 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 		return;
 	}
 
-	// Hash content of IP packet (everything after the IP header)
+	// Hash content of packet
 	uint8_t md5sumRaw[16];
 	char md5sum[33] = "";
-	md5(packet->data + packet->linkLayerLen, packet->len - packet->linkLayerLen, md5sumRaw);
+	md5(packet->unknown_data, packet->unknown_len, md5sumRaw);
 	for(int i = 0; i < sizeof(md5sumRaw); i++)
 		sprintf(md5sum + (2 * i), "%02x", (int)md5sumRaw[i]);
 	md5sum[sizeof(md5sum) - 1] = '\0';
@@ -116,34 +122,8 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	// Add rest of label for the IP packet
 	inet_ntop(AF_INET, &packet->ipv4->saddr, sIP, sizeof(sIP));
 	inet_ntop(AF_INET, &packet->ipv4->daddr, dIP, sizeof(dIP));
-
-	switch(packet->ipv4->protocol)
-	{
-	case ARG_PROTO:
-		// ARG: s:<source ip> d:<dest ip> hash:<content hash>
-		snprintf(buf, buflen, "ARG: s:%s d:%s hash:%s", sIP, dIP, md5sum); 
-		break;
-
-	case TCP_PROTO:
-		// TCP: s:<source ip>:<source port> d:<dest ip>:<dest port> hash:<content hash>
-		snprintf(buf, buflen, "TCP: s:%s:%i d:%s:%i hash:%s",
-			sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
-		break;
-
-	case UDP_PROTO:
-		// UDP: s:<source ip>:<source port> d:<dest ip>:<dest port> hash:<content hash>
-		snprintf(buf, buflen, "UDP: s:%s:%i d:%s:%i hash:%s",
-			sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
-		break;
-
-	case ICMP_PROTO:
-		// ICMP: s:<source ip> d:<dest ip> hash:<content hash>
-		snprintf(buf, buflen, "ICMP: s:%s d:%s hash:%s", sIP, dIP, md5sum);
-		break;
-
-	default:
-		snprintf(buf, buflen, "IP: s:%s d:%s hash:%s", sIP, dIP, md5sum);
-	}
+	snprintf(buf, buflen, "s:%s:%i d:%s:%i hash:%s",
+		sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
 }
 
 int get_mac_addr(const char *dev, uint8_t *mac)

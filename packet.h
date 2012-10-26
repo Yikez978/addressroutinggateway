@@ -49,6 +49,7 @@ typedef struct packet_data
 	struct arghdr *arg;
 
 	uint8_t *unknown_data; // Pointer to first part of data we didn't parse
+	unsigned long unknown_len; // Length of unparsed data
 
 	uint8_t *data;
 } packet_data;
