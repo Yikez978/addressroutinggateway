@@ -122,8 +122,8 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	// Add rest of label for the IP packet
 	inet_ntop(AF_INET, &packet->ipv4->saddr, sIP, sizeof(sIP));
 	inet_ntop(AF_INET, &packet->ipv4->daddr, dIP, sizeof(dIP));
-	snprintf(buf, buflen, "s:%s:%i d:%s:%i hash:%s",
-		sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
+	snprintf(buf, buflen, "p:%i s:%s:%i d:%s:%i hash:%s",
+		packet->ipv4->protocol, sIP, get_source_port(packet), dIP, get_dest_port(packet), md5sum);
 }
 
 int get_mac_addr(const char *dev, uint8_t *mac)

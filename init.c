@@ -3,6 +3,7 @@
 #endif
 
 #include <stdio.h>
+#include <time.h>
 
 #include "settings.h"
 #include "hopper.h"
@@ -24,8 +25,14 @@ void sig_handler(int signum)
 static int arg_init(char *configPath, char *gateName)
 {
 	struct config_data conf;
-	
-	arglog(LOG_DEBUG, "Starting\n");
+	time_t rawtime;
+	struct tm * timeinfo;
+	char buf[30];
+
+	time(&rawtime);
+	timeinfo = localtime(&rawtime);
+	strftime(buf, sizeof(buf), "%d %b %Y %T", timeinfo);	
+	arglog(LOG_DEBUG, "Starting at %s\n", buf);
 
 	// Take care of locks first so that we know they're ALWAYS safe to use
 	init_nat_locks();

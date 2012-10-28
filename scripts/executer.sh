@@ -34,7 +34,7 @@ function start-tests {
 	clean-pushed
 	clean-pulled
 
-	#run-make
+	run-make
 
 	echo Setting latency to $2
 	set-latency $2

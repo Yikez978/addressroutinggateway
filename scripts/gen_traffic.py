@@ -29,15 +29,15 @@ def log_local_addr(addr):
 	ip = socket.gethostbyname(socket.gethostname())
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
-def log_send(ip, port, buf):
+def log_send(proto, ip, port, buf):
 	m = hashlib.md5()
 	m.update(buf)
-	log('Sent {} to {}:{}'.format(m.hexdigest(), ip, port))
+	log('Sent {}:{} to {}:{}'.format(proto, m.hexdigest(), ip, port))
 
-def log_recv(ip, port, buf):
+def log_recv(proto, ip, port, buf):
 	m = hashlib.md5()
 	m.update(buf)
-	log('Received {} from {}:{}'.format(m.hexdigest(), ip, port))
+	log('Received {}:{} from {}:{}'.format(proto, m.hexdigest(), ip, port))
 	pass
 
 def randbytes(size):
@@ -74,14 +74,14 @@ def tcp_sender(ip, port, delay=1, size=None):
 			# Delay next packet
 			time.sleep(delay)
 			s.sendall(buf) # TBD, change to send and ensure each packet gets logged
-			log_send(ip, port, buf)
+			log_send(6, ip, port, buf)
 
 			# Get response back?
 			try:
 				buf = s.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(ip, port, buf)
+				log_recv(6, ip, port, buf)
 			except socket.timeout:
 				continue
 	except socket.error:
@@ -128,7 +128,7 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 				buf = conn.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(ip, port, buf)
+				log_recv(6, ip, port, buf)
 			except socket.timeout:
 				# Check if we're supposed to be done
 				continue
@@ -140,7 +140,7 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 					buf = randbytes(random.randrange(0, MAX_PACKET_SIZE))
 
 			conn.sendall(buf)
-			log_send(ip, port, buf)
+			log_send(6, ip, port, buf)
 	except socket.error:
 		pass
 	except KeyboardInterrupt:
@@ -170,14 +170,14 @@ def udp_sender(ip, port, delay=1, size=None):
 			
 			# Send
 			s.sendto(buf, (ip, port))
-			log_send(ip, port, buf)
+			log_send(17, ip, port, buf)
 
 			# Get response back?
 			try:
 				buf = s.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(ip, port, buf)
+				log_recv(6, ip, port, buf)
 			except socket.timeout:
 				continue
 	except KeyboardInterrupt:
@@ -197,7 +197,7 @@ def udp_receiver(port, echo=False, size=None):
 	try:
 		while True:
 			buf, addr = s.recvfrom(MAX_PACKET_SIZE)
-			log_recv(addr[0], addr[1], buf)
+			log_recv(17, addr[0], addr[1], buf)
 
 			# Send back either their data or some gibberish
 			if not echo:
@@ -207,7 +207,7 @@ def udp_receiver(port, echo=False, size=None):
 					buf = randbytes(random.randrange(0, MAX_PACKET_SIZE))
 			
 			s.sendto(buf, addr)
-			log_send(addr[0], addr[1], buf)
+			log_send(17, addr[0], addr[1], buf)
 	except KeyboardInterrupt:
 		log('User requested we stop')
 

@@ -77,19 +77,16 @@ void varglog(int level, char *fmt, va_list ap)
 	int fmtLen = 0;
 	int fullLen = 40;
 	char *line = NULL;
-	struct timespec curr;
 
 	#ifndef DISP_RESULTS
 	if(level == LOG_RESULTS)
-	{
-		// Make the check always fail
-		level = logLevel + 1;
-	}
+		return;
 	#endif
 
 	if(level <= logLevel)
 	{
-		current_time(&curr);
+		time_t rawtime;
+		time(&rawtime);
 		
 		fmtLen = strlen(fmt);
 		fullLen += fmtLen;
@@ -97,7 +94,7 @@ void varglog(int level, char *fmt, va_list ap)
 		if(line)
 		{
 			// Include timestamp and log level
-			snprintf(line, fullLen, "%lu.%lu LOG%i %s", curr.tv_sec, curr.tv_nsec, level, fmt);
+			snprintf(line, fullLen, "%lu LOG%i %s", rawtime, curr.tv_nsec, level, fmt);
 			vprintf(line, ap);
 			free(line);
 		}
