@@ -97,8 +97,8 @@ function start-generators {
 		elif [[ "$TYPE" == "prot" ]] 
 		then
 			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 .2
-			start-generator udp 2000 172.100.0.1 .2
+			start-generator tcp 2000 172.100.0.1 2
+			start-generator udp 2000 172.100.0.1 2
 		fi
 	fi
 }
@@ -121,14 +121,14 @@ function start-generator {
 			# Listen
 			echo $1 listener created on port $2
 			filename="`hostname`-listen-$1:$2.log"
-			./gen_traffic.py -l -t "$1" -p "$2" -o "$filename" &
+			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" &
 			disown $!
 		elif [[ "$#" == 4 ]]
 		then
 			# Send
 			echo $1 sender created to $3:$2 with $4 second delay
 			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
-			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" -o "$filename" &
+			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" >"$filename" &
 			disown $!
 		else
 			help start-generator
@@ -144,7 +144,6 @@ function stop-generators {
 		push-to $ALL - 
 		run-on $ALL - stop-generators
 	else
-		#sudo killall gen_traffic.py
 		_stop-process python
 	fi
 }
@@ -402,7 +401,7 @@ function _stop-process {
 	for i in {1..10}
 	do
 		# Check for the process
-		if [[ `ps -fA | grep "$1"` == "" ]]
+		if [[ `ps -A | grep "$1"` == "" ]]
 		then
 			return
 		fi
@@ -414,6 +413,8 @@ function _stop-process {
 
 	# Kill
 	echo Sending kill signal to $1
+	sudo killall "$1"
+	sleep .5
 	sudo killall -KILL "$1"
 }
 

@@ -13,6 +13,7 @@ import random
 import string
 import threading
 import hashlib
+import signal
 
 MAX_PACKET_SIZE = 1400
 
@@ -213,6 +214,10 @@ def udp_receiver(port, echo=False, size=None):
 	log('UDP listener on port {} dying'.format(port))
 	s.close()
 
+# Tell whatever generator we're running to die
+def end_traffic(sig, stack):
+	raise KeyboardInterrupt
+
 # Run the correct host generator
 def main(argv):
 	# Parse command line
@@ -243,6 +248,8 @@ def main(argv):
 		sys.stdout = output_file
 
 	# What should we run?
+	signal.signal(signal.SIGINT, end_traffic)
+	signal.signal(signal.SIGTERM, end_traffic)
 	try:
 		log_timestamp()
 		if args.type.lower() == 'tcp':
