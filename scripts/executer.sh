@@ -97,8 +97,8 @@ function start-generators {
 		elif [[ "$TYPE" == "prot" ]] 
 		then
 			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 2
-			start-generator udp 2000 172.100.0.1 2
+			start-generator tcp 2000 172.100.0.1 .2
+			start-generator udp 2000 172.100.0.1 .2
 		fi
 	fi
 }
@@ -166,9 +166,9 @@ function start-collection {
 			file2="`hostname`-outer.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
-			sudo tcpdump -i eth1 -w "$file1" -n not arp &
+			sudo tcpdump -i eth2 -w "$file1" -n not arp &
 			disown $!
-			sudo tcpdump -i eth2 -w "$file2" -n not arp &
+			sudo tcpdump -i eth1 -w "$file2" -n not arp &
 			disown $!
 		else
 			# Dump traffic on just the one

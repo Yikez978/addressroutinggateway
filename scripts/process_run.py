@@ -16,6 +16,9 @@ from glob import glob
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
 PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
 
+# Times on each host may not match up perfectly. How many second on either side do we allow?
+TIME_SLACK=5
+
 def create_schema(db):
 	# Schema:
 	# systems
@@ -31,17 +34,24 @@ def create_schema(db):
 	#
 	# packets
 	#	- id (PK)
+	#	- system_id (foreign: systems.id) - system this packet was seen/sent on
+	#	- log_line (int) - Line in the log file (of the host we saw it on) that corresponds to this entry
 	#	- time (int) - time in seconds, relative to the start of the experiment
 	#	- is_send (bool)
+	#	- is_valid (bool) - true if the sender believes this packet SHOULD reach its destination
+	#			(ie, a spoofed packet may not be expected to work)
 	#	- proto (int) - protocol of this packet
 	#	- src_ip 
 	#	- dest_ip
 	#	- src_id (foreign: packet.id)
 	#	- dest_id (foreign: packet.id)
 	#	- hash (index) - MD5 hash of packet data, after the transport layer
+	#	- next_hop_id (foreign: packet.id) - If this packet was transformed, then next_hop_id is the ID of the
+	#		transformed packet. If this field is NULL on a sent packet, it was lost at this point and
+	#		reason_id points to a description of why
 	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
 	#
-	# transformations
+	# transforms
 	#	- id (PK)
 	#	- gate_id (foreign: system.id)
 	#	- in_id (foreign: packet.id)
@@ -56,18 +66,23 @@ def create_schema(db):
 						PRIMARY KEY(id ASC))''')
 
 	c.execute('''CREATE TABLE IF NOT EXISTS packets (
-						id INTEGER, 
+						id INTEGER,
+						system_id INTEGER,
+						log_line INT,
 						time INTEGER,
 						is_send TINYINT,
+						is_valid TINYINT DEFAULT 1,
 						proto SHORTINT,
 						src_ip INT,
 						dest_ip INT,
 						src_id INT,
 						dest_id INT,
 						hash CHARACTER(32),
+						next_hop_id INT DEFAULT NULL,
+						reason_id INT,
 						PRIMARY KEY (id ASC))''')
 
-	c.execute('''CREATE TABLE IF NOT EXISTS transformations (
+	c.execute('''CREATE TABLE IF NOT EXISTS transforms (
 						id INTEGER,
 						gate_id INT,
 						in_id INT,
@@ -215,7 +230,7 @@ def get_system(db, name=None, ip=None):
 
 ###############################################
 # Parse sends
-def record_traffic(db, logdir, base_time):
+def record_traffic(db, logdir):
 	# Go through each log file and record what packets each host believes it sent
 	for logName in glob('{}/*.log'.format(logdir)):
 		# Determine what type of log this is. Alters parsing and processing
@@ -230,11 +245,11 @@ def record_traffic(db, logdir, base_time):
 		
 		with open(logName) as log:
 			if isGate:
-				record_gate_admin_traffic(db, name, log, base_time)
+				record_gate_admin_traffic(db, name, log)
 			else:
-				record_client_traffic(db, name, log, base_time)
+				record_client_traffic(db, name, log) 
 
-def record_client_traffic(db, name, log, base_time):
+def record_client_traffic(db, name, log): 
 	this_id = get_system(db, name=name)
 	this_ip = None
 
@@ -243,8 +258,10 @@ def record_client_traffic(db, name, log, base_time):
 
 	# Record each packet this host saw
 	count = 0
+	log_line_num = 0
 	c.execute('BEGIN TRANSACTION');
 	for line in log:
+		log_line_num += 1
 		# Pull out data on each send or receive
 		# Example lines:
 		# 1351452800.14 LOG4 Sent 6:dd3f6ad25f9885796e1193fe93dd841e to 172.2.20.0:40869
@@ -254,7 +271,7 @@ def record_client_traffic(db, name, log, base_time):
 			continue
 
 		time, direction, proto, hash, their_ip, port = m.groups()
-		time = int(time) - base_time
+		time = int(time)
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)
 
@@ -271,8 +288,11 @@ def record_client_traffic(db, name, log, base_time):
 			dest_ip = their_ip
 			dest_id = their_id
 		
-		c.execute('INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-			(time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash))
+		c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+							src_ip, dest_ip, src_id, dest_id, hash, log_line)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+						(this_id, time, is_send, proto,
+							src_ip, dest_ip, src_id, dest_id, hash, log_line_num))
 
 		count += 1
 		if count % 1000 == 0:
@@ -282,7 +302,7 @@ def record_client_traffic(db, name, log, base_time):
 	db.commit()
 	c.close()
 
-def record_gate_admin_traffic(db, name, log, base_time):
+def record_gate_admin_traffic(db, name, log):
 	this_id = get_system(db, name=name)
 	this_ip = None
 
@@ -291,9 +311,11 @@ def record_gate_admin_traffic(db, name, log, base_time):
 
 	admin_count = 1
 	transform_count = 1
+	log_line_num = 0
 	c.execute('BEGIN TRANSACTION')
 	for line in log:
-		# Transformations are handled later to ensure that all packets are in the system
+		log_line_num += 1
+		# transforms are handled later to ensure that all packets are in the system
 		# Example lines:
 		# 353608.535795917 LOG0 Outbound: Accept: Admin: sent: /p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:2f67e51d456961704b08f6ec186dd182
 		# 353609.935773424 LOG0 Inbound: Accept: Admin: pong accepted: p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:9c05e526c46e5f4214f90201dd5e3b58/
@@ -305,7 +327,10 @@ def record_gate_admin_traffic(db, name, log, base_time):
 		in_proto, in_sip, in_sport, in_dip, in_dport, in_hash = m.groups()[5:11]
 		out_proto, out_sip, out_sport, out_dip, out_dport, out_hash = m.groups()[11:]
 		
-		time = int(time) - base_time
+		time = int(time)
+
+		# We'll be recording the reason one way or another
+		reason_id = add_reason(db, reason)
 
 		# Create packets. A transformation line (IE, NAT or Hopper) may have both a send and 
 		# receive. Admin lines will just be one or the other. Regardless, create both packets if
@@ -318,9 +343,13 @@ def record_gate_admin_traffic(db, name, log, base_time):
 			dest_id = this_id
 			hash = in_hash
 
-			c.execute('''INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-							(time, is_send, in_proto, src_ip, dest_ip, src_id, dest_id, hash))
+			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+								src_ip, dest_ip, src_id, dest_id,
+								hash, reason_id, log_line)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							(this_id, time, is_send, in_proto,
+								src_ip, dest_ip, src_id, dest_id,
+								hash, reason_id, log_line_num))
 			in_packet_id = c.lastrowid
 		else:
 			in_packet_id = None
@@ -333,18 +362,22 @@ def record_gate_admin_traffic(db, name, log, base_time):
 			dest_id = get_system(db, ip=dest_ip)
 			hash = out_hash
 
-			c.execute('''INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-							(time, is_send, out_proto, src_ip, dest_ip, src_id, dest_id, hash))
+			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+								src_ip, dest_ip, src_id, dest_id,
+								hash, reason_id, log_line)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							(this_id, time, is_send, out_proto,
+								src_ip, dest_ip, src_id, dest_id,
+								hash, reason_id, log_line_num))
 			out_packet_id = c.lastrowid
 		else:
 			out_packet_id = None
 
 		# If this was a transformation, record the linkage
 		if module == 'NAT' or module == 'Hopper':
-			reason_id = add_reason(db, reason)
-			c.execute('INSERT INTO transformations (gate_id, in_id, out_id, reason_id) VALUES (?, ?, ?, ?)',
-				(this_id, in_packet_id, out_packet_id, reason_id))
+			#c.execute('INSERT INTO transforms (gate_id, in_id, out_id, reason_id) VALUES (?, ?, ?, ?)',
+			#	(this_id, in_packet_id, out_packet_id, reason_id))
+			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
 			transform_count += 1
 		elif module == 'Admin':
 			admin_count += 1
@@ -360,10 +393,52 @@ def record_gate_admin_traffic(db, name, log, base_time):
 	c.close()
 
 ##########################################
-# Do simple checks to see if each packet got where it should be
-# Begin by documenting all the packet transformations
-def trace_packets(db, results):
-	pass
+# Track each sent packet through the system and determine either where it died or that
+# it reached its destination
+def trace_packets(db):
+	print('Beginning packet trace')
+
+	# Go one-by-one through packets and match them up
+	packets = db.cursor()
+	
+	packets.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+	total_count = packets.fetchone()[0]
+
+	packets.execute('SELECT id, time, hash, src_id, proto FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+
+	count = 0
+	for sent_packet in packets:
+		id, time, hash, src_id, proto = sent_packet
+
+		# Find corresponding received packet
+		c = db.cursor()
+		c.execute('''SELECT id, next_hop_id FROM packets
+						WHERE is_send=0 AND NOT id=?
+							AND proto=?
+							AND src_id=?  AND hash=?
+							AND time > ? AND time < ?''',
+						(id, proto, src_id, hash, time - TIME_SLACK, time + TIME_SLACK))
+		receives = c.fetchall()
+		
+		if len(receives) == 1:
+			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], id))
+		elif len(receives) > 1:
+			print('Multiple matches for packet {} (hash {})'.format(id, hash))
+			print(sent_packet)
+			print(receives)
+		else:
+			# No matches found. We'll figure this one out later
+			pass
+
+		c.close()
+
+		count += 1
+		if count % 1000 == 0:
+			print('Tracing packet {} of {}'.format(count, total_count))
+
+	print('{} packets traced'.format(count))
+	db.commit()
+	packets.close()
 
 def generate_stats(db):
 	pass
@@ -430,7 +505,7 @@ def main(argv):
 
 	# Make nice relative base times
 	base_time = get_overall_base_time(args.logdir)
-	print('Using {} seconds as the base time for the experiment'.format(base_time))
+	print('{} seconds is the base time for the experiment'.format(base_time))
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
@@ -448,10 +523,10 @@ def main(argv):
 	# Trace packets
 	if doTrace:
 		# What did each host attempt to do?
-		record_traffic(db, args.logdir, base_time)
+		record_traffic(db, args.logdir)
 
 		# Do quick check for packets making it to their destination
-
+		trace_packets(db)
 
 		# Now trace through failures to find where and why they died
 	

@@ -173,7 +173,7 @@ def udp_sender(ip, port, delay=1, size=None):
 				buf = s.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(6, ip, port, buf)
+				log_recv(17, ip, port, buf)
 			except socket.timeout:
 				continue
 	except KeyboardInterrupt:
