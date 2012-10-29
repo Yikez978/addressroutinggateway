@@ -24,7 +24,7 @@ def log(msg):
 def log_timestamp():
 	log('START: Starting at {}'.format(time.strftime('%d %b %Y %H:%M:%S')))
 
-def log_local_addr(addr):
+def log_local_addr(port):
 	ip, port = addr
 	ip = socket.gethostbyname(socket.gethostname())
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
@@ -47,6 +47,7 @@ def randbytes(size):
 # Basic senders and receivers
 def tcp_sender(ip, port, delay=1, size=None):
 	log('Starting a TCP sender to {}:{}'.format(ip, port))
+	log_local_addr(port)
 
 	connected = False
 	while not connected:
@@ -62,8 +63,6 @@ def tcp_sender(ip, port, delay=1, size=None):
 
 	s.settimeout(1)
 	
-	log_local_addr(s.getsockname())
-
 	try:
 		while True:
 			if size is not None:
@@ -94,14 +93,13 @@ def tcp_sender(ip, port, delay=1, size=None):
 
 def tcp_receiver(port, echo=False, size=None):
 	log('Starting a TCP receiver on port {}'.format(port))
+	log_local_addr(port)
 
 	stopper = threading.Event()
 
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	s.bind(('', port))
 	s.listen(1)
-
-	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -151,11 +149,10 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 		
 def udp_sender(ip, port, delay=1, size=None):
 	log('Starting a UDP sender to {}:{}'.format(ip, port))
+	log_local_addr(port)
 
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.settimeout(1)
-	
-	log_local_addr(s.getsockname())
 
 	try:
 		while True:
@@ -188,11 +185,10 @@ def udp_sender(ip, port, delay=1, size=None):
 
 def udp_receiver(port, echo=False, size=None):
 	log('Starting a UDP receiver on port {}'.format(port))
+	log_local_addr(port)
 	
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.bind(('', port))
-	
-	log_local_addr(s.getsockname())
 
 	try:
 		while True:
