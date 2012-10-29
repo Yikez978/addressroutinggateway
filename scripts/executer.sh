@@ -121,14 +121,14 @@ function start-generator {
 			# Listen
 			echo $1 listener created on port $2
 			filename="`hostname`-listen-$1:$2.log"
-			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" &
+			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" 2>&1 &
 			disown $!
 		elif [[ "$#" == 4 ]]
 		then
 			# Send
 			echo $1 sender created to $3:$2 with $4 second delay
 			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
-			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" >"$filename" &
+			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" >"$filename" 2>&1 &
 			disown $!
 		else
 			help start-generator

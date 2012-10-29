@@ -25,7 +25,6 @@ def log_timestamp():
 	log('START: Starting at {}'.format(time.strftime('%d %b %Y %H:%M:%S')))
 
 def log_local_addr(port):
-	ip, port = addr
 	ip = socket.gethostbyname(socket.gethostname())
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
