@@ -6,6 +6,7 @@
 *.h.*
 *.o.*
 *.symvers
+*.db
 modules.order
 *.mod.c
 .tmp_versions

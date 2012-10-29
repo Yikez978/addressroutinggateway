@@ -1,0 +1,474 @@
+#!/usr/bin/env python
+from __future__ import absolute_import
+from __future__ import print_function
+from __future__ import unicode_literals
+from __future__ import division
+
+import sys
+import os
+import os.path
+import pcap
+import sqlite3
+import argparse
+import re
+from glob import glob
+
+IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
+PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
+
+def create_schema(db):
+	# Schema:
+	# systems
+	#	- id (PK)
+	#	- name
+	#	- ip (index) - in the case of gateways, the internal IP
+	#	- base ip (NULL) - only for gateways, the external base IP
+	#	- ip mask (NULL) - gateways, external IP mask
+	#
+	# reasons
+	#	- id (PK)
+	#	- msg (NOT NULL)
+	#
+	# packets
+	#	- id (PK)
+	#	- time (int) - time in seconds, relative to the start of the experiment
+	#	- is_send (bool)
+	#	- proto (int) - protocol of this packet
+	#	- src_ip 
+	#	- dest_ip
+	#	- src_id (foreign: packet.id)
+	#	- dest_id (foreign: packet.id)
+	#	- hash (index) - MD5 hash of packet data, after the transport layer
+	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
+	#
+	# transformations
+	#	- id (PK)
+	#	- gate_id (foreign: system.id)
+	#	- in_id (foreign: packet.id)
+	#	- out_id (foreign: packet.id)
+	#	- reason_id (foreign: packet.id)
+	c = db.cursor()	
+	c.execute('''CREATE TABLE IF NOT EXISTS systems (
+						id INTEGER, name VARCHAR(25), ip INT, base_ip INT, mask INT,
+						PRIMARY KEY(id ASC))''')
+	
+	c.execute('''CREATE TABLE IF NOT EXISTS reasons (id INTEGER, msg VARCHAR(255),
+						PRIMARY KEY(id ASC))''')
+
+	c.execute('''CREATE TABLE IF NOT EXISTS packets (
+						id INTEGER, 
+						time INTEGER,
+						is_send TINYINT,
+						proto SHORTINT,
+						src_ip INT,
+						dest_ip INT,
+						src_id INT,
+						dest_id INT,
+						hash CHARACTER(32),
+						PRIMARY KEY (id ASC))''')
+
+	c.execute('''CREATE TABLE IF NOT EXISTS transformations (
+						id INTEGER,
+						gate_id INT,
+						in_id INT,
+						out_id INT,
+						reason_id INT,
+						PRIMARY KEY (id ASC))''')
+	
+	c.close()
+
+##############################################
+# Manange reasons table
+def add_reason(db, reason):
+	id = get_reason(db, reason)
+	if id is not None:
+		return id
+	
+	c = db.cursor()
+	c.execute('INSERT INTO reasons (msg) VALUES (?)', (reason,))
+	return c.lastrowid
+
+def get_reason(db, reason):
+	c = db.cursor()
+	c.execute('SELECT id FROM reasons WHERE msg=?', (reason,))
+	r = c.fetchone()
+	if r is not None:
+		return r[0]
+	else:
+		return None
+
+##############################################
+# Manange system table
+def add_all_systems(db, logdir):
+	print('Adding all systems to database')
+
+	for logName in glob('{}/*.log'.format(logdir)):
+		# Determine what type of log this is. Alters parsing and processing
+		name = os.path.basename(logName)
+		name = name[:name.find('-')]
+
+		print('\tFound {} with log {}'.format(name, logName))
+
+		isGate = name.startswith('gate')
+		isProt = name.startswith('prot')
+		isExt = name.startswith('ext')
+		
+		with open(logName) as log:
+			if isGate:
+				add_gate(db, name, log)
+			else:
+				add_client(db, name, log)
+
+def add_gate(db, name, log):
+	ip = None
+	for line in log:
+		if line.find('Internal IP') != -1:
+			m = re.search('''Internal IP: ({0}).+IP: ({0}).+mask: ({0})'''.format(IP_REGEX), line)
+			if m is None:
+				raise IOError('Found address line, but unable to parse it for {}'.format(name))
+
+			ip = m.group(1)
+			base = m.group(2)
+			mask = m.group(3)
+			break
+
+	if ip is None:
+		raise IOError('Unable to find address from log file for {}'.format(name))
+	
+	add_system(db, name, ip, base, mask)
+
+def add_client(db, name, log):
+	# Finds the client's IP address and adds it to the database
+	ip = None
+	for line in log:
+		if line.find('LOCAL ADDRESS') != -1:
+			m = re.search('''({}):(\d+)'''.format(IP_REGEX), line)
+			if m is None:
+				raise IOError('Found local address line, but unable to parse it for {}'.format(name))
+
+			ip = m.group(1)
+			port = m.group(2)
+			break
+	
+	if ip is None:
+		raise IOError('Unable to parse log file for {}. Bad format?'.format(name))
+
+	add_system(db, name, ip)
+
+def add_system(db, name, ip, ext_base=None, ext_mask=None):
+	# Add system only if it doesn't already exist. Otherwise, just return the rowid
+	id = get_system(db, name=name)
+	if id is not None:
+		return id
+
+	# Convert IPs/mask to decimal
+	if type(ip) is str:
+		ip = inet_aton_integer(ip)
+	if type(ext_base) is str:
+		ext_base = inet_aton_integer(ext_base)
+	if type(ext_mask) is str:
+		ext_mask = inet_aton_integer(ext_mask)
+
+	# Actually add
+	c = db.cursor()
+	if not ext_base:
+		c.execute('INSERT INTO systems (name, ip) VALUES (?, ?)', (name, ip))
+		return c.lastrowid
+	else:
+		c.execute('INSERT INTO systems (name, ip, base_ip, mask) VALUES (?, ?, ?, ?)',
+			(name, ip, ext_base, ext_mask))
+		return c.lastrowid
+
+def get_system(db, name=None, ip=None):
+	# Gets a system ID based on the given name or ip
+	c = db.cursor()
+	if name is not None:
+		c.execute('SELECT id FROM systems WHERE name=?', (name,))
+		r = c.fetchone()
+		c.close()
+		if r is not None:
+			return r[0]
+		else:
+			return None
+	
+	elif ip is not None:
+		# Convert IPs/mask to decimal
+		if type(ip) is str:
+			ip = inet_aton_integer(ip)
+
+		c.execute('SELECT id, ip, name FROM systems WHERE ip=? OR (mask & ? = mask & base_ip)', (ip, ip))
+		rows = c.fetchall()
+		if len(rows) == 1:
+			return rows[0][0]
+		elif len(rows) > 1:
+			for r in rows:
+				if r[1] == ip:
+					return r[0]
+
+			print(rows)
+			raise Exception('Found multiple systems matching IP {}, but none were an exact match. Bad configuration?'.format(ip))
+		else:
+			return None
+
+	else:
+		raise Exception('Name or IP must be given for retrieval')
+
+###############################################
+# Parse sends
+def record_traffic(db, logdir, base_time):
+	# Go through each log file and record what packets each host believes it sent
+	for logName in glob('{}/*.log'.format(logdir)):
+		# Determine what type of log this is. Alters parsing and processing
+		name = os.path.basename(logName)
+		name = name[:name.find('-')]
+
+		isGate = name.startswith('gate')
+		isProt = name.startswith('prot')
+		isExt = name.startswith('ext')
+
+		print('Processing send log file for {}'.format(name))
+		
+		with open(logName) as log:
+			if isGate:
+				record_gate_admin_traffic(db, name, log, base_time)
+			else:
+				record_client_traffic(db, name, log, base_time)
+
+def record_client_traffic(db, name, log, base_time):
+	this_id = get_system(db, name=name)
+	this_ip = None
+
+	log.seek(0)
+	c = db.cursor()
+
+	# Record each packet this host saw
+	count = 0
+	c.execute('BEGIN TRANSACTION');
+	for line in log:
+		# Pull out data on each send or receive
+		# Example lines:
+		# 1351452800.14 LOG4 Sent 6:dd3f6ad25f9885796e1193fe93dd841e to 172.2.20.0:40869
+		# 1351452800.14 LOG4 Received 6:33f773e74690b9dfe714f80d6e3d8c39 from 172.2.20.0:40869
+		m = re.match('''^([0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX), line)
+		if m is None:
+			continue
+
+		time, direction, proto, hash, their_ip, port = m.groups()
+		time = int(time) - base_time
+		their_ip = inet_aton_integer(their_ip)
+		their_id = get_system(db, ip=their_ip)
+
+		if direction == 'Received':
+			is_send = False
+			src_ip = their_ip
+			src_id = their_id
+			dest_ip = this_ip
+			dest_id = this_id
+		else:
+			is_send = True
+			src_ip = this_ip
+			src_id = this_id
+			dest_ip = their_ip
+			dest_id = their_id
+		
+		c.execute('INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+			(time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash))
+
+		count += 1
+		if count % 1000 == 0:
+			print('\tProcessed {} packets so far'.format(count))
+
+	print('\t{} total packets processed'.format(count))
+	db.commit()
+	c.close()
+
+def record_gate_admin_traffic(db, name, log, base_time):
+	this_id = get_system(db, name=name)
+	this_ip = None
+
+	log.seek(0)
+	c = db.cursor()
+
+	admin_count = 1
+	transform_count = 1
+	c.execute('BEGIN TRANSACTION')
+	for line in log:
+		# Transformations are handled later to ensure that all packets are in the system
+		# Example lines:
+		# 353608.535795917 LOG0 Outbound: Accept: Admin: sent: /p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:2f67e51d456961704b08f6ec186dd182
+		# 353609.935773424 LOG0 Inbound: Accept: Admin: pong accepted: p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:9c05e526c46e5f4214f90201dd5e3b58/
+		m = re.match('''^([0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX), line)
+		if m is None:
+			continue
+
+		time, direction, result, module, reason = m.groups()[:5]
+		in_proto, in_sip, in_sport, in_dip, in_dport, in_hash = m.groups()[5:11]
+		out_proto, out_sip, out_sport, out_dip, out_dport, out_hash = m.groups()[11:]
+		
+		time = int(time) - base_time
+
+		# Create packets. A transformation line (IE, NAT or Hopper) may have both a send and 
+		# receive. Admin lines will just be one or the other. Regardless, create both packets if
+		# needed
+		if in_sip is not None:
+			is_send = False
+			src_ip = inet_aton_integer(in_sip)
+			src_id = get_system(db, ip=src_ip)
+			dest_ip = inet_aton_integer(in_dip)
+			dest_id = this_id
+			hash = in_hash
+
+			c.execute('''INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+							(time, is_send, in_proto, src_ip, dest_ip, src_id, dest_id, hash))
+			in_packet_id = c.lastrowid
+		else:
+			in_packet_id = None
+
+		if out_sip is not None:
+			is_send = True
+			src_ip = inet_aton_integer(out_sip)
+			src_id = this_id
+			dest_ip = inet_aton_integer(out_dip)
+			dest_id = get_system(db, ip=dest_ip)
+			hash = out_hash
+
+			c.execute('''INSERT INTO packets (time, is_send, proto, src_ip, dest_ip, src_id, dest_id, hash)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+							(time, is_send, out_proto, src_ip, dest_ip, src_id, dest_id, hash))
+			out_packet_id = c.lastrowid
+		else:
+			out_packet_id = None
+
+		# If this was a transformation, record the linkage
+		if module == 'NAT' or module == 'Hopper':
+			reason_id = add_reason(db, reason)
+			c.execute('INSERT INTO transformations (gate_id, in_id, out_id, reason_id) VALUES (?, ?, ?, ?)',
+				(this_id, in_packet_id, out_packet_id, reason_id))
+			transform_count += 1
+		elif module == 'Admin':
+			admin_count += 1
+
+		if admin_count % 1000 == 0:
+			print('\t~{} admin packets processed'.format(admin_count))
+		if transform_count % 1000 == 0:
+			print('\t~{} transforms processed'.format(transform_count))
+		
+	print('\t{} total admin packets processed'.format(admin_count - 1))
+	print('\t{} total transforms processed'.format(transform_count - 1))
+	db.commit()
+	c.close()
+
+##########################################
+# Do simple checks to see if each packet got where it should be
+# Begin by documenting all the packet transformations
+def trace_packets(db, results):
+	pass
+
+def generate_stats(db):
+	pass
+
+########################################
+# Helper utilities
+def inet_aton_integer(ip):
+	octets = ip.split('.')
+	n = 0
+	for o in octets:
+		n = (n << 8) | int(o)
+	return n
+
+def inet_ntoa_integer(addr):
+	ip = ''
+	for i in range(0, 32, 8):
+		ip = str(addr >> i & 0xFF) + '.' + ip
+	return ip[:-1]
+
+def get_overall_base_time(logdir):
+	earliestBase = None
+
+	for logName in glob('{}/*.log'.format(logdir)):
+		with open(logName) as log:
+			base = get_base_time(log)
+			if base < earliestBase or earliestBase is None:
+				earliestBase = base
+
+	return earliestBase
+
+def get_base_time(log):
+	curr = log.tell()
+	log.seek(0)
+	base = 0
+	for line in log:
+		m = re.match('^([0-9]+)', line)
+		if m is not None:
+			base = int(m.group(1))
+			break
+	log.seek(curr)
+	return base
+
+def main(argv):
+	# Parse command line
+	parser = argparse.ArgumentParser(description='Process an ARG test network run')
+	parser.add_argument('-l', '--logdir', default='.', help='Directory with pcap and log files from a test')
+	parser.add_argument('-db', '--database', default=':memory:',
+		help='SQLite database to save packet-tracing data to. If it already exists, \
+			we assume it contains trace data. If not given, will be done in memory.')
+	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
+	parser.add_argument('-t', '--trace-only', action='store_true', help='Perform only the initial step of tracing each packet through the network. Do not pull stats out')
+	args = parser.parse_args(argv[1:])
+
+	# Ensure database is empty
+	# If it is and/or if --empty-database was given, create the schema
+	doTrace = True
+	if os.path.exists(args.database):
+		if args.empty_database:
+			os.unlink(args.database)
+		else:
+			print('Database already exists, skipping packet trace.')
+			print('To override this and force a new trace, give --empty-database on the command line')
+			doTrace = False
+
+	# Make nice relative base times
+	base_time = get_overall_base_time(args.logdir)
+	print('Using {} seconds as the base time for the experiment'.format(base_time))
+
+	# Open database and create schema if it doesn't exist already
+	db = sqlite3.connect(args.database)
+	if doTrace:
+		try:
+			create_schema(db)
+		except sqlite3.OperationalError as e:
+			print("Unable to create database: ", e)
+			return 1
+
+	# Ensure all the systems are in place before we begin
+	if doTrace:
+		add_all_systems(db, args.logdir)
+
+	# Trace packets
+	if doTrace:
+		# What did each host attempt to do?
+		record_traffic(db, args.logdir, base_time)
+
+		# Do quick check for packets making it to their destination
+
+
+		# Now trace through failures to find where and why they died
+	
+	if args.trace_only:
+		print('Trace only requested. Processing complete')
+		return 0
+
+	# Collect stats
+	# TBD
+	# TBD allow packets outside of a range of times to be ignored
+	
+	# All done
+	db.commit()
+	db.close()
+
+	return 0
+
+if __name__ == '__main__':
+	sys.exit(main(sys.argv))
+
