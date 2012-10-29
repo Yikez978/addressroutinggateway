@@ -163,10 +163,16 @@ int uninit_director(void)
 		join_director();
 
 		// Kill pcap
-		pcap_close(intData.pd);
-		pcap_close(extData.pd);
-		intData.pd = NULL;
-		extData.pd = NULL;
+		if(intData.pd != NULL)
+		{
+			pcap_close(intData.pd);
+			intData.pd = NULL;
+		}
+		if(extData.pd != NULL)
+		{
+			pcap_close(extData.pd);
+			extData.pd = NULL;
+		}
 	
 		pthread_mutex_unlock(&cancelLock);
 		pthread_mutex_destroy(&cancelLock);

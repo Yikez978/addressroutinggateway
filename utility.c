@@ -94,7 +94,7 @@ void varglog(int level, char *fmt, va_list ap)
 		if(line)
 		{
 			// Include timestamp and log level
-			snprintf(line, fullLen, "%lu LOG%i %s", rawtime, curr.tv_nsec, level, fmt);
+			snprintf(line, fullLen, "%lu LOG%i %s", rawtime, level, fmt);
 			vprintf(line, ap);
 			free(line);
 		}
