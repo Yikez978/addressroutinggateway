@@ -69,7 +69,7 @@ int send_arg_ping(struct arg_network_info *local,
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
 	// Create and send
-	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg)) < 0)
+	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "ping sent", NULL)) < 0)
 		arglog(LOG_DEBUG, "Failed to send ping\n");
 
 	pthread_mutex_unlock(&remote->lock);
@@ -96,7 +96,7 @@ int process_arg_ping(struct arg_network_info *local,
 	if(msg->len == sizeof(remote->proto.pingID))
 	{
 		// Echo back their data
-		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg)) < 0)
+		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg, "pong sent", packet)) < 0)
 			arglog(LOG_DEBUG, "Failed to send pong\n");
 	}
 	else
@@ -175,7 +175,7 @@ int send_arg_conn_data(struct arg_network_info *local,
 							struct arg_network_info *remote,
 							char isResponse)
 {
-	int ret;
+	int ret = 0;
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL;
 
@@ -202,13 +202,14 @@ int send_arg_conn_data(struct arg_network_info *local,
 
 	// Send
 	if((ret = send_arg_packet(local, remote,
-			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg)) < 0)
-		arglog(LOG_DEBUG, "Failed to send connection data\n");
+			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg,
+			"connection data sent", NULL)) < 0)
+		arglog(LOG_DEBUG, "Failed to send connection data: error %i\n", ret);
 
 	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
 
-	return 0;
+	return ret;
 }
 
 int process_arg_conn_data_req(struct arg_network_info *local,
@@ -349,7 +350,7 @@ int send_arg_trust(struct arg_network_info *local,
 	pthread_mutex_lock(&remote->lock);
 
 	// Send
-	if(send_arg_packet(local, remote, ARG_TRUST_DATA_MSG, msg) < 0)
+	if(send_arg_packet(local, remote, ARG_TRUST_DATA_MSG, msg, "trust data sent", NULL) < 0)
 		arglog(LOG_ALERT, "Failed to send ARG trust data\n");
 
 	pthread_mutex_unlock(&remote->lock);
@@ -535,7 +536,8 @@ int process_arg_wrapped(struct arg_network_info *local,
 
 int send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
-					 int type, const struct argmsg *msg)
+					 int type, const struct argmsg *msg,
+					 const char *logMsg, const struct packet_data *originalPacket)
 {
 	int ret = 0;
 	struct packet_data *packet = NULL;
@@ -544,7 +546,7 @@ int send_arg_packet(struct arg_network_info *local,
 		return ret;
 
 	if((ret = send_packet(packet)) >= 0)
-		arglog_result(NULL, packet, 0, 1, "Admin", "sent");
+		arglog_result(originalPacket, packet, 0, 1, "Admin", logMsg);
 	else
 		arglog(LOG_DEBUG, "Failed to send ARG packet\n");
 
@@ -661,6 +663,9 @@ int create_arg_packet(struct arg_network_info *local,
 
 	packet->len = ntohs(packet->ipv4->tot_len) + ntohs(packet->arg->len);
 	packet->ipv4->tot_len = htons(packet->len);
+
+	// Reparse, now that we've added in ARG informatino
+	parse_packet(packet);
 	
 	//arglog(LOG_DEBUG, "seq num out %u\n", packet->arg->seq);
 

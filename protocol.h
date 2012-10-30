@@ -201,7 +201,8 @@ int process_arg_wrapped(struct arg_network_info *local,
 // Creates the ARG header for the given data and sends it
 int send_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
-					 int type, const struct argmsg *msg);
+					 int type, const struct argmsg *msg,
+					 const char *logMsg, const struct packet_data *originalPacket);
 int create_arg_packet(struct arg_network_info *local,
 					 struct arg_network_info *remote,
 					 int type, const struct argmsg *msg,

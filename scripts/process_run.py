@@ -194,13 +194,14 @@ def add_system(db, name, ip, ext_base=None, ext_mask=None):
 			(name, ip, ext_base, ext_mask))
 		return c.lastrowid
 
-def get_system(db, name=None, ip=None):
+def get_system(db, name=None, ip=None, id=None):
 	# Gets a system ID based on the given name or ip
-	c = db.cursor()
 	if name is not None:
+		c = db.cursor()
 		c.execute('SELECT id FROM systems WHERE name=?', (name,))
 		r = c.fetchone()
 		c.close()
+
 		if r is not None:
 			return r[0]
 		else:
@@ -211,8 +212,11 @@ def get_system(db, name=None, ip=None):
 		if type(ip) is str:
 			ip = inet_aton_integer(ip)
 
+		c = db.cursor()
 		c.execute('SELECT id, ip, name FROM systems WHERE ip=? OR (mask & ? = mask & base_ip)', (ip, ip))
 		rows = c.fetchall()
+		c.close()
+
 		if len(rows) == 1:
 			return rows[0][0]
 		elif len(rows) > 1:
@@ -224,6 +228,14 @@ def get_system(db, name=None, ip=None):
 			raise Exception('Found multiple systems matching IP {}, but none were an exact match. Bad configuration?'.format(ip))
 		else:
 			return None
+
+	elif id is not None:
+		c = db.cursor()
+		c.execute('SELECT id, ip, name FROM systems WHERE id=?', (id,))
+		r = c.fetchone()
+		c.close()
+
+		return r
 
 	else:
 		raise Exception('Name or IP must be given for retrieval')
@@ -340,7 +352,7 @@ def record_gate_admin_traffic(db, name, log):
 			src_ip = inet_aton_integer(in_sip)
 			src_id = get_system(db, ip=src_ip)
 			dest_ip = inet_aton_integer(in_dip)
-			dest_id = this_id
+			dest_id = get_system(db, ip=dest_ip)
 			hash = in_hash
 
 			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
@@ -357,7 +369,7 @@ def record_gate_admin_traffic(db, name, log):
 		if out_sip is not None:
 			is_send = True
 			src_ip = inet_aton_integer(out_sip)
-			src_id = this_id
+			src_id = get_system(db, ip=src_ip)
 			dest_ip = inet_aton_integer(out_dip)
 			dest_id = get_system(db, ip=dest_ip)
 			hash = out_hash
@@ -374,13 +386,13 @@ def record_gate_admin_traffic(db, name, log):
 			out_packet_id = None
 
 		# If this was a transformation, record the linkage
-		if module == 'NAT' or module == 'Hopper':
-			#c.execute('INSERT INTO transforms (gate_id, in_id, out_id, reason_id) VALUES (?, ?, ?, ?)',
-			#	(this_id, in_packet_id, out_packet_id, reason_id))
+		if in_packet_id is not None and out_packet_id is not None:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
-			transform_count += 1
-		elif module == 'Admin':
+		
+		if module == 'Admin':
 			admin_count += 1
+		else:
+			transform_count += 1
 
 		if admin_count % 1000 == 0:
 			print('\t~{} admin packets processed'.format(admin_count))
@@ -404,31 +416,48 @@ def trace_packets(db):
 	packets.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
 	total_count = packets.fetchone()[0]
 
-	packets.execute('SELECT id, time, hash, src_id, proto FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+	packets.execute('''SELECT system_id, id, time, hash, src_id, proto FROM packets
+						WHERE is_send=1 AND next_hop_id IS NULL''')
 
 	count = 0
+	failed_count = 0
 	for sent_packet in packets:
-		id, time, hash, src_id, proto = sent_packet
+		system_id, packet_id, time, hash, src_id, proto = sent_packet
 
 		# Find corresponding received packet
 		c = db.cursor()
 		c.execute('''SELECT id, next_hop_id FROM packets
 						WHERE is_send=0 AND NOT id=?
+							AND NOT system_id=?
 							AND proto=?
-							AND src_id=?  AND hash=?
-							AND time > ? AND time < ?''',
-						(id, proto, src_id, hash, time - TIME_SLACK, time + TIME_SLACK))
+							AND src_id=? AND hash=?
+							AND time > ? AND time < ?
+						ORDER BY next_hop_id DESC''',
+						(packet_id, system_id, proto, src_id, hash, time - TIME_SLACK, time + TIME_SLACK))
 		receives = c.fetchall()
 		
 		if len(receives) == 1:
-			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], id))
+			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
+
 		elif len(receives) > 1:
-			print('Multiple matches for packet {} (hash {})'.format(id, hash))
-			print(sent_packet)
-			print(receives)
+			# Find the best match. We want a transformation if it exists. Actually,
+			# if it doesn't freak out and die. We could put some knowledge like "protA1
+			# should be using gateA as its next hop," but I don't think that's needed
+			found = False
+			for recv in receives:
+				if recv[1] is not None:
+					c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (recv[0], packet_id))
+					found = True
+					break
+
+			if not found:
+				print('Multiple possible receives found for packet{}'.format(packet_id))
+				failed_count += 1
+
 		else:
 			# No matches found. We'll figure this one out later
-			pass
+			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			failed_count += 1
 
 		c.close()
 
@@ -436,7 +465,7 @@ def trace_packets(db):
 		if count % 1000 == 0:
 			print('Tracing packet {} of {}'.format(count, total_count))
 
-	print('{} packets traced'.format(count))
+	print('{} traces attempted, {} failed'.format(count, failed_count))
 	db.commit()
 	packets.close()
 
@@ -490,6 +519,8 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('-t', '--trace-only', action='store_true', help='Perform only the initial step of tracing each packet through the network. Do not pull stats out')
+	parser.add_argument('--min-time', type=int, default=0, help='Minimum time, relative to the start of the trace')
+	parser.add_argument('--max-time', type=int, default=None, help='Latest time, relative to the start of the trace')
 	args = parser.parse_args(argv[1:])
 
 	# Ensure database is empty

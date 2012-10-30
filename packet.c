@@ -19,6 +19,8 @@
 
 int parse_packet(struct packet_data *packet)
 {
+	int old = 0;
+
 	void *transStart = NULL;
 	
 	packet->eth = NULL;
@@ -63,6 +65,16 @@ int parse_packet(struct packet_data *packet)
 	{
 		if(packet->ipv4->version != 4)
 			return -ARG_PACKET_PARSE_ERROR;
+
+		// Back up the packet length to skip the padding. If there is none/we're just ipv4,
+		// this step should have no impact
+		arglog(LOG_DEBUG, "len is %i, link layer len %i, ipv4 %i\n", packet->len, packet->linkLayerLen, ntohs(packet->ipv4->tot_len));
+		old = packet->len;
+		packet->len = packet->linkLayerLen + ntohs(packet->ipv4->tot_len);
+		arglog(LOG_DEBUG, "new len is %i\n", packet->len);
+
+		if(packet->len != old)
+			arglog(LOG_DEBUG, "Length change!\n");
 
 		transStart = (void*)((uint8_t*)packet->ipv4 + packet->ipv4->ihl*4);
 
@@ -110,6 +122,11 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 		snprintf(buf, buflen, "Unable to generate ID");
 		return;
 	}
+
+	arglog(LOG_DEBUG, "Hashing");
+	printRaw(packet->unknown_len, packet->unknown_data);
+	arglog(LOG_DEBUG, "(which is a part of %i bytes)", packet->unknown_len);
+	printRaw(packet->len, packet->data);
 
 	// Hash content of packet
 	uint8_t md5sumRaw[16];

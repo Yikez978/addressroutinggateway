@@ -114,6 +114,7 @@ int do_nat_inbound_rewrite(const struct packet_data *packet)
 	set_dest_port(newPacket, e->intPort);
 	
 	// Fix checksums
+	parse_packet(newPacket);
 	udp_csum(newPacket);
 	tcp_csum(newPacket);
 
@@ -198,6 +199,7 @@ int do_nat_outbound_rewrite(const struct packet_data *packet)
 	set_source_port(newPacket, e->gatePort);
 
 	// Fix checksums
+	parse_packet(newPacket);
 	udp_csum(newPacket);
 	tcp_csum(newPacket);
 

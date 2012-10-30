@@ -87,7 +87,7 @@ int init_pcap_driver(pcap_t **pd, char *dev, bool is_internal)
 
 	// Activate pcap
 	*pd = pcap_create(dev, ebuf);
-	if(pd == NULL)
+	if(*pd == NULL)
 	{
 		arglog(LOG_FATAL, "Unable to initialize create pcap driver on %s: %s\n", dev, ebuf);
 		return -ARG_CONFIG_BAD;

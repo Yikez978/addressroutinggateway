@@ -96,9 +96,13 @@ function start-generators {
 			start-generator udp 2000 
 		elif [[ "$TYPE" == "prot" ]] 
 		then
+			if [[ "$HOST" == "protA1" ]]
+			then
 			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 .2
-			start-generator udp 2000 172.100.0.1 .2
+			#start-generator tcp 2000 172.100.0.1 3
+			sleep 1
+			start-generator udp 2000 172.100.0.1 3
+			fi
 		fi
 	fi
 }
@@ -273,7 +277,7 @@ function start-arg {
 		push-to $GATES - arg conf
 		run-on $GATES - start-arg $@
 	else
-		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" &
+		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" 2>&1 &
 		disown $!
 	fi
 	return
@@ -673,6 +677,7 @@ function _main {
 
 	# Determine what type of host we are
 	# For local, we move back up to the parent, giving us nice access to all of the source
+	HOST=`hostname`
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
 	if [[ "$LOCAL" == "$TYPE" ]]
 	then
