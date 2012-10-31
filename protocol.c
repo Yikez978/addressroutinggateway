@@ -270,10 +270,13 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 	else
 	{
 		arglog(LOG_DEBUG, "Connection not properly sized\n");
-		status = -2;
+		status = -ARG_MSG_SIZE_BAD;
 	}
 	
 	free_arg_msg(msg);
+
+	if(!status)
+		arglog_result(packet, NULL, 1, 1, "Admin", "connection data received");
 
 	// All done with a connection
 	remote->proto.state &= ~ARG_DO_CONN;
@@ -391,6 +394,7 @@ int process_arg_trust(struct arg_network_info *local,
 			{
 				arglog(LOG_ALERT, "Already know about %s\n", trust->name);
 				free_arg_msg(msg);
+				arglog_result(packet, NULL, 1, 1, "Admin", "trust data received");
 				return 0;
 			}
 			
@@ -434,8 +438,11 @@ int process_arg_trust(struct arg_network_info *local,
 	else
 	{
 		arglog(LOG_DEBUG, "Trust data not properly sized\n");
-		status = -2;
+		status = -ARG_MSG_SIZE_BAD;
 	}
+
+	if(!status)
+		arglog_result(packet, NULL, 1, 1, "Admin", "trust data received");
 	
 	free_arg_msg(msg);
 

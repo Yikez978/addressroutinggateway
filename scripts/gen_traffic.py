@@ -29,6 +29,7 @@ def log_local_addr(port):
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
 def log_send(proto, ip, port, buf):
+	log('logging send of {}'.format(buf))
 	m = hashlib.md5()
 	m.update(buf)
 	log('Sent {}:{} to {}:{}'.format(proto, m.hexdigest(), ip, port))
@@ -48,21 +49,21 @@ def tcp_sender(ip, port, delay=1, size=None):
 	log('Starting a TCP sender to {}:{}'.format(ip, port))
 	log_local_addr(port)
 
-	connected = False
-	while not connected:
-		try:
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			s.connect((ip, port))
-			connected = True
-		except socket.error:
-			s.close()
-			connected = False
-			time.sleep(1)
-			log('Retrying connection to {}:{}'.format(ip, port))
-
-	s.settimeout(1)
-	
 	try:
+		connected = False
+		while not connected:
+			try:
+				s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				s.connect((ip, port))
+				connected = True
+			except socket.error:
+				s.close()
+				connected = False
+				time.sleep(1)
+				log('Retrying connection to {}:{}'.format(ip, port))
+
+		s.settimeout(1)
+	
 		while True:
 			if size is not None:
 				buf = randbytes(size)

@@ -114,7 +114,6 @@ int do_nat_inbound_rewrite(const struct packet_data *packet)
 	set_dest_port(newPacket, e->intPort);
 	
 	// Fix checksums
-	parse_packet(newPacket);
 	udp_csum(newPacket);
 	tcp_csum(newPacket);
 
@@ -122,7 +121,10 @@ int do_nat_inbound_rewrite(const struct packet_data *packet)
 	{
 		// Success
 		ret = 0;
-		arglog_result(packet, newPacket, 1, 1, "NAT", "rewrite");
+		if(!packet->tcp || packet->unknown_len > 0)
+			arglog_result(packet, newPacket, 1, 1, "NAT", "rewrite");
+		else
+			arglog(LOG_RESULTS, "TCP ACK\n");
 	}
 
 	free_packet(newPacket);
@@ -199,7 +201,6 @@ int do_nat_outbound_rewrite(const struct packet_data *packet)
 	set_source_port(newPacket, e->gatePort);
 
 	// Fix checksums
-	parse_packet(newPacket);
 	udp_csum(newPacket);
 	tcp_csum(newPacket);
 
@@ -207,7 +208,10 @@ int do_nat_outbound_rewrite(const struct packet_data *packet)
 	{
 		// Success
 		ret = 0;
-		arglog_result(packet, newPacket, 0, 1, "NAT", "rewrite");
+		if(!packet->tcp || packet->unknown_len > 0)
+			arglog_result(packet, newPacket, 0, 1, "NAT", "rewrite");
+		else
+			arglog(LOG_RESULTS, "TCP ACK\n");
 	}
 	
 	free_packet(newPacket);

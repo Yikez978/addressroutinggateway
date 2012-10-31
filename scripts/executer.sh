@@ -93,16 +93,13 @@ function start-generators {
 
 			# One UDP and one TCP listener
 			start-generator tcp 2000 
-			start-generator udp 2000 
+			start-generator udp 3000 
 		elif [[ "$TYPE" == "prot" ]] 
 		then
-			if [[ "$HOST" == "protA1" ]]
-			then
 			# Talk to the UDP and TCP external hosts
-			#start-generator tcp 2000 172.100.0.1 3
-			sleep 1
-			start-generator udp 2000 172.100.0.1 3
-			fi
+			start-generator tcp 2000 172.100.0.1 .2
+			sleep .8
+			start-generator udp 3000 172.100.0.1 .2
 		fi
 	fi
 }

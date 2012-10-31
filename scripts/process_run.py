@@ -81,14 +81,6 @@ def create_schema(db):
 						next_hop_id INT DEFAULT NULL,
 						reason_id INT,
 						PRIMARY KEY (id ASC))''')
-
-	c.execute('''CREATE TABLE IF NOT EXISTS transforms (
-						id INTEGER,
-						gate_id INT,
-						in_id INT,
-						out_id INT,
-						reason_id INT,
-						PRIMARY KEY (id ASC))''')
 	
 	c.close()
 
@@ -253,7 +245,7 @@ def record_traffic(db, logdir):
 		isProt = name.startswith('prot')
 		isExt = name.startswith('ext')
 
-		print('Processing send log file for {}'.format(name))
+		print('Processing log file for {}'.format(name))
 		
 		with open(logName) as log:
 			if isGate:
@@ -385,10 +377,17 @@ def record_gate_admin_traffic(db, name, log):
 		else:
 			out_packet_id = None
 
-		# If this was a transformation, record the linkage
+		# If this was a transformation/a send in response to a receive, record the linkage
 		if in_packet_id is not None and out_packet_id is not None:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
-		
+	
+		# TBD, need to fix hashing, but then it would be nice to change the sent
+		# packet (from the external) to point to the correct destination ID,
+		# rather than the gate ID
+		if module == 'NAT' and direction == 'Incoming':
+			#c.execute('''UPDATE packets SET dest_id=? WHERE id=?''', (, ))
+			pass
+
 		if module == 'Admin':
 			admin_count += 1
 		else:
@@ -451,7 +450,7 @@ def trace_packets(db):
 					break
 
 			if not found:
-				print('Multiple possible receives found for packet{}'.format(packet_id))
+				print('Multiple possible receives found for packet {}'.format(packet_id))
 				failed_count += 1
 
 		else:
@@ -469,8 +468,8 @@ def trace_packets(db):
 	db.commit()
 	packets.close()
 
-def generate_stats(db):
-	pass
+def generate_stats(db, begin_time, end_time):
+	print
 
 ########################################
 # Helper utilities
@@ -487,28 +486,14 @@ def inet_ntoa_integer(addr):
 		ip = str(addr >> i & 0xFF) + '.' + ip
 	return ip[:-1]
 
-def get_overall_base_time(logdir):
-	earliestBase = None
-
-	for logName in glob('{}/*.log'.format(logdir)):
-		with open(logName) as log:
-			base = get_base_time(log)
-			if base < earliestBase or earliestBase is None:
-				earliestBase = base
-
-	return earliestBase
-
-def get_base_time(log):
-	curr = log.tell()
-	log.seek(0)
-	base = 0
-	for line in log:
-		m = re.match('^([0-9]+)', line)
-		if m is not None:
-			base = int(m.group(1))
-			break
-	log.seek(curr)
-	return base
+def get_time_limits(db):
+	c = db.cursor()
+	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
+	beg = c.fetchone()[0]
+	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
+	end = c.fetchone()[0]
+	c.close()
+	return (beg, end)
 
 def main(argv):
 	# Parse command line
@@ -519,8 +504,8 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('-t', '--trace-only', action='store_true', help='Perform only the initial step of tracing each packet through the network. Do not pull stats out')
-	parser.add_argument('--min-time', type=int, default=0, help='Minimum time, relative to the start of the trace')
-	parser.add_argument('--max-time', type=int, default=None, help='Latest time, relative to the start of the trace')
+	parser.add_argument('--min-time', type=int, default=0, help='First moment in time to take stats from. Given in seconds relative to the start of the trace')
+	parser.add_argument('--max-time', type=int, default=None, help='Latest packet time to account for in stats')
 	args = parser.parse_args(argv[1:])
 
 	# Ensure database is empty
@@ -531,12 +516,8 @@ def main(argv):
 			os.unlink(args.database)
 		else:
 			print('Database already exists, skipping packet trace.')
-			print('To override this and force a new trace, give --empty-database on the command line')
+			print('To override this and force a new trace, give --empty-database on the command line\n')
 			doTrace = False
-
-	# Make nice relative base times
-	base_time = get_overall_base_time(args.logdir)
-	print('{} seconds is the base time for the experiment'.format(base_time))
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
@@ -558,17 +539,15 @@ def main(argv):
 
 		# Do quick check for packets making it to their destination
 		trace_packets(db)
-
-		# Now trace through failures to find where and why they died
 	
 	if args.trace_only:
 		print('Trace only requested. Processing complete')
 		return 0
 
 	# Collect stats
-	# TBD
 	# TBD allow packets outside of a range of times to be ignored
-	
+	generate_stats(db, args.min_time, args.max_time)
+
 	# All done
 	db.commit()
 	db.close()
