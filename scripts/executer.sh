@@ -96,18 +96,22 @@ function start-generators {
 			start-generator udp 3000 
 		elif [[ "$TYPE" == "prot" ]] 
 		then
+			# Listen for traffic
+			start-generator udp 5000
+			start-generator tcp 6000
+
 			# Talk to the UDP and TCP external hosts
-			#start-generator tcp 2000 172.100.0.1 .2
+			start-generator tcp 2000 172.100.0.1 .2
 			sleep .8
-			#start-generator udp 3000 172.100.0.1 .2
+			start-generator udp 3000 172.100.0.1 .3
 		fi
 
 		if [[ "$HOST" == "protA1" ]]
 		then
-			start-generator udp 5000
+			start-generator udp 5000 172.2.0.11 .4
 		elif [[ "$HOST" == "protB1" ]]
 		then
-			start-generator udp 5000 172.1.0.11 5
+			start-generator tcp 6000 172.1.0.11 .3
 		fi
 	fi
 }

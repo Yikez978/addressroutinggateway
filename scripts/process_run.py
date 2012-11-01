@@ -43,12 +43,17 @@ def create_schema(db):
 	#	- proto (int) - protocol of this packet
 	#	- src_ip 
 	#	- dest_ip
-	#	- src_id (foreign: packet.id)
-	#	- dest_id (foreign: packet.id)
+	#	- src_id (foreign: packet.id) - What host this packet is coming from (the sender of the packet)
+	#	- dest_id (foreign: packet.id) - What host this packet is destined for next. Not teh final destination,
+	#		the next routing stop
+	#	- true_src_id (foreign: packet.id) - The ORIGINAL/real sender of this packet, before routing and transformations
+	#	- true_dest_id (foreign: packet.id) - The REAL destination of this packet. IE, what host behind the gateways
 	#	- hash (index) - MD5 hash of packet data, after the transport layer
 	#	- next_hop_id (foreign: packet.id) - If this packet was transformed, then next_hop_id is the ID of the
 	#		transformed packet. If this field is NULL on a sent packet, it was lost at this point and
 	#		reason_id points to a description of why
+	#	- terminal_hop_id  (foreign: packet.id) - The final packet in this trace. IE, if you followed
+	#		next_hop_id until encountering a null, this id would be the packet you reached
 	#	- is_failed (bool) - True if the packet could not be traced (not received, probably)
 	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
 	#
@@ -78,11 +83,23 @@ def create_schema(db):
 						dest_ip INT,
 						src_id INT,
 						dest_id INT,
+						true_src_id INT,
+						true_dest_id INT,
 						hash CHARACTER(32),
 						next_hop_id INT DEFAULT NULL,
+						terminal_hop_id INT DEFAULT NULL,
 						is_failed TINYINT DEFAULT 0,
 						reason_id INT,
 						PRIMARY KEY (id ASC))''')
+
+	# After much experimentation, this combination of indexes proves effective. While
+	# insert speeds are not impacted much by adding more indexes, the packet tracer updates
+	# next_hop_id and is_failed so often that having them indexed actually hurts things
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_hash ON packets (hash)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_system_id ON packets (system_id)''')
+	#c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
+	#c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	
 	c.close()
 
@@ -188,6 +205,51 @@ def add_system(db, name, ip, ext_base=None, ext_mask=None):
 			(name, ip, ext_base, ext_mask))
 		return c.lastrowid
 
+def check_systems(db):
+	# Ensures that none of the assumptions regarding system naming are violated
+	# IE, must be called either extX, gateX, or protXX. There may be only one prot
+	# client behind each gateway. Each prot client must have a gateway with
+	# their network (IE, protA1 has gateA)
+	print('Checking systems for test setup problems')
+
+	c = db.cursor()
+	c.execute('SELECT name FROM systems')
+	names = [name[0] for name in c.fetchall()]
+	c.close()
+
+	for name in names:
+		if name.startswith('gate'):
+			# Ensure it's properly formatted
+			if re.match('gate[A-Z]', name) is None:
+				print('Gates must be named "gateX," where X is a single capital letter')
+				return False
+
+		elif name.startswith('prot'):
+			if re.match('prot[A-Z][0-9]', name) is None:
+				print('Protected hosts must be named "protXY," where X is a capital letter and Y is a single digit 0-9')
+				return False
+
+			# There must be a gate with the same network "name" (the letter)
+			gate_name = 'gate' + name[4]
+			try:
+				names.index(gate_name)
+			except ValueError:
+				print('There must be a corresponding gate for all protected clients')
+				print('We have a {} but no {}'.format(name, gate_name))
+				return False
+
+		elif name.startswith('ext'):
+			if re.match('ext[0-9]', name) is None:
+				print('External hosts must be named "extX," where X is a single digit 0-9')
+				return False
+
+		else:
+			print('All hosts on the network must be named "extX," "protXX," or "gateX"')
+			return False
+	
+	print('Everything appears fine')
+	return True
+
 def get_system(db, name=None, ip=None, id=None):
 	# Gets a system ID based on the given name or ip
 	if name is not None:
@@ -251,7 +313,7 @@ def record_traffic(db, logdir):
 		
 		with open(logName) as log:
 			if isGate:
-				record_gate_admin_traffic(db, name, log)
+				record_gate_traffic(db, name, log)
 			else:
 				record_client_traffic(db, name, log) 
 
@@ -259,20 +321,30 @@ def record_client_traffic(db, name, log):
 	this_id = get_system(db, name=name)
 	this_ip = None
 
+	is_prot = name.startswith('prot')
+	is_ext = name.startswith('ext')
+	if is_prot:
+		network = name[4]
+		gate_id = get_system(db, name='gate'+network)
+
 	log.seek(0)
 	c = db.cursor()
 
 	# Record each packet this host saw
 	count = 0
 	log_line_num = 0
+
+	client_re = re.compile('''^([0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
+
 	c.execute('BEGIN TRANSACTION');
+
 	for line in log:
 		log_line_num += 1
 		# Pull out data on each send or receive
 		# Example lines:
 		# 1351452800.14 LOG4 Sent 6:dd3f6ad25f9885796e1193fe93dd841e to 172.2.20.0:40869
 		# 1351452800.14 LOG4 Received 6:33f773e74690b9dfe714f80d6e3d8c39 from 172.2.20.0:40869
-		m = re.match('''^([0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX), line)
+		m = client_re.match(line)
 		if m is None:
 			continue
 
@@ -283,22 +355,53 @@ def record_client_traffic(db, name, log):
 
 		if direction == 'Received':
 			is_send = False
-			src_ip = their_ip
-			src_id = their_id
+
 			dest_ip = this_ip
 			dest_id = this_id
-		else:
+			true_dest_id = this_id
+
+			src_ip = their_ip
+
+			if is_prot:
+				# For a protected client, a received packet always has the real
+				# src and destination IPs. The previous routing location was the gateway though
+				src_id = gate_id
+				true_src_id = their_id
+			else:
+				# For an external client, a received packet must be coming from the gateway
+				# However, we don't actually know the gateway, but their_id is more than likely correct
+				# The gateway IP would have to match the internal client for that to be true,
+				# which is a 1 in 65536 chance. TBD, could create a get_system_gate(db, ip)
+				# We don't know the true sender yet
+				src_id = their_id
+				true_src_id = None
+		else: 
 			is_send = True
+
 			src_ip = this_ip
 			src_id = this_id
+			true_src_id = this_id
+
 			dest_ip = their_ip
-			dest_id = their_id
-		
+
+			if is_prot:
+				# A protected client knows the true destination of packets it sends
+				# The next hop must be a gateway
+				dest_id = gate_id
+				true_dest_id = their_id
+			else:
+				# An external client, we don't know the real ID of the system inside that we're communicating
+				# with. At least yet. The malicious clients may include this in the log
+				dest_id = their_id
+				true_dest_id = None
+
 		c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-							src_ip, dest_ip, src_id, dest_id, hash, log_line)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+							hash, log_line)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 						(this_id, time, is_send, proto,
-							src_ip, dest_ip, src_id, dest_id, hash, log_line_num))
+							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+							hash, log_line_num))
 
 		count += 1
 		if count % 1000 == 0:
@@ -308,9 +411,11 @@ def record_client_traffic(db, name, log):
 	db.commit()
 	c.close()
 
-def record_gate_admin_traffic(db, name, log):
+def record_gate_traffic(db, name, log):
 	this_id = get_system(db, name=name)
 	this_ip = None
+	network = name[4]
+	prot_id = get_system(db, name='prot{}1'.format(network))
 
 	log.seek(0)
 	c = db.cursor()
@@ -318,14 +423,18 @@ def record_gate_admin_traffic(db, name, log):
 	admin_count = 1
 	transform_count = 1
 	log_line_num = 0
+	
+	gate_re = re.compile('''^([0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
+
 	c.execute('BEGIN TRANSACTION')
+
 	for line in log:
 		log_line_num += 1
 		# transforms are handled later to ensure that all packets are in the system
 		# Example lines:
 		# 353608.535795917 LOG0 Outbound: Accept: Admin: sent: /p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:2f67e51d456961704b08f6ec186dd182
 		# 353609.935773424 LOG0 Inbound: Accept: Admin: pong accepted: p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:9c05e526c46e5f4214f90201dd5e3b58/
-		m = re.match('''^([0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX), line)
+		m = gate_re.match(line)
 		if m is None:
 			continue
 
@@ -343,18 +452,45 @@ def record_gate_admin_traffic(db, name, log):
 		# needed
 		if in_sip is not None:
 			is_send = False
+
 			src_ip = inet_aton_integer(in_sip)
 			src_id = get_system(db, ip=src_ip)
+			true_src_id = None
+
 			dest_ip = inet_aton_integer(in_dip)
-			dest_id = get_system(db, ip=dest_ip)
+			dest_id = this_id
+			true_dest_id = None
+
 			hash = in_hash
 
+			if direction == 'Outbound':
+				# For an outbound receive, this packet must have come from a protected client
+				# We therefore know the real destination and source. Easy!
+				true_src_id = src_id
+				true_dest_id = get_system(db, ip=dest_ip)
+			else:
+				# For an inbound receive, the packet may have come from either an external
+				# client or the other gateway. For the other gateway, we know the it could be an
+				# admin packet or it could be a wrapped packet. For admin we have all the information we need.
+				# For wrapped, we need to look at the send (assuming we have one) to determine the true
+				# source and destination. For an external client we have the true source but an
+				# incomplete destination. However, we can get the true destination if we actually
+				# forwarded the packet.
+				if module == 'Admin':
+					true_src_id = src_id
+					true_dest_id = this_id
+					
+				else:
+					if out_sip is not None:
+						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))
+						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))
+
 			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-								src_ip, dest_ip, src_id, dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								hash, reason_id, log_line)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 							(this_id, time, is_send, in_proto,
-								src_ip, dest_ip, src_id, dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								hash, reason_id, log_line_num))
 			in_packet_id = c.lastrowid
 		else:
@@ -362,18 +498,45 @@ def record_gate_admin_traffic(db, name, log):
 
 		if out_sip is not None:
 			is_send = True
+
 			src_ip = inet_aton_integer(out_sip)
-			src_id = get_system(db, ip=src_ip)
+			src_id = this_id
+			true_src_id = None
+
 			dest_ip = inet_aton_integer(out_dip)
 			dest_id = get_system(db, ip=dest_ip)
+			true_dest_id = None
+
 			hash = out_hash
 
+			if direction == 'Outbound':
+				if module == 'Admin':
+					# Straight forward enough, we're sending an admin packet to another gate
+					true_src_id = this_id
+					true_dest_id = dest_id
+
+				else:
+					# True source and destination can be deduced through what we
+					# received, as that prompted this send
+					if in_sip is not None:
+						true_src_id = get_system(db, ip=inet_aton_integer(in_sip))
+						true_dest_id = get_system(db, ip=inet_aton_integer(in_dip))
+
+			else:
+				if module == 'Admin':
+					true_src_id = this_id
+					true_dest_id = dest_id
+
+				else:
+					true_src_id = get_system(db, ip=src_ip)
+					true_dest_id = dest_id
+
 			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-								src_ip, dest_ip, src_id, dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								hash, reason_id, log_line)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 							(this_id, time, is_send, out_proto,
-								src_ip, dest_ip, src_id, dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								hash, reason_id, log_line_num))
 			out_packet_id = c.lastrowid
 		else:
@@ -406,6 +569,7 @@ def trace_packets(db):
 
 	# Go one-by-one through packets and match them up
 	c = db.cursor()
+	c.execute('BEGIN TRANSACTION')
 	
 	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
 	total_count = c.fetchone()[0]
@@ -413,46 +577,51 @@ def trace_packets(db):
 	count = 0
 	failed_count = 0
 	while True:
-		c.execute('''SELECT system_id, id, time, hash, src_id, proto FROM packets
+		c.execute('''SELECT system_id, name, packets.id, time, hash, src_id, dest_id, proto FROM packets
+						JOIN systems ON systems.id=packets.system_id
 						WHERE is_send=1
 							AND is_failed=0
 							AND next_hop_id IS NULL
+						ORDER BY system_id ASC
 						LIMIT 1''')
 		sent_packet = c.fetchone()
 		if sent_packet is None:
 			break
 
-		system_id, packet_id, time, hash, src_id, proto = sent_packet
+		system_id, system_name, packet_id, time, hash, src_id, dest_id, proto = sent_packet
 
 		# Find corresponding received packet
-		c.execute('''SELECT id, next_hop_id FROM packets
-						WHERE is_send=0 AND NOT id=?
+		c.execute('''SELECT id, next_hop_id, system_id FROM packets
+						WHERE is_send=0
 							AND NOT system_id=?
+							AND src_id=? AND dest_id=?
+							AND hash=?
+							AND NOT id=?
 							AND proto=?
-							AND src_id=? AND hash=?
 							AND time > ? AND time < ?
-						ORDER BY next_hop_id DESC''',
-						(packet_id, system_id, proto, src_id, hash, time - TIME_SLACK, time + TIME_SLACK))
+						ORDER BY next_hop_id DESC, id ASC''',
+						(system_id, src_id, dest_id, 
+							hash, packet_id,
+							proto,
+							time - TIME_SLACK, time + TIME_SLACK))
 		receives = c.fetchall()
 		
 		if len(receives) == 1:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
 
 		elif len(receives) > 1:
-			# Find the best match. We want a transformation if it exists. Actually,
-			# if it doesn't freak out and die. We could put some knowledge like "protA1
-			# should be using gateA as its next hop," but I don't think that's needed
-			found = False
+			# Ensure all systems are the same. If they, are this, is almost certainly a retransmission
+			# If they aren't, we have a problem
+			print('Multiple receives matched sent packet {}, this is likely a retransmission.'.format(packet_id))
+			sys = receives[0][2]
 			for recv in receives:
-				if recv[1] is not None:
-					c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (recv[0], packet_id))
-					found = True
+				if recv[2] != sys:
+					print('Found multiple systems with the same receive... this is a problem (not a retransmission?)')
 					break
 
-			if not found:
-				print('Multiple possible receives found for packet {}'.format(packet_id))
-				c.execute('UPDATE packets SET is_failed=1 WHERE id=?', (packet_id,))
-				failed_count += 1
+			next_hop = receives[0][0]
+			print('Picked {} as the matching receive'.format(next_hop))
+			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (next_hop, packet_id))
 
 		else:
 			# No matches found. We'll figure this one out later
@@ -462,14 +631,29 @@ def trace_packets(db):
 
 		count += 1
 		if count % 1000 == 0:
-			print('Tracing packet {} of {}'.format(count, total_count))
+			print('\tTracing packet {} of {}'.format(count, total_count))
 
-	print('{} traces attempted, {} failed'.format(count, failed_count))
+	print('\t{} traces attempted, {} failed'.format(count, failed_count))
+	db.commit()
+
+	# Add next_hop_id index now that all the data is ready
+	print('Creating index for routing data')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''') # # # 31 sec
+	
+	db.commit()
+	c.close()
+
+def locate_trace_terminations(db):
+	# Find the ends of each trace and work backwards, applying the
+	# terminating packet's ID to each of them
+	c = db.cursor()
+	c.execute('''SELECT id FROM packets WHERE ''')
+
 	db.commit()
 	c.close()
 
 def check_for_trace_cycles(db):
-	print('Checking for cycles in packet traces (indicates problem with processing, not test)')
+	print('Checking for cycles in packet traces')
 	bad = for_all_traces(db, check_trace)
 	if bad:
 		print('Cycles found for packet IDs {}'.format(bad))
@@ -555,6 +739,68 @@ def for_all_traces(db, callback):
 
 	return failures
 
+def complete_packet_intentions(db):
+	# Find any packets that don't know their true source or destination, find
+	# the beginning of the trace they are a part of, and run through it trying to
+	# find data to fill it in
+	print('Finalizing true packet intentions')
+
+	missing = db.cursor()
+	missing.execute('BEGIN TRANSACTION')
+	missing.execute('''SELECT id, true_src_id, true_dest_id
+						FROM packets
+						WHERE true_src_id IS NULL or true_dest_id IS NULL''')
+
+	count = 0
+	for row in missing:
+		packet_id = row[0]
+		
+		# Find the beginning of this trace
+		c = db.cursor()
+		curr_id = packet_id
+		while True:
+			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
+			prev_id = c.fetchone()
+			if prev_id is None:
+				break
+
+			curr_id = prev_id[0]
+
+		# Run down this trace to find the true source and dest
+		true_src_id = row[1]
+		true_dest_id = row[2]
+		while curr_id is not None and (true_src_id is None or true_dest_id is None):
+			c.execute('''SELECT next_hop_id, true_src_id, true_dest_id 
+							FROM packets
+							WHERE id=?''', (curr_id,))
+			next_id, src, dest = c.fetchone()
+			
+			if src is not None:
+				if true_src_id is not None and true_src_id != src:
+					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
+				true_src_id = src
+			if dest is not None:
+				if true_dest_id is not None and true_dest_id != dest:
+					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
+				true_dest_id = dest
+
+			curr_id = next_id
+
+		# Fix what we can
+		c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+		c.close()
+
+		count += 1
+		if count % 1000 == 0:
+			print('\tFinalizing packet {}'.format(count))
+	
+	print('\t{} packets finalized'.format(count))
+	
+	db.commit()
+	missing.close()
+
+########################################
+# Collect results and stats!
 def generate_stats(db, begin_time, end_time):
 	print('stats tbd')
 
@@ -619,14 +865,21 @@ def main(argv):
 	# Ensure all the systems are in place before we begin
 	if doTrace:
 		add_all_systems(db, args.logdir)
+		if not check_systems(db):
+			print('Problems detected with setup. Correct and re-run the test')
+			return 1
 
 	# Trace packets
 	if doTrace:
 		# What did each host attempt to do?
 		record_traffic(db, args.logdir)
 
-		# Do quick check for packets making it to their destination
+		# Follow each packet through the network and figure out where each packet
+		# was meant to go (many were already resolved above, but NAT traffic needs
+		# additional assistance)
 		trace_packets(db)
+		complete_packet_intentions(db)
+		locate_packet_terminations(db)
 
 	# Check for problems
 	cycles = check_for_trace_cycles(db)

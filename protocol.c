@@ -483,7 +483,7 @@ int send_arg_wrapped(struct arg_network_info *local,
 	}
 	
 	if((ret = send_packet(newPacket)) >= 0)
-		arglog_result(packet, newPacket, 1, 1, "Hopper", "wrapped");
+		arglog_result(packet, newPacket, 0, 1, "Hopper", "wrapped");
 	/*else
 		arglog_result(packet, newPacket, 1, 0, "Wrap", "failed to send");*/
 

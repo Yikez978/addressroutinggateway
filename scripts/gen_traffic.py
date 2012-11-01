@@ -29,7 +29,6 @@ def log_local_addr(port):
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
 def log_send(proto, ip, port, buf):
-	log('logging send of {}'.format(buf))
 	m = hashlib.md5()
 	m.update(buf)
 	log('Sent {}:{} to {}:{}'.format(proto, m.hexdigest(), ip, port))
