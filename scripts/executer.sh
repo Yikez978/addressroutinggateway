@@ -55,7 +55,7 @@ function start-tests {
 		sleep 1
 		i=`expr $i - 1`
 	done
-	echo -e "$eraselineDone running tests"
+	echo -e "${eraseline}Done running tests"
 
 	echo Ending test
 	stop-tests
@@ -97,9 +97,17 @@ function start-generators {
 		elif [[ "$TYPE" == "prot" ]] 
 		then
 			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 .2
+			#start-generator tcp 2000 172.100.0.1 .2
 			sleep .8
-			start-generator udp 3000 172.100.0.1 .2
+			#start-generator udp 3000 172.100.0.1 .2
+		fi
+
+		if [[ "$HOST" == "protA1" ]]
+		then
+			start-generator udp 5000
+		elif [[ "$HOST" == "protB1" ]]
+		then
+			start-generator udp 5000 172.1.0.11 5
 		fi
 	fi
 }

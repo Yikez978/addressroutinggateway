@@ -49,6 +49,7 @@ def create_schema(db):
 	#	- next_hop_id (foreign: packet.id) - If this packet was transformed, then next_hop_id is the ID of the
 	#		transformed packet. If this field is NULL on a sent packet, it was lost at this point and
 	#		reason_id points to a description of why
+	#	- is_failed (bool) - True if the packet could not be traced (not received, probably)
 	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
 	#
 	# transforms
@@ -79,6 +80,7 @@ def create_schema(db):
 						dest_id INT,
 						hash CHARACTER(32),
 						next_hop_id INT DEFAULT NULL,
+						is_failed TINYINT DEFAULT 0,
 						reason_id INT,
 						PRIMARY KEY (id ASC))''')
 	
@@ -380,13 +382,6 @@ def record_gate_admin_traffic(db, name, log):
 		# If this was a transformation/a send in response to a receive, record the linkage
 		if in_packet_id is not None and out_packet_id is not None:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
-	
-		# TBD, need to fix hashing, but then it would be nice to change the sent
-		# packet (from the external) to point to the correct destination ID,
-		# rather than the gate ID
-		if module == 'NAT' and direction == 'Incoming':
-			#c.execute('''UPDATE packets SET dest_id=? WHERE id=?''', (, ))
-			pass
 
 		if module == 'Admin':
 			admin_count += 1
@@ -410,21 +405,26 @@ def trace_packets(db):
 	print('Beginning packet trace')
 
 	# Go one-by-one through packets and match them up
-	packets = db.cursor()
+	c = db.cursor()
 	
-	packets.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
-	total_count = packets.fetchone()[0]
-
-	packets.execute('''SELECT system_id, id, time, hash, src_id, proto FROM packets
-						WHERE is_send=1 AND next_hop_id IS NULL''')
+	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+	total_count = c.fetchone()[0]
 
 	count = 0
 	failed_count = 0
-	for sent_packet in packets:
+	while True:
+		c.execute('''SELECT system_id, id, time, hash, src_id, proto FROM packets
+						WHERE is_send=1
+							AND is_failed=0
+							AND next_hop_id IS NULL
+						LIMIT 1''')
+		sent_packet = c.fetchone()
+		if sent_packet is None:
+			break
+
 		system_id, packet_id, time, hash, src_id, proto = sent_packet
 
 		# Find corresponding received packet
-		c = db.cursor()
 		c.execute('''SELECT id, next_hop_id FROM packets
 						WHERE is_send=0 AND NOT id=?
 							AND NOT system_id=?
@@ -451,14 +451,14 @@ def trace_packets(db):
 
 			if not found:
 				print('Multiple possible receives found for packet {}'.format(packet_id))
+				c.execute('UPDATE packets SET is_failed=1 WHERE id=?', (packet_id,))
 				failed_count += 1
 
 		else:
 			# No matches found. We'll figure this one out later
 			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			c.execute('UPDATE packets SET is_failed=1 WHERE id=?', (packet_id,))
 			failed_count += 1
-
-		c.close()
 
 		count += 1
 		if count % 1000 == 0:
@@ -466,10 +466,97 @@ def trace_packets(db):
 
 	print('{} traces attempted, {} failed'.format(count, failed_count))
 	db.commit()
-	packets.close()
+	c.close()
+
+def check_for_trace_cycles(db):
+	print('Checking for cycles in packet traces (indicates problem with processing, not test)')
+	bad = for_all_traces(db, check_trace)
+	if bad:
+		print('Cycles found for packet IDs {}'.format(bad))
+	else:
+		print('No cycles found')
+	return bad
+
+def show_all_traces(db):
+	for_all_traces(db, show_trace)
+	
+def check_trace(db, packet_id, cycle_limit=10):
+	c = db.cursor()
+
+	curr_id = packet_id
+	is_send = True
+
+	cycles = 0
+	while curr_id is not None and cycles < cycle_limit:
+		c.execute('''SELECT next_hop_id FROM packets WHERE id=?''', (curr_id,))
+		row = c.fetchone()
+		if row is None:
+			break
+
+		cycles += 1
+		curr_id = row[0]
+	
+	c.close()
+	
+	return cycles < cycle_limit
+
+def show_trace(db, packet_id, cycle_limit=10):
+	desc = 'Trace of packet {}: '.format(packet_id)
+
+	c = db.cursor()
+
+	curr_id = packet_id
+	is_send = True
+
+	cycles = 0
+	while curr_id is not None and cycles < cycle_limit:
+		c.execute('''SELECT is_send, hash, next_hop_id FROM packets WHERE id=?''', (curr_id,))
+		row = c.fetchone()
+		if row is None:
+			break
+
+		if cycles != 0 and cycles % 2 == 0:
+			desc += '\n' + ' '*(desc.find(':') - 1) + '-> '
+		cycles += 1
+
+		is_send, hash, next_hop_id = row
+		desc += '{}:{} -> '.format(curr_id, hash)
+
+		curr_id = next_hop_id
+	
+	# If the last packet we saw was a send, warn of the break in the chain (never saw a receive)
+	if is_send:
+		desc += '(not received)'
+	else:
+		desc = desc[:-3]
+
+	c.close()
+	
+	if cycles >= cycle_limit:
+		desc += '(cycle limit reached, not done)'
+	
+	print(desc)
+
+	return cycles < cycle_limit
+
+def for_all_traces(db, callback):
+	c = db.cursor()
+	c.execute('''SELECT l.id, r.next_hop_id AS rhop
+						FROM packets AS l
+						LEFT OUTER JOIN packets AS r ON l.id = r.next_hop_id
+					WHERE l.is_send=1
+						AND rhop IS NULL ''')
+	failures = list()
+	for row in c:
+		if not callback(db, row[0]):
+			failures.append(row[0])
+	
+	c.close()
+
+	return failures
 
 def generate_stats(db, begin_time, end_time):
-	print
+	print('stats tbd')
 
 ########################################
 # Helper utilities
@@ -506,6 +593,7 @@ def main(argv):
 	parser.add_argument('-t', '--trace-only', action='store_true', help='Perform only the initial step of tracing each packet through the network. Do not pull stats out')
 	parser.add_argument('--min-time', type=int, default=0, help='First moment in time to take stats from. Given in seconds relative to the start of the trace')
 	parser.add_argument('--max-time', type=int, default=None, help='Latest packet time to account for in stats')
+	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
 	args = parser.parse_args(argv[1:])
 
 	# Ensure database is empty
@@ -539,7 +627,17 @@ def main(argv):
 
 		# Do quick check for packets making it to their destination
 		trace_packets(db)
-	
+
+	# Check for problems
+	cycles = check_for_trace_cycles(db)
+	if cycles:
+		print('WARNING: Cycles found in trace data. Results may be incorrect')
+		if args.show_cycles:
+			for id in cycles:
+				show_trace(db, id)
+		else:
+			print('To display the cycles, specify --show-cycles on the command line')
+
 	if args.trace_only:
 		print('Trace only requested. Processing complete')
 		return 0
