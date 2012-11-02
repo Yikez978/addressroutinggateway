@@ -338,7 +338,7 @@ def record_client_traffic(db, name, log):
 	count = 0
 	log_line_num = 0
 
-	client_re = re.compile('''^([0-9]+\.[0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
+	client_re = re.compile('''^([0-9]+(?:|\.[0-9]+)).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
 	c.execute('BEGIN TRANSACTION');
 
@@ -433,7 +433,7 @@ def record_gate_traffic(db, name, log):
 	transform_count = 1
 	log_line_num = 0
 	
-	gate_re = re.compile('''^([0-9]+\.[0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
+	gate_re = re.compile('''^([0-9]+(?:|\.[0-9]+)).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
 	c.execute('BEGIN TRANSACTION')
 
@@ -922,11 +922,14 @@ def generate_stats(db, begin_time=None, end_time=None):
 	print('####### Results for run #######')
 	print('Generating statistics for time {} to {}'.format(abs_begin_time, abs_end_time))
 
-	# Valid sends vs receives
+	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
 	print('Valid packets sent: {}'.format(sent_count))
 	print('Valid packets received: {}'.format(receive_count))
 	print('Valid packet loss rate: {}'.format(loss_rate))
+
+	# Rejection methods
+
 
 	c.close()
 
