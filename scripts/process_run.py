@@ -19,6 +19,7 @@ PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)
 
 # Times on each host may not match up perfectly. How many second on either side do we allow?
 TIME_SLACK=5
+ROW_CACHE_SIZE=50000
 
 def create_schema(db):
 	# Schema:
@@ -55,7 +56,8 @@ def create_schema(db):
 	#		reason_id points to a description of why
 	#	- terminal_hop_id  (foreign: packet.id) - The final packet in this trace. IE, if you followed
 	#		next_hop_id until encountering a null, this id would be the packet you reached
-	#	- is_failed (bool) - True if the packet could not be traced (not received, probably)
+	#	- trace_failed (bool) - True if the packet could not be traced (not received, probably)
+	#	- truth_failed (bool) - True if the true source or destination of the packet could not be determined
 	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
 	#
 	# transforms
@@ -89,13 +91,14 @@ def create_schema(db):
 						hash CHARACTER(32),
 						next_hop_id INT DEFAULT NULL,
 						terminal_hop_id INT DEFAULT NULL,
-						is_failed TINYINT DEFAULT 0,
+						trace_failed TINYINT DEFAULT 0,
+						truth_failed TINYINT DEFAULT 0,
 						reason_id INT,
 						PRIMARY KEY (id ASC))''')
 
 	# After much experimentation, this combination of indexes proves effective. While
 	# insert speeds are not impacted much by adding more indexes, the packet tracer updates
-	# next_hop_id and is_failed so often that having them indexed actually hurts things
+	# next_hop_id and trace_failed so often that having them indexed actually hurts things
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_hash ON packets (hash)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_system_id ON packets (system_id)''')
 	#c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
@@ -371,11 +374,13 @@ def record_client_traffic(db, name, log):
 			else:
 				# For an external client, a received packet must be coming from the gateway
 				# However, we don't actually know the gateway, but their_id is more than likely correct
-				# The gateway IP would have to match the internal client for that to be true,
+				# The gateway IP would have to match the internal client for that to not be true,
 				# which is a 1 in 65536 chance. TBD, could create a get_system_gate(db, ip)
 				# We don't know the true sender yet
 				src_id = their_id
-				true_src_id = None
+
+				gate_name = get_system(db, id=src_id)[2]
+				true_src_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 		else: 
 			is_send = True
 
@@ -391,10 +396,13 @@ def record_client_traffic(db, name, log):
 				dest_id = gate_id
 				true_dest_id = their_id
 			else:
-				# An external client, we don't know the real ID of the system inside that we're communicating
-				# with. At least yet. The malicious clients may include this in the log
+				# An external client doesn't actually know the interal client's ID, but
+				# we require (for the test) that there's only one of them and we know the 
+				# network they're on, so...
 				dest_id = their_id
-				true_dest_id = None
+
+				gate_name = get_system(db, id=dest_id)[2]
+				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
 		c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
 							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
@@ -575,19 +583,30 @@ def trace_packets(db):
 	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
 	total_count = c.fetchone()[0]
 
-	c.execute('''SELECT system_id, name, packets.id, time, hash, src_id, dest_id, proto FROM packets
-					JOIN systems ON systems.id=packets.system_id
-					WHERE is_send=1
-						AND is_failed=0
-						AND next_hop_id IS NULL
-					ORDER BY system_id ASC''')
-	hopless_packets = c.fetchall()
+	hopless_packets = list()
+	curr_packet = len(hopless_packets)
 
 	count = 0
 	failed_count = 0
 	start_time = time.time()
-	for sent_packet in hopless_packets:
-		system_id, system_name, packet_id, packet_time, hash, src_id, dest_id, proto = sent_packet
+	while True:
+		if curr_packet >= len(hopless_packets):
+			print('\tGrabbing packets that need processing')
+			c.execute('''SELECT system_id, id, time, hash, src_id, dest_id, proto FROM packets
+							WHERE is_send=1
+								AND trace_failed=0
+								AND next_hop_id IS NULL
+							LIMIT ?''', (ROW_CACHE_SIZE,))
+			hopless_packets = c.fetchall()
+			curr_packet = 0
+
+			# If we're all out of packets, terminate
+			if not hopless_packets:
+				break
+
+		sent_packet = hopless_packets[curr_packet]
+		curr_packet += 1
+		system_id, packet_id, packet_time, hash, src_id, dest_id, proto = sent_packet
 
 		# Find corresponding received packet
 		c.execute('''SELECT id, next_hop_id, system_id FROM packets
@@ -625,7 +644,7 @@ def trace_packets(db):
 		else:
 			# No matches found. We'll figure this one out later
 			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
-			c.execute('UPDATE packets SET is_failed=1 WHERE id=?', (packet_id,))
+			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
 			failed_count += 1
 
 		count += 1
@@ -638,8 +657,12 @@ def trace_packets(db):
 			db.commit()
 			c.execute('BEGIN TRANSACTION')
 
-	print('\t{} traces attempted, {} failed'.format(count, failed_count))
 	db.commit()
+
+	if count > 0:
+		print('\t{} traces attempted, {} failed'.format(count, failed_count))
+	else:
+		print('\tEverything appears to be in order here. No traces needed')
 
 	# Add next_hop_id index now that all the data is ready
 	print('Creating index for routing data')
@@ -751,10 +774,10 @@ def complete_packet_intentions(db):
 	print('Finalizing true packet intentions')
 
 	missing = db.cursor()
-	missing.execute('BEGIN TRANSACTION')
 	missing.execute('''SELECT id, true_src_id, true_dest_id
 						FROM packets
-						WHERE true_src_id IS NULL or true_dest_id IS NULL''')
+						WHERE truth_failed=0
+							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
 
 	count = 0
 	for row in missing:
@@ -774,6 +797,10 @@ def complete_packet_intentions(db):
 		# Run down this trace to find the true source and dest
 		true_src_id = row[1]
 		true_dest_id = row[2]
+
+		src_found = False
+		dest_found = False
+
 		while curr_id is not None and (true_src_id is None or true_dest_id is None):
 			c.execute('''SELECT next_hop_id, true_src_id, true_dest_id 
 							FROM packets
@@ -784,25 +811,34 @@ def complete_packet_intentions(db):
 				if true_src_id is not None and true_src_id != src:
 					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
 				true_src_id = src
+				src_found = True
+
 			if dest is not None:
 				if true_dest_id is not None and true_dest_id != dest:
 					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
 				true_dest_id = dest
+				dest_found = True
 
 			curr_id = next_id
 
 		# Fix what we can
-		c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+		if src_found or dest_found:
+			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+		else:
+			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
 		c.close()
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tFinalizing packet {}'.format(count))
 	
-	print('\t{} packets finalized'.format(count))
-	
 	db.commit()
 	missing.close()
+
+	if count > 0:
+		print('\t{} packets finalized'.format(count))
+	else:
+		print('\tNo work needed')
 
 ########################################
 # Collect results and stats!
@@ -841,7 +877,7 @@ def main(argv):
 		help='SQLite database to save packet-tracing data to. If it already exists, \
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
-	parser.add_argument('-t', '--trace-only', action='store_true', help='Perform only the initial step of tracing each packet through the network. Do not pull stats out')
+	parser.add_argument('-t', '--skip-trace', action='store_true', help='Do not ensure tracing is complete')
 	parser.add_argument('--min-time', type=int, default=0, help='First moment in time to take stats from. Given in seconds relative to the start of the trace')
 	parser.add_argument('--max-time', type=int, default=None, help='Latest packet time to account for in stats')
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
@@ -849,18 +885,18 @@ def main(argv):
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
-	doTrace = True
+	do_record = True
 	if os.path.exists(args.database):
 		if args.empty_database:
 			os.unlink(args.database)
 		else:
-			print('Database already exists, skipping packet trace.')
-			print('To override this and force a new trace, give --empty-database on the command line\n')
-			doTrace = False
+			print('Database already exists, skipping data recording.')
+			print('To override this and force a record and trace, give --empty-database on the command line\n')
+			do_record = False
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
-	if doTrace:
+	if do_record:
 		try:
 			create_schema(db)
 		except sqlite3.OperationalError as e:
@@ -868,23 +904,27 @@ def main(argv):
 			return 1
 
 	# Ensure all the systems are in place before we begin
-	if doTrace:
+	if do_record:
 		add_all_systems(db, args.logdir)
 		if not check_systems(db):
 			print('Problems detected with setup. Correct and re-run the test')
 			return 1
 
 	# Trace packets
-	if doTrace:
+	if do_record:
 		# What did each host attempt to do?
 		record_traffic(db, args.logdir)
 
+	if not args.skip_trace:
 		# Follow each packet through the network and figure out where each packet
 		# was meant to go (many were already resolved above, but NAT traffic needs
 		# additional assistance)
 		trace_packets(db)
 		complete_packet_intentions(db)
-		locate_packet_terminations(db)
+		locate_trace_terminations(db)
+	elif do_record:
+		print('--skip-trace was specified but new data was recorded. Unable to provide stats')
+		return 1
 
 	# Check for problems
 	cycles = check_for_trace_cycles(db)
@@ -895,10 +935,6 @@ def main(argv):
 				show_trace(db, id)
 		else:
 			print('To display the cycles, specify --show-cycles on the command line')
-
-	if args.trace_only:
-		print('Trace only requested. Processing complete')
-		return 0
 
 	# Collect stats
 	# TBD allow packets outside of a range of times to be ignored
