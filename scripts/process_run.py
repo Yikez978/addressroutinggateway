@@ -712,16 +712,20 @@ def complete_packet_intentions(db):
 			next_id, src, dest = c.fetchone()
 			
 			if src is not None:
-				if true_src_id is not None and true_src_id != src:
-					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
-				true_src_id = src
-				src_found = True
+				if true_src_id is None:
+					src_found = True
+					true_src_id = src
+				elif true_src_id != src:
+					raise Exception('Problem! Packet {} has a different true \
+						source than {} but is in the same trace'.format(packet_id, curr_id))
 
 			if dest is not None:
-				if true_dest_id is not None and true_dest_id != dest:
-					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
-				true_dest_id = dest
-				dest_found = True
+				if true_dest_id is None:
+					dest_found = True
+					true_dest_id = dest
+				elif true_dest_id != dest:
+					raise Exception('Problem! Packet {} has a different true \
+						dest than {} but is in the same trace'.format(packet_id, curr_id))
 
 			curr_id = next_id
 
@@ -730,6 +734,8 @@ def complete_packet_intentions(db):
 			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
 		else:
 			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
+
+		db.commit()
 		c.close()
 
 		count += 1
@@ -745,21 +751,34 @@ def complete_packet_intentions(db):
 		print('\tNo work needed')
 
 def locate_trace_terminations(db):
+	print('Determining terminal packet of all traces')
+
+	# Terminal packets terminate at themselves, take care of that first
+	terminals = db.cursor()
+	terminals.execute('UPDATE packets SET terminal_hop_id=id WHERE next_hop_id IS NULL')
+
 	# Find the ends of each trace and work backwards, applying the
-	# terminating packet's ID to each of them
-	c = db.cursor()
-	c.execute('''SELECT id FROM packets WHERE ''')
+	# terminating packet's ID to each of them. 
+	terminals.execute('''SELECT id FROM packets WHERE next_hop_id IS NULL''')
+
+	for terminal_id in terminals:
+		c = db.cursor()
+		curr_id = terminal_id
+		c.execute('''SELECT id, terminal_hop_id FROM packets WHERE next_hop_id=?''', (curr_id,))
+
+		db.commit()
+		c.close()
 
 	db.commit()
-	c.close()
+	terminals.close()
 
 def check_for_trace_cycles(db):
-	print('Checking for cycles in packet traces')
+	print('Checking for cycles in packet traces: ')
 	bad = for_all_traces(db, check_trace)
 	if bad:
-		print('Cycles found for packet IDs {}'.format(bad))
+		print('\tCycles found for packet IDs {}'.format(bad))
 	else:
-		print('No cycles found')
+		print('\tNo cycles found')
 	return bad
 
 def show_all_traces(db):
