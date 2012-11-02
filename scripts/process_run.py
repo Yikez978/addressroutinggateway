@@ -671,6 +671,79 @@ def trace_packets(db):
 	db.commit()
 	c.close()
 
+def complete_packet_intentions(db):
+	# Find any packets that don't know their true source or destination, find
+	# the beginning of the trace they are a part of, and run through it trying to
+	# find data to fill it in
+	print('Finalizing true packet intentions')
+
+	missing = db.cursor()
+	missing.execute('''SELECT id, true_src_id, true_dest_id
+						FROM packets
+						WHERE truth_failed=0
+							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
+
+	count = 0
+	for row in missing:
+		packet_id = row[0]
+		
+		# Find the beginning of this trace
+		c = db.cursor()
+		curr_id = packet_id
+		while True:
+			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
+			prev_id = c.fetchone()
+			if prev_id is None:
+				break
+
+			curr_id = prev_id[0]
+
+		# Run down this trace to find the true source and dest
+		true_src_id = row[1]
+		true_dest_id = row[2]
+
+		src_found = False
+		dest_found = False
+
+		while curr_id is not None and (true_src_id is None or true_dest_id is None):
+			c.execute('''SELECT next_hop_id, true_src_id, true_dest_id 
+							FROM packets
+							WHERE id=?''', (curr_id,))
+			next_id, src, dest = c.fetchone()
+			
+			if src is not None:
+				if true_src_id is not None and true_src_id != src:
+					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
+				true_src_id = src
+				src_found = True
+
+			if dest is not None:
+				if true_dest_id is not None and true_dest_id != dest:
+					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
+				true_dest_id = dest
+				dest_found = True
+
+			curr_id = next_id
+
+		# Fix what we can
+		if src_found or dest_found:
+			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+		else:
+			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
+		c.close()
+
+		count += 1
+		if count % 1000 == 0:
+			print('\tFinalizing packet {}'.format(count))
+	
+	db.commit()
+	missing.close()
+
+	if count > 0:
+		print('\t{} packets finalized'.format(count))
+	else:
+		print('\tNo work needed')
+
 def locate_trace_terminations(db):
 	# Find the ends of each trace and work backwards, applying the
 	# terminating packet's ID to each of them
@@ -766,79 +839,6 @@ def for_all_traces(db, callback):
 	c.close()
 
 	return failures
-
-def complete_packet_intentions(db):
-	# Find any packets that don't know their true source or destination, find
-	# the beginning of the trace they are a part of, and run through it trying to
-	# find data to fill it in
-	print('Finalizing true packet intentions')
-
-	missing = db.cursor()
-	missing.execute('''SELECT id, true_src_id, true_dest_id
-						FROM packets
-						WHERE truth_failed=0
-							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
-
-	count = 0
-	for row in missing:
-		packet_id = row[0]
-		
-		# Find the beginning of this trace
-		c = db.cursor()
-		curr_id = packet_id
-		while True:
-			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
-			prev_id = c.fetchone()
-			if prev_id is None:
-				break
-
-			curr_id = prev_id[0]
-
-		# Run down this trace to find the true source and dest
-		true_src_id = row[1]
-		true_dest_id = row[2]
-
-		src_found = False
-		dest_found = False
-
-		while curr_id is not None and (true_src_id is None or true_dest_id is None):
-			c.execute('''SELECT next_hop_id, true_src_id, true_dest_id 
-							FROM packets
-							WHERE id=?''', (curr_id,))
-			next_id, src, dest = c.fetchone()
-			
-			if src is not None:
-				if true_src_id is not None and true_src_id != src:
-					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
-				true_src_id = src
-				src_found = True
-
-			if dest is not None:
-				if true_dest_id is not None and true_dest_id != dest:
-					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
-				true_dest_id = dest
-				dest_found = True
-
-			curr_id = next_id
-
-		# Fix what we can
-		if src_found or dest_found:
-			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
-		else:
-			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
-		c.close()
-
-		count += 1
-		if count % 1000 == 0:
-			print('\tFinalizing packet {}'.format(count))
-	
-	db.commit()
-	missing.close()
-
-	if count > 0:
-		print('\t{} packets finalized'.format(count))
-	else:
-		print('\tNo work needed')
 
 ########################################
 # Collect results and stats!
