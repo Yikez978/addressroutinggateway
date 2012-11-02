@@ -575,21 +575,18 @@ def trace_packets(db):
 	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
 	total_count = c.fetchone()[0]
 
+	c.execute('''SELECT system_id, name, packets.id, time, hash, src_id, dest_id, proto FROM packets
+					JOIN systems ON systems.id=packets.system_id
+					WHERE is_send=1
+						AND is_failed=0
+						AND next_hop_id IS NULL
+					ORDER BY system_id ASC''')
+	hopless_packets = c.fetchall()
+
 	count = 0
 	failed_count = 0
 	start_time = time.time()
-	while True:
-		c.execute('''SELECT system_id, name, packets.id, time, hash, src_id, dest_id, proto FROM packets
-						JOIN systems ON systems.id=packets.system_id
-						WHERE is_send=1
-							AND is_failed=0
-							AND next_hop_id IS NULL
-						ORDER BY system_id ASC
-						LIMIT 1''')
-		sent_packet = c.fetchone()
-		if sent_packet is None:
-			break
-
+	for sent_packet in hopless_packets:
 		system_id, system_name, packet_id, packet_time, hash, src_id, dest_id, proto = sent_packet
 
 		# Find corresponding received packet
