@@ -47,7 +47,7 @@ function start-tests {
 	start-generators
 
 	echo Running for $1 seconds
-	eraseline="\r                        \r"
+	eraseline="\r                             \r"
 	i=$1
 	while (( $i ))
 	do
@@ -64,9 +64,7 @@ function start-tests {
 	echo Pulling logs into $RESULTSDIR/$d
 	retrieve-logs "$d"
 
-	echo Analyze
-	
-	return
+	echo Analyze away
 }
 
 # Ensures all components of a test are dead (gateways, collectors, etc)
@@ -227,15 +225,20 @@ function retrieve-logs {
 	return
 }
 
-# Process a given run's results
-# Usage: process-run <results dir>
-function process-run {
+# Process all runs in the results director
+# Usage: process-runs
+function process-runs {
 	if [[ ! $IS_LOCAL ]]
 	then
 		echo Must be run from local
 		return
 	fi
+}
 
+# Process a given run's results
+# Usage: process-run [<results dir>]
+function process-run {
+	cd $1
 	./scripts/process_run.py 
 }
 

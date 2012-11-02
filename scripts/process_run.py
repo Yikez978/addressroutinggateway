@@ -38,7 +38,7 @@ def create_schema(db):
 	#	- id (PK)
 	#	- system_id (foreign: systems.id) - system this packet was seen/sent on
 	#	- log_line (int) - Line in the log file (of the host we saw it on) that corresponds to this entry
-	#	- time (int) - time in seconds, relative to the start of the experiment
+	#	- time (float) - time in seconds, relative to the start of the experiment
 	#	- is_send (bool)
 	#	- is_valid (bool) - true if the sender believes this packet SHOULD reach its destination
 	#			(ie, a spoofed packet may not be expected to work)
@@ -78,7 +78,7 @@ def create_schema(db):
 						id INTEGER,
 						system_id INTEGER,
 						log_line INT,
-						time INTEGER,
+						time DOUBLE,
 						is_send TINYINT,
 						is_valid TINYINT DEFAULT 1,
 						proto SHORTINT,
@@ -338,7 +338,7 @@ def record_client_traffic(db, name, log):
 	count = 0
 	log_line_num = 0
 
-	client_re = re.compile('''^([0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
+	client_re = re.compile('''^([0-9]+\.[0-9]+).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
 	c.execute('BEGIN TRANSACTION');
 
@@ -353,7 +353,7 @@ def record_client_traffic(db, name, log):
 			continue
 
 		time, direction, proto, hash, their_ip, port = m.groups()
-		time = int(time)
+		time = float(time)
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)
 
@@ -433,7 +433,7 @@ def record_gate_traffic(db, name, log):
 	transform_count = 1
 	log_line_num = 0
 	
-	gate_re = re.compile('''^([0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
+	gate_re = re.compile('''^([0-9]+\.[0-9]+).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
 	c.execute('BEGIN TRANSACTION')
 
@@ -451,7 +451,7 @@ def record_gate_traffic(db, name, log):
 		in_proto, in_sip, in_sport, in_dip, in_dport, in_hash = m.groups()[5:11]
 		out_proto, out_sip, out_sport, out_dip, out_dport, out_hash = m.groups()[11:]
 		
-		time = int(time)
+		time = float(time)
 
 		# We'll be recording the reason one way or another
 		reason_id = add_reason(db, reason)
@@ -683,6 +683,7 @@ def complete_packet_intentions(db):
 						WHERE truth_failed=0
 							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
 
+
 	count = 0
 	for row in missing:
 		packet_id = row[0]
@@ -754,23 +755,65 @@ def locate_trace_terminations(db):
 	print('Determining terminal packet of all traces')
 
 	# Terminal packets terminate at themselves, take care of that first
-	terminals = db.cursor()
-	terminals.execute('UPDATE packets SET terminal_hop_id=id WHERE next_hop_id IS NULL')
+	c = db.cursor()
+	c.execute('BEGIN TRANSACTION')
+	c.execute('UPDATE packets SET terminal_hop_id=id WHERE next_hop_id IS NULL')
 
-	# Find the ends of each trace and work backwards, applying the
-	# terminating packet's ID to each of them. 
-	terminals.execute('''SELECT id FROM packets WHERE next_hop_id IS NULL''')
+	c.execute('''SELECT count(*) FROM packets
+					WHERE next_hop_id IS NOT NULL
+						AND terminal_hop_id IS NULL''')
+	total_count = c.fetchone()[0]
 
-	for terminal_id in terminals:
-		c = db.cursor()
-		curr_id = terminal_id
-		c.execute('''SELECT id, terminal_hop_id FROM packets WHERE next_hop_id=?''', (curr_id,))
+	# For each packet that doesn't know its terminator, hop forward until we find one
+	# Start at the end of traces (roughly) so that later packets find the terminal faster
+	unterminated_packets = list()
+	curr_packet = len(unterminated_packets)
 
-		db.commit()
-		c.close()
+	count = 0
+
+	while True:
+		if curr_packet >= len(unterminated_packets):
+			print('\tGrabbing packets that need processing')
+			c.execute('''SELECT id, next_hop_id FROM packets
+									WHERE next_hop_id IS NOT NULL
+										AND terminal_hop_id IS NULL
+									ORDER BY id DESC
+									LIMIT ?''', (ROW_CACHE_SIZE,))
+			unterminated_packets = c.fetchall()
+			curr_packet = 0
+
+			# If we're all out of packets, terminate
+			if not unterminated_packets:
+				break
+
+		curr_id, next_hop = unterminated_packets[curr_packet]
+		curr_packet += 1
+
+		# Loop forward until we find a packet that has terminal_hop_id set
+		while True:
+			c.execute('''SELECT next_hop_id, terminal_hop_id FROM packets WHERE id=?''', (next_hop,))
+			next_hop, next_terminal = c.fetchone()
+
+			if next_terminal is not None:
+				c.execute('''UPDATE packets SET terminal_hop_id=? WHERE id=?''', (next_terminal, curr_id))
+				break
+			elif next_hop is None:
+				raise Exception('Reached end of trace without finding terminal packet. This should not be possible')
+
+		# Status update
+		count += 1
+		if count % 1000 == 0:
+			print('\tTerminated {} packets of {}'.format(count, total_count))
+			db.commit()
+			c.execute('BEGIN TRANSACTION')
 
 	db.commit()
-	terminals.close()
+	c.close()
+
+	if count > 0:
+		print('\tTerminated {} packets total'.format(count, total_count))
+	else:
+		print('\tNothing to be done')
 
 def check_for_trace_cycles(db):
 	print('Checking for cycles in packet traces: ')
@@ -861,9 +904,53 @@ def for_all_traces(db, callback):
 
 ########################################
 # Collect results and stats!
-def generate_stats(db, begin_time, end_time):
-	print('stats tbd')
+def generate_stats(db, begin_time=None, end_time=None):
+	c = db.cursor()
 
+	# Get the absolute (rather than relative) times to generate stats on
+	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
+	abs_begin_time = c.fetchone()[0]
+	if begin_time is not None:
+		abs_begin_time += begin_time
+	
+	c.execute('SELECT time FROM packets ORDER BY time DESC LIMIT 1')
+	abs_end_time = c.fetchone()[0]
+	if end_time is not None:
+		abs_end_time += end_time
+
+	print('\n###############################')
+	print('####### Results for run #######')
+	print('Generating statistics for time {} to {}'.format(abs_begin_time, abs_end_time))
+
+	# Valid sends vs receives
+	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
+	print('Valid packets sent: {}'.format(sent_count))
+	print('Valid packets received: {}'.format(receive_count))
+	print('Valid packet loss rate: {}'.format(loss_rate))
+
+	c.close()
+
+def valid_loss_rate(db, begin, end):
+	c = db.cursor()
+	c.execute('''SELECT count(*) FROM packets 
+					JOIN systems ON system_id=systems.id
+					WHERE name not like 'gate%'
+						AND is_send=1
+						AND is_valid=1
+						AND time BETWEEN ? AND ?''', (begin, end))	
+	sends = c.fetchone()[0]
+	
+	c.execute('''SELECT count(*) FROM packets 
+					JOIN systems ON system_id=systems.id
+					WHERE name not like 'gate%'
+						AND is_send=0
+						AND is_valid=1
+						AND time BETWEEN ? AND ?''', (begin, end))	
+	receives = c.fetchone()[0]
+	c.close()
+
+	return ((sends - receives)/sends, sends, receives)
+	
 ########################################
 # Helper utilities
 def inet_aton_integer(ip):
@@ -956,7 +1043,6 @@ def main(argv):
 			print('To display the cycles, specify --show-cycles on the command line')
 
 	# Collect stats
-	# TBD allow packets outside of a range of times to be ignored
 	generate_stats(db, args.min_time, args.max_time)
 
 	# All done
