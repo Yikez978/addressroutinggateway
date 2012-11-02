@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 from __future__ import division
 
 import sys
+import time
 import os
 import os.path
 import pcap
@@ -300,7 +301,7 @@ def get_system(db, name=None, ip=None, id=None):
 # Parse sends
 def record_traffic(db, logdir):
 	# Go through each log file and record what packets each host believes it sent
-	for logName in glob('{}/*.log'.format(logdir)):
+	for logName in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
@@ -576,6 +577,7 @@ def trace_packets(db):
 
 	count = 0
 	failed_count = 0
+	start_time = time.time()
 	while True:
 		c.execute('''SELECT system_id, name, packets.id, time, hash, src_id, dest_id, proto FROM packets
 						JOIN systems ON systems.id=packets.system_id
@@ -588,7 +590,7 @@ def trace_packets(db):
 		if sent_packet is None:
 			break
 
-		system_id, system_name, packet_id, time, hash, src_id, dest_id, proto = sent_packet
+		system_id, system_name, packet_id, packet_time, hash, src_id, dest_id, proto = sent_packet
 
 		# Find corresponding received packet
 		c.execute('''SELECT id, next_hop_id, system_id FROM packets
@@ -603,7 +605,7 @@ def trace_packets(db):
 						(system_id, src_id, dest_id, 
 							hash, packet_id,
 							proto,
-							time - TIME_SLACK, time + TIME_SLACK))
+							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
 		receives = c.fetchall()
 		
 		if len(receives) == 1:
@@ -630,8 +632,14 @@ def trace_packets(db):
 			failed_count += 1
 
 		count += 1
-		if count % 1000 == 0:
-			print('\tTracing packet {} of {}'.format(count, total_count))
+		if count % 500 == 0:
+			time_per_chunk = time.time() - start_time
+			start_time = time.time()
+			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
+				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
+
+			db.commit()
+			c.execute('BEGIN TRANSACTION')
 
 	print('\t{} traces attempted, {} failed'.format(count, failed_count))
 	db.commit()
