@@ -995,22 +995,22 @@ def for_all_traces(db, callback):
 
 ########################################
 # Collect results and stats!
-def generate_stats(db, begin_time=None, end_time=None):
+def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	c = db.cursor()
 
 	# Get the absolute (rather than relative) times to generate stats on
 	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
 	abs_begin_time = c.fetchone()[0]
-	if begin_time is not None:
-		abs_begin_time += begin_time
+	if begin_time_buffer is not None:
+		abs_begin_time += begin_time_buffer
 	
 	c.execute('SELECT time FROM packets ORDER BY time DESC LIMIT 1')
 	abs_end_time = c.fetchone()[0]
-	if end_time is not None:
-		abs_end_time += end_time
+	if end_time_buffer is not None:
+		abs_end_time -= end_time_buffer
 
 	print('--- Statistics ---')
-	print('Generating statistics for time {} to {}'.format(abs_begin_time, abs_end_time))
+	print('Generating statistics for time {} to {} ({} seconds total)'.format(abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
 
 	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
@@ -1077,8 +1077,8 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('-t', '--skip-trace', action='store_true', help='Do not ensure tracing is complete')
-	parser.add_argument('--min-time', type=int, default=0, help='First moment in time to take stats from. Given in seconds relative to the start of the trace')
-	parser.add_argument('--max-time', type=int, default=None, help='Latest packet time to account for in stats')
+	parser.add_argument('--start-offset', type=int, default=0, help='How many seconds to ignore at the beginning of a run')
+	parser.add_argument('--end-offset', type=int, default=0, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
 	args = parser.parse_args(argv[1:])
 
@@ -1140,7 +1140,7 @@ def main(argv):
 	print('\n----------------------')
 	show_settings(db)
 	print()
-	generate_stats(db, args.min_time, args.max_time)
+	generate_stats(db, args.start_offset, args.end_offset)
 
 	# All done
 	db.commit()
