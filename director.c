@@ -307,13 +307,13 @@ void direct_inbound(const struct packet_data *packet)
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
-				arglog_result(packet, NULL, 1, 0, "Unwrap", "Dest IP Incorrect");
+				arglog_result(packet, NULL, 1, 0, "Hopper", "Dest IP Incorrect");
 				return;
 			}
 			
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
-				arglog_result(packet, NULL, 1, 0, "Unwrap", "Source IP Incorrect");
+				arglog_result(packet, NULL, 1, 0, "Hopper", "Source IP Incorrect");
 				return;
 			}
 
@@ -351,7 +351,7 @@ void direct_outbound(const struct packet_data *packet)
 		if((ret = do_arg_wrap(packet, gate)) < 0)
 		{
 			arg_strerror_r(ret, error, sizeof(error));
-			arglog_result(packet, NULL, 0, 0, "Wrap", error);
+			arglog_result(packet, NULL, 0, 0, "Hopper", error);
 		}
 	}
 	else

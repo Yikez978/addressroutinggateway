@@ -157,11 +157,11 @@ def read_all_settings(db, logdir):
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
 
-		isGate = name.startswith('gate')
-		isProt = name.startswith('prot')
-		isExt = name.startswith('ext')
+		is_gate = name.startswith('gate')
+		is_prot = name.startswith('prot')
+		is_ext = name.startswith('ext')
 		
-		if isGate:
+		if is_gate:
 			m = re.search('''-hr([0-9]+ms)''', logName)
 			if m is not None:
 				add_setting(db, '{} hop rate'.format(name), m.group(1))
@@ -182,7 +182,6 @@ def read_all_settings(db, logdir):
 					add_setting(db, '{} sender'.format(name), '{}, {}:{}, {} second delay'.format(proto, ip, port, delay))
 				else:
 					print('WARNING: Log file {} improperly named, unable to setup information')
-				
 
 def add_setting(db, name, value):
 	c = db.cursor()
@@ -225,12 +224,12 @@ def add_all_systems(db, logdir):
 
 		print('\tFound {} with log {}'.format(name, logName))
 
-		isGate = name.startswith('gate')
-		isProt = name.startswith('prot')
-		isExt = name.startswith('ext')
+		is_gate = name.startswith('gate')
+		is_prot = name.startswith('prot')
+		is_ext = name.startswith('ext')
 		
 		with open(logName) as log:
-			if isGate:
+			if is_gate:
 				add_gate(db, name, log)
 			else:
 				add_client(db, name, log)
@@ -400,14 +399,14 @@ def record_traffic(db, logdir):
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
 
-		isGate = name.startswith('gate')
-		isProt = name.startswith('prot')
-		isExt = name.startswith('ext')
+		is_gate = name.startswith('gate')
+		is_prot = name.startswith('prot')
+		is_ext = name.startswith('ext')
 
 		print('Processing log file for {}'.format(name))
 		
 		with open(logName) as log:
-			if isGate:
+			if is_gate:
 				record_gate_traffic(db, name, log)
 			else:
 				record_client_traffic(db, name, log) 
@@ -545,7 +544,7 @@ def record_gate_traffic(db, name, log):
 		time = float(time)
 
 		# We'll be recording the reason one way or another
-		reason_id = add_reason(db, reason)
+		reason_id = add_reason(db, '{} {}'.format(direction, reason))
 
 		# Create packets. A transformation line (IE, NAT or Hopper) may have both a send and 
 		# receive. Admin lines will just be one or the other. Regardless, create both packets if
@@ -1012,37 +1011,121 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('--- Statistics ---')
 	print('Generating statistics for time {} to {} ({} seconds total)'.format(abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
 
+	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
+					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+	failed_trace_count, failed_truth_count = c.fetchone()
+	print('Failed traces (unable to find a corresponding receive): {} packets'.format(failed_trace_count))
+	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(failed_truth_count))
+
 	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
-	print('Valid packets sent: {}'.format(sent_count))
+	print('\nValid packets sent: {}'.format(sent_count))
 	print('Valid packets received: {}'.format(receive_count))
+	print('Valid packets lost: {}'.format(sent_count - receive_count))
 	print('Valid packet loss rate: {}'.format(loss_rate))
 
-	# Rejection methods
+	loss_rate, sent_count, receive_count = invalid_loss_rate(db, abs_begin_time, abs_end_time)
+	print('\nInvalid packets sent: {}'.format(sent_count))
+	print('Invalid packets received: {}'.format(receive_count))
+	print('Invalid packets lost: {}'.format(sent_count - receive_count))
+	print('Invalid packet loss rate: {}'.format(loss_rate))
+
+	# Rejection methods (for every packet that didn't make it to its destination, why
+	# did it fail?)
+	losses = loss_methods(db, abs_begin_time, abs_end_time)
+	print('\nLosses:')
+	for msg, packets in losses.iteritems():
+		print('  {}: {} packets ({})'.format(msg, len(packets), packets[:10]))
 
 
 	c.close()
 
 def valid_loss_rate(db, begin, end):
+	# Compare the number of sent valid packets to the number of sent valid packets
+	# that actually reached their intended destination (ideally 0)
 	c = db.cursor()
 	c.execute('''SELECT count(*) FROM packets 
 					JOIN systems ON system_id=systems.id
-					WHERE name not like 'gate%'
+					WHERE name NOT LIKE 'gate%'
 						AND is_send=1
 						AND is_valid=1
 						AND time BETWEEN ? AND ?''', (begin, end))	
 	sends = c.fetchone()[0]
 	
+	c.execute('''SELECT count(*) FROM packets AS p1
+					JOIN systems ON p1.system_id=systems.id
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					WHERE name NOT LIKE 'gate%'
+						AND p1.true_dest_id=p2.system_id
+						AND p1.is_send=1
+						AND p1.is_valid=1
+						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+	receives = c.fetchone()[0]
+	c.close()
+	
+	if sends > 0:
+		return ((sends - receives)/sends, sends, receives)
+	else:
+		return (0, 0, 0)
+
+def invalid_loss_rate(db, begin, end):
+	# Compare the number of sent _invalid_ packets to the number of sent invalid packets
+	# that actually reached their intended destination (ideally 100%)
+	c = db.cursor()
 	c.execute('''SELECT count(*) FROM packets 
 					JOIN systems ON system_id=systems.id
-					WHERE name not like 'gate%'
-						AND is_send=0
-						AND is_valid=1
+					WHERE name NOT LIKE 'gate%'
+						AND is_send=1
+						AND is_valid=0
 						AND time BETWEEN ? AND ?''', (begin, end))	
+	sends = c.fetchone()[0]
+	
+	c.execute('''SELECT count(*) FROM packets AS p1
+					JOIN systems ON p1.system_id=systems.id
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					WHERE name NOT LIKE 'gate%'
+						AND p1.true_dest_id=p2.system_id
+						AND p1.is_send=1
+						AND p1.is_valid=0
+						AND p1.time BETWEEN ? AND ?''', (begin, end))	
 	receives = c.fetchone()[0]
 	c.close()
 
-	return ((sends - receives)/sends, sends, receives)
+	if sends > 0:
+		return ((sends - receives)/sends, sends, receives)
+	else:
+		return (1, 0, 0)
+
+def loss_methods(db, begin, end):
+	# Get sent packets that didn't make it to their destination
+	c = db.cursor()
+	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name FROM packets AS p1
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
+					JOIN systems ON p2.system_id=systems.id
+					WHERE p1.is_send=1
+						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
+						AND p1.time BETWEEN ? AND ?''', (begin, end))
+	
+	packet_cats = {'Unknown': list()}
+	for row in c:
+		packet_id, reason_msg, next_hop_id, name = row
+		is_gate = name.startswith('gate')
+		is_prot = name.startswith('prot')
+		is_ext = name.startswith('ext')
+
+		# The gate was the last place to see the packet. However, if it forwarded it,
+		# then we don't want to blame them... file it under "unknown"
+		if reason_msg is not None:
+			try:
+				packet_cats[reason_msg].append(packet_id)
+			except KeyError:
+				packet_cats[reason_msg] = [packet_id,]
+		else:
+			packet_cats['Unknown'].append(packet_id)
+
+	c.close()
+	return packet_cats
 	
 ########################################
 # Helper utilities
