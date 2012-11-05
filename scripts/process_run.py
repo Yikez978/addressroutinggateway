@@ -73,6 +73,12 @@ def create_schema(db):
 	
 	c.execute('''CREATE TABLE IF NOT EXISTS reasons (id INTEGER, msg VARCHAR(255),
 						PRIMARY KEY(id ASC))''')
+	
+	c.execute('''CREATE TABLE IF NOT EXISTS settings (
+						id INTEGER,
+						name VARCHAR(20) UNIQUE,
+						value VARCHAR(20),
+						PRIMARY KEY (id ASC))''')
 
 	c.execute('''CREATE TABLE IF NOT EXISTS packets (
 						id INTEGER,
@@ -128,8 +134,88 @@ def get_reason(db, reason):
 		return None
 
 ##############################################
+# Manage settings table
+def read_all_settings(db, logdir):
+	# Clean slate
+	c = db.cursor()
+	c.execute('DELETE FROM settings')
+	c.close()
+
+	print('Reading in run settings')
+
+	# Latency comes from folder name
+	dirname = os.path.basename(os.path.realpath(logdir))
+	m = re.search('''-l([0-9a-zA-Z]+)-''', dirname)
+	if m is not None:
+		add_setting(db, 'Latency', m.group(1))
+	else:
+		add_setting(db, 'Latency', 'unknown')
+
+	# Read the settings for each log file
+	for logName in glob('{}/*.log'.format(logdir)):
+		# Determine what type of log this is. Alters parsing and processing
+		name = os.path.basename(logName)
+		name = name[:name.find('-')]
+
+		isGate = name.startswith('gate')
+		isProt = name.startswith('prot')
+		isExt = name.startswith('ext')
+		
+		if isGate:
+			m = re.search('''-hr([0-9]+ms)''', logName)
+			if m is not None:
+				add_setting(db, '{} hop rate'.format(name), m.group(1))
+			else:
+				add_setting(db, '{} hop rate'.format(name), 'unknown')
+		else:
+			if logName.find('send') == -1:
+				m = re.search('''listen-(tcp|udp):([0-9]+)\.log''', logName)
+				if m is not None:
+					proto, port = m.groups()
+					add_setting(db, '{} listener'.format(name), '{}, port {}'.format(proto, port))
+				else:
+					print('WARNING: Log file {} improperly named, unable to setup information')
+			else:
+				m = re.search('''send-(tcp|udp)-({}):([0-9]+)-delay:([0-9\.]+)\.log'''.format(IP_REGEX), logName)
+				if m is not None:
+					proto, ip, port, delay = m.groups()
+					add_setting(db, '{} sender'.format(name), '{}, {}:{}, {} second delay'.format(proto, ip, port, delay))
+				else:
+					print('WARNING: Log file {} improperly named, unable to setup information')
+				
+
+def add_setting(db, name, value):
+	c = db.cursor()
+	try:
+		c.execute('INSERT INTO settings (name, value) VALUES (?, ?)', (name, str(value)))
+	except sqlite3.IntegrityError:
+		c.execute('UPDATE settings SET value=? WHERE name=?', (str(value), name))
+	c.close()
+
+def show_settings(db):
+	c = db.cursor()
+
+	c.execute('SELECT length(name) FROM settings ORDER BY length(name) DESC LIMIT 1')
+	width = c.fetchone()
+
+	if width is not None:
+		print('--- Run settings ---')
+
+		outstr = '{:<' + str(width[0]) + '}: {}'
+
+		c.execute('SELECT name, value FROM settings ORDER BY name ASC')
+		for row in c:
+			print(outstr.format(row[0], row[1]))
+		c.close()
+
+##############################################
 # Manange system table
 def add_all_systems(db, logdir):
+	# Clean slate
+	c = db.cursor()
+	c.execute('DELETE FROM systems')
+	c.close()
+
 	print('Adding all systems to database')
 
 	for logName in glob('{}/*.log'.format(logdir)):
@@ -303,6 +389,11 @@ def get_system(db, name=None, ip=None, id=None):
 ###############################################
 # Parse sends
 def record_traffic(db, logdir):
+	# Ensure we don't double up packet data or something silly like that
+	c = db.cursor()
+	c.execute('DELETE FROM packets')
+	c.close()
+
 	# Go through each log file and record what packets each host believes it sent
 	for logName in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
@@ -918,8 +1009,7 @@ def generate_stats(db, begin_time=None, end_time=None):
 	if end_time is not None:
 		abs_end_time += end_time
 
-	print('\n###############################')
-	print('####### Results for run #######')
+	print('--- Statistics ---')
 	print('Generating statistics for time {} to {}'.format(abs_begin_time, abs_end_time))
 
 	# Valid sends vs receives (loss rate)
@@ -1012,8 +1102,9 @@ def main(argv):
 			print("Unable to create database: ", e)
 			return 1
 
-	# Ensure all the systems are in place before we begin
+	# Ensure all the systems and settings are in place before we begin
 	if do_record:
+		read_all_settings(db, args.logdir)
 		add_all_systems(db, args.logdir)
 		if not check_systems(db):
 			print('Problems detected with setup. Correct and re-run the test')
@@ -1046,6 +1137,9 @@ def main(argv):
 			print('To display the cycles, specify --show-cycles on the command line')
 
 	# Collect stats
+	print('\n----------------------')
+	show_settings(db)
+	print()
 	generate_stats(db, args.min_time, args.max_time)
 
 	# All done
