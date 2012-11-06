@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 #include "utility.h"
 #include "settings.h"
@@ -85,16 +86,16 @@ void varglog(int level, char *fmt, va_list ap)
 
 	if(level <= logLevel)
 	{
-		time_t rawtime;
-		time(&rawtime);
+		struct timeval out;
+		gettimeofday(&out, NULL);
 		
 		fmtLen = strlen(fmt);
 		fullLen += fmtLen;
 		line = (char*)calloc(fullLen, 1);
 		if(line)
 		{
-			// Include timestamp and log level
-			snprintf(line, fullLen, "%lu LOG%i %s", rawtime, level, fmt);
+			// Include timestamp and log level. Timestamp has three decimal points
+			snprintf(line, fullLen, "%lu.%.3lu LOG%i %s", out.tv_sec, out.tv_usec/1000, level, fmt);
 			vprintf(line, ap);
 			free(line);
 		}
