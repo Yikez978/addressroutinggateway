@@ -6,9 +6,9 @@ RESULTSDIR="results"
 LOCAL="ramlap"
 IS_LOCAL=1
 
-GATES="gateA gateB"
+GATES="gateA gateB gateC"
 EXT="ext1"
-PROT="protA1 protB1"
+PROT="protA1 protB1 protC1"
 LATENCY="delay1"
 
 ALL="$GATES $EXT $PROT"
@@ -80,7 +80,7 @@ function start-test {
 	start-generators $1
 
 	echo Running for $2 seconds
-	eraseline="\r                             \r"
+	eraseline="\r                                \r"
 	i=$2
 	while (( $i ))
 	do
@@ -262,13 +262,15 @@ function retrieve-logs {
 	return
 }
 
-# Process all runs in the results director
+# Process all runs in the results director. Farms them out to test hosts
+# for processing, allowing us to parallelize the work.
 # Usage: process-runs
 function process-runs {
-	if [[ ! $IS_LOCAL ]]
+	if [[ $IS_LOCAL ]]
 	then
-		echo Must be run from local
-		return
+		echo tbd
+	else
+		echo tbd
 	fi
 }
 
@@ -303,6 +305,7 @@ function run-make {
 		fi
 	else
 		stop-arg 
+		rm -f install.sh
 		./autogen.sh && make clean && make 2>&1 | tee build.log 
 	fi
 }
@@ -313,6 +316,13 @@ function run-make {
 function start-arg {
 	if [[ $IS_LOCAL ]]
 	then
+		if [[ "$#" != 1 ]]
+		then
+			echo Hop rate must be given
+			help start-arg
+			return 
+		fi
+
 		stop-arg 
 
 		if [ ! -f arg ]
@@ -421,7 +431,7 @@ function shutdown {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL $LATENCY -
-		run-on $ALL $LATENCY - shutdown
+		run-on $ALL $LATENCY - shutdown/
 	else
 		sudo shutdown -h 0
 	fi
@@ -437,7 +447,8 @@ function enable-forwarding {
 		run-on $GATES - enable-forwarding
 	else
 		[[ "$TYPE" == "gate" ]] || return
-		echo 1 > /proc/sys/net/ipv4/ip_forward
+		#echo 1 > /proc/sys/net/ipv4/ip_forward
+		sudo ifconfig br0 up
 	fi
 	return
 }
@@ -451,7 +462,8 @@ function disable-forwarding {
 		run-on $GATES - enable-forwarding
 	else
 		[[ "$TYPE" == "gate" ]] || return
-		echo 0 > /proc/sys/net/ipv4/ip_forward
+		#echo 0 > /proc/sys/net/ipv4/ip_forward
+		sudo ifconfig br0 down
 	fi
 	return
 }
@@ -467,7 +479,7 @@ function _stop-process {
 	for i in {1..10}
 	do
 		# Check for the process
-		if [[ `ps -A | grep "$1"` == "" ]]
+		if [[ `ps -A | grep " $1$"` == "" ]]
 		then
 			return
 		fi
@@ -508,6 +520,20 @@ function install-vmware-tools {
 		reboot
 	fi
 	return
+}
+
+# Installs the packages necessary to build ARG on the gates
+# Usage: setup-gate-env
+function setup-gate-env {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $GATES
+		run-on $GATES - setup-gate-env 
+	else
+		sudo apt-get -y update
+		sudo apt-get -y dist-upgrade
+		sudo apt-get -y install build-essential autoconf automake libtool libpcap-dev libpolarssl-dev bridge-utils
+	fi
 }
 
 # Runs the given command line on all servers. Any command may be used, arguments are allowed
