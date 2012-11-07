@@ -13,9 +13,8 @@ LATENCY="delay1"
 
 ALL="$GATES $EXT $PROT"
 
-# Begins the tests! Runs for <time> seconds with <delay> latency (see set-latency),
-# with ARG hopping every <hop rate> milliseconds.
-# Usage: start-tests <time> <delay> <hop rate>
+# Starts the given test number 
+# Usage: start-tests [<time>]
 function start-tests {
 	if [[ ! $IS_LOCAL ]]
 	then
@@ -23,32 +22,66 @@ function start-tests {
 		return
 	fi
 
-	if [[ "$#" != 3 ]]
+	runtime=900
+	if [[ "$#" == 1 ]]
 	then
-		echo Not enough arguments given
-		help start-tests
+		runtime=$1
+	fi
+
+	# Ensure we have the newest build
+	if ! run-make
+	then
+		echo Fix build problems before continuing
 		return
 	fi
 
-	stop-tests
+	# Do every combination of hop rate (hr), latency, and test
+	for hr in 100000 5000 1000 500 100 50 30 20 10
+	do
+		for latency in 0
+		do
+			for num in 1
+			do
+				start-test $num $runtime $latency $hr 
+			done
+		done
+	done
+}
+
+# Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
+# with <delay> latency (see set-latency), with ARG hopping every <hop rate> milliseconds.
+# Usage: start-test <test num> <time> <latency> <hop rate>
+function start-test {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	if [[ "$#" != 4 ]]
+	then
+		echo Incorrect number of arguments given
+		help start-test
+		return
+	fi
+
+	stop-test
 	clean-pushed
 	clean-pulled
 
-	#run-make
+	echo Setting latency to $3
+	set-latency $3
 
-	echo Setting latency to $2
-	set-latency $2
-	
 	echo Starting collection
 	start-collection
 
-	echo Beginning experiment with hop rate $3
-	start-arg $3
-	start-generators
+	echo Beginning experiment $1 with hop rate $4
+	start-arg $4
+	start-generators $1
 
-	echo Running for $1 seconds
+	echo Running for $2 seconds
 	eraseline="\r                             \r"
-	i=$1
+	i=$2
 	while (( $i ))
 	do
 		echo -ne "$eraseline$i seconds remaining"
@@ -57,33 +90,37 @@ function start-tests {
 	done
 	echo -e "${eraseline}Done running tests"
 
-	echo Ending test
-	stop-tests
+	echo Ending experiment $1
+	stop-test
 
-	d="`date +%Y-%m-%d-%H:%M:%S`-l$2-hr$3ms"
+	d="`date +%Y-%m-%d-%H:%M:%S`-t$1-l$3-hr$4ms"
 	echo Pulling logs into $RESULTSDIR/$d
 	retrieve-logs "$d"
-
-	echo Analyze away
 }
 
 # Ensures all components of a test are dead (gateways, collectors, etc)
-# Usage: stop-tests
-function stop-tests {
+# Usage: stop-test
+function stop-test {
 	stop-generators
 	stop-collection
 	stop-arg
 }
 
-# Starts traffic generators on the network. Intended just for testing.
-# Full tests will call start-generator directly
-# Usage: start-generators
+# Starts traffic generators on the network for the appropriate test
+# Test number may be one of:
+#	1 - Flood legitimate
+#	2 - Flood illegitimate
+#	3 - Replay
+# Usage: start-generators <test num>
 function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $EXT $PROT - scripts/gen_traffic.py
 		run-on $EXT $PROT - start-generators
 	else
+		# What test are we running?
+		# TBD
+
 		# What host are we?
 		if [[ "$TYPE" == "ext" ]]
 		then
@@ -249,15 +286,25 @@ function run-make {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to gateA - conf *.c *.h autogen.sh configure.ac Makefile.am
-		run-on gateA - run-make
-		pull-from gateA - arg
-		mv "$PULLDIR/arg" .
-		clean-pulled 
+		run-on gateA - run-make 
+		pull-from gateA - build.log
+
+		# Check build log for status
+		if ! grep 'make.*Error' "$PULLDIR/build.log" >/dev/null
+		then
+			# All good
+			pull-from gateA - arg
+			mv "$PULLDIR/arg" .
+			clean-pulled 
+			return 0
+		else
+			echo Errors found during build
+			return 1
+		fi
 	else
 		stop-arg 
-		./autogen.sh && make clean && make || return 1
+		./autogen.sh && make clean && make 2>&1 | tee build.log 
 	fi
-	return
 }
 
 # Builds ARG from scratch and runs it on all gateways. Hops
@@ -344,6 +391,9 @@ function set-latency {
 		fi
 
 		# Main bridge ("internet")
+		toExt=`expr $toExt '*' 1000`
+		toA=`expr $toA '*' 1000`
+		toB=`expr $toB '*' 1000`
 		sudo tc qdisc replace dev eth1 root netem delay "$toExt"
 		sudo tc qdisc replace dev eth2 root netem delay "$toA"
 		sudo tc qdisc replace dev eth3 root netem delay "$toB"

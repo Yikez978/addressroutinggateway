@@ -143,11 +143,12 @@ def read_all_settings(db, logdir):
 
 	print('Reading in run settings')
 
-	# Latency comes from folder name
+	# Latency and test number comes from folder name
 	dirname = os.path.basename(os.path.realpath(logdir))
-	m = re.search('''-l([0-9a-zA-Z]+)-''', dirname)
+	m = re.search('''-t([0-9]+)-l([0-9a-zA-Z]+)-''', dirname)
 	if m is not None:
-		add_setting(db, 'Latency', m.group(1))
+		add_setting(db, 'Test', m.group(1))
+		add_setting(db, 'Latency', m.group(2))
 	else:
 		add_setting(db, 'Latency', 'unknown')
 
@@ -428,7 +429,7 @@ def record_client_traffic(db, name, log):
 	count = 0
 	log_line_num = 0
 
-	client_re = re.compile('''^([0-9]+(?:|\.[0-9]+)).*LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
+	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
 	c.execute('BEGIN TRANSACTION');
 
@@ -443,7 +444,9 @@ def record_client_traffic(db, name, log):
 			continue
 
 		time, direction, proto, hash, their_ip, port = m.groups()
+		print(time)
 		time = float(time)
+		print(time)
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)
 
@@ -523,7 +526,7 @@ def record_gate_traffic(db, name, log):
 	transform_count = 1
 	log_line_num = 0
 	
-	gate_re = re.compile('''^([0-9]+(?:|\.[0-9]+)).*LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
+	gate_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
 	c.execute('BEGIN TRANSACTION')
 
@@ -1009,7 +1012,7 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 		abs_end_time -= end_time_buffer
 
 	print('--- Statistics ---')
-	print('Generating statistics for time {} to {} ({} seconds total)'.format(abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
+	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
 
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
 					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
@@ -1036,7 +1039,13 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('\nLosses:')
 	for msg, packets in losses.iteritems():
 		print('  {}: {} packets ({})'.format(msg, len(packets), packets[:10]))
-
+	
+	# Latency introduced by ARG
+	avgs = avg_latency(db, abs_begin_time, abs_end_time)
+	print('\nAverage packet latency: (take with a grain of salt)')
+	print('Overall average: {:.1f} ms'.format(avgs[0]))
+	print('NATed average: {:.1f} ms'.format(avgs[1]))
+	print('Wrapped average: {:.1f} ms'.format(avgs[2]))
 
 	c.close()
 
@@ -1126,6 +1135,55 @@ def loss_methods(db, begin, end):
 
 	c.close()
 	return packet_cats
+
+def avg_latency(db, begin, end):
+	# Get the average latency for packets that passed through the NAT
+	# and packets that were wrapped
+	c = db.cursor()
+	c.execute('''SELECT AVG(p2.time - p1.time) AS latency FROM packets AS p1
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					JOIN systems ON p1.system_id=systems.id
+					WHERE name NOT LIKE 'gate%'
+						AND p1.true_dest_id=p2.system_id
+						AND p1.is_send=1
+						AND p1.is_valid=1
+						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+	overall = c.fetchone()[0]
+	if overall is None:
+		overall = 0
+
+	c.execute('''SELECT AVG(p2.time - p1.time) AS latency FROM packets AS p1
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					JOIN packets AS np ON p1.next_hop_id=np.id
+					JOIN reasons ON np.reason_id=reasons.id
+					JOIN systems ON p1.system_id=systems.id
+					WHERE name NOT LIKE 'gate%'
+						AND reasons.msg LIKE '%rewrite'
+						AND p1.true_dest_id=p2.system_id
+						AND p1.is_send=1
+						AND p1.is_valid=1
+						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+	nat = c.fetchone()[0]
+	if nat is None:
+		nat = 0
+
+	c.execute('''SELECT AVG(p2.time - p1.time) AS latency FROM packets AS p1
+					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+					JOIN packets AS np ON p1.next_hop_id=np.id
+					JOIN reasons ON np.reason_id=reasons.id
+					JOIN systems ON p1.system_id=systems.id
+					WHERE name NOT LIKE 'gate%'
+						AND reasons.msg LIKE '%wrapped'
+						AND p1.true_dest_id=p2.system_id
+						AND p1.is_send=1
+						AND p1.is_valid=1
+						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+	hopper = c.fetchone()[0]
+	if hopper is None:
+		hopper = 0
+	c.close()
+
+	return [x*1000 for x in (overall, nat, hopper)]
 	
 ########################################
 # Helper utilities
