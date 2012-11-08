@@ -268,17 +268,116 @@ function retrieve-logs {
 function process-runs {
 	if [[ $IS_LOCAL ]]
 	then
-		echo tbd
-	else
-		echo tbd
+		export gateA=00
+		export gateB=00
+		export gateC=00
+		export protA1=00
+		export protB1=00
+		export protC1=00
+		export ext1=00
+		for results in $RESULTSDIR/*
+		do
+			# Don't handle if it has already been processed
+			if [ -f "$results/run.db" ]
+			then
+				continue
+			fi
+
+			echo Finding a host to process $results	
+
+			while (( 1 ))
+			do
+				if [ -z "`ps -A | grep \"^$gateA\"`" ]
+				then
+					process-run-remote gateA "$results" &
+					gateA=$!
+					break
+				elif [ -z "`ps -A | grep \"^$gateB\"`" ]
+				then
+					process-run-remote gateB "$results" &
+					gateB=$!
+					break
+				elif [ -z "`ps -A | grep \"^$gateC\"`" ]
+				then
+					process-run-remote gateC "$results" &
+					gateC=$!
+					break
+				elif [ -z "`ps -A | grep \"^$protA1\"`" ]
+				then
+					process-run-remote protA1 "$results" &
+					protA1=$!
+					break
+				elif [ -z "`ps -A | grep \"^$protB1\"`" ]
+				then
+					process-run-remote protB1 "$results" &
+					protB1=$!
+					break
+				elif [ -z "`ps -A | grep \"^$protC1\"`" ]
+				then
+					process-run-remote protC1 "$results" &
+					protC1=$!
+					break
+				elif [ -z "`ps -A | grep \"^$ext1\"`" ]
+				then
+					process-run-remote ext1 "$results" &
+					ext1=$!
+					break
+				fi
+
+				# Don't try again too soon
+				echo Waiting for a slot to open up to process $results
+				sleep 10
+			done
+		done
+
+		# Make sure everything finishes
+		echo Waiting for final processing to complete
+		wait
+		echo All processing completed
+
+
+		# Show final results
+		for results in $RESULTSDIR/*
+		do
+			echo -e '\n\n############################################'
+			echo Showing results for $results
+			scripts/process_run.py -l "$results" -db "$results/run.db" --skip-trace
+		done
 	fi
 }
 
-# Process a given run's results
-# Usage: process-run [<results dir>]
-function process-run {
-	cd $1
-	./scripts/process_run.py 
+# Process a given run's results on a remote host
+# Usage: process-run <host> <results dir>
+function process-run-remote {
+	if [[ $IS_LOCAL ]]
+	then
+		if [[ "$#" != "2" ]]
+		then
+			echo Not enough parameters given
+			help process-run-remote
+		fi
+
+		echo Processing $2 on $1
+
+		push-to "$1" - scripts/process_run.py "$2"
+		base=`basename "$2"`
+		run-on "$1" - process-run-remote "$base"
+
+		# Prevent one result overwriting another
+		while [ -f "$PULLDIR/run.db" ]
+		do
+			echo Waiting for run.db to disappear
+			sleep 1
+		done
+		touch "$PULLDIR/run.db"
+
+		pull-from "$1" - run.db
+		mv "$PULLDIR/run.db" "$2/run.db"
+
+		echo Completed processing of $2
+	else
+		./process_run.py -l "$1" -db run.db
+	fi
 }
 
 # Run-make does a full build on _all_ gates and saves the binary to ~
@@ -448,6 +547,9 @@ function enable-forwarding {
 	else
 		[[ "$TYPE" == "gate" ]] || return
 		#echo 1 > /proc/sys/net/ipv4/ip_forward
+		sudo brctl addbr br0
+		sudo brctl addif br0 eth1
+		sudo brctl addif br0 eth2
 		sudo ifconfig br0 up
 	fi
 	return
@@ -464,6 +566,7 @@ function disable-forwarding {
 		[[ "$TYPE" == "gate" ]] || return
 		#echo 0 > /proc/sys/net/ipv4/ip_forward
 		sudo ifconfig br0 down
+		sudo brctl delbr br0
 	fi
 	return
 }

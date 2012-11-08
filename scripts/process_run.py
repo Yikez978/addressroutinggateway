@@ -153,7 +153,7 @@ def read_all_settings(db, logdir):
 		add_setting(db, 'Latency', 'unknown')
 
 	# Read the settings for each log file
-	for logName in glob('{}/*.log'.format(logdir)):
+	for logName in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
@@ -161,6 +161,9 @@ def read_all_settings(db, logdir):
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
+		
+		if not is_gate and not is_prot and not is_ext:
+			continue
 		
 		if is_gate:
 			m = re.search('''-hr([0-9]+ms)''', logName)
@@ -218,7 +221,7 @@ def add_all_systems(db, logdir):
 
 	print('Adding all systems to database')
 
-	for logName in glob('{}/*.log'.format(logdir)):
+	for logName in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
@@ -228,6 +231,9 @@ def add_all_systems(db, logdir):
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
+
+		if not is_gate and not is_prot and not is_ext:
+			continue
 		
 		with open(logName) as log:
 			if is_gate:
@@ -404,6 +410,9 @@ def record_traffic(db, logdir):
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
 
+		if not is_gate and not is_prot and not is_ext:
+			continue
+
 		print('Processing log file for {}'.format(name))
 		
 		with open(logName) as log:
@@ -444,9 +453,7 @@ def record_client_traffic(db, name, log):
 			continue
 
 		time, direction, proto, hash, their_ip, port = m.groups()
-		print(time)
 		time = float(time)
-		print(time)
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)
 
@@ -1012,7 +1019,8 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 		abs_end_time -= end_time_buffer
 
 	print('--- Statistics ---')
-	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
+	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
+		abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
 
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
 					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
