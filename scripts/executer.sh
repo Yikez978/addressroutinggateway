@@ -791,9 +791,8 @@ function clean-pushed {
 		push-to $ALL -  
 		run-on $ALL - clean-pushed
 	else
-		rm -rf *
+		sudo rm -rf *
 	fi
-	return
 }
 
 # Removes all files in the 'pulled' directory on local system
@@ -806,7 +805,6 @@ function clean-pulled {
 	fi
 	
 	rm -rf "$PULLDIR/*"
-	return
 }
 
 # Adds the helper script and cronjob that allows runcmd-*.sh files
@@ -870,7 +868,8 @@ function _main {
 	# For local, we move back up to the parent, giving us nice access to all of the source
 	HOST=`hostname`
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
-	if [[ "$LOCAL" == "$TYPE" ]]
+	echo $TYPE
+	if [[ "$LOCAL" == "$TYPE" || "$HOST" == "dev" ]]
 	then
 		cd ..
 		SCRIPT="scripts/`basename $SOURCE`"
