@@ -2,6 +2,7 @@
 PUSHDIR="~/pushed"
 PULLDIR="pulled"
 RESULTSDIR="results"
+RUNDB="run.db"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -9,7 +10,8 @@ IS_LOCAL=1
 GATES="gateA gateB gateC"
 EXT="ext1"
 PROT="protA1 protB1 protC1"
-LATENCY="delay1"
+#LATENCY="delay1"
+LATENCY=
 
 ALL="$GATES $EXT $PROT"
 
@@ -35,8 +37,12 @@ function start-tests {
 		return
 	fi
 
+	# Make sure times are similar (only used for processing)
+	# TBD remove once NTP works
+	set-time
+
 	# Do every combination of hop rate (hr), latency, and test
-	for hr in 100000 5000 1000 500 100 50 30 20 10
+	for hr in 5000 1000 500
 	do
 		for latency in 0
 		do
@@ -66,8 +72,6 @@ function start-test {
 	fi
 
 	stop-test
-	clean-pushed
-	clean-pulled
 
 	echo Setting latency to $3
 	set-latency $3
@@ -116,37 +120,59 @@ function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $EXT $PROT - scripts/gen_traffic.py
-		run-on $EXT $PROT - start-generators
+		run-on $EXT $PROT - start-generators $1
 	else
 		# What test are we running?
-		# TBD
-
-		# What host are we?
-		if [[ "$TYPE" == "ext" ]]
+		if [[ "$1" == "0" ]]
 		then
-			filename="generator-`hostname`-"
+			# Simple test to check connectivity
+			if [[ "$TYPE" == "ext" ]]
+			then	
+				start-generator udp 2000
+			else
+				start-generator udp 3000
+				start-generator udp 2000 172.100.0.1 5
+				
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator udp 3000 172.2.0.11 5
+					start-generator udp 3000 172.3.0.11 5
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator udp 3000 172.1.0.11 5
+					start-generator udp 3000 172.3.0.11 5
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator udp 3000 172.1.0.11 5
+					start-generator udp 3000 172.2.0.11 5
+				fi
+			fi
+		else
+			# What host are we?
+			if [[ "$TYPE" == "ext" ]]
+			then
+				# One UDP and one TCP listener
+				start-generator tcp 2000 
+				start-generator udp 3000 
+			elif [[ "$TYPE" == "prot" ]] 
+			then
+				# Listen for traffic
+				start-generator udp 5000
+				start-generator tcp 6000
 
-			# One UDP and one TCP listener
-			start-generator tcp 2000 
-			start-generator udp 3000 
-		elif [[ "$TYPE" == "prot" ]] 
-		then
-			# Listen for traffic
-			start-generator udp 5000
-			start-generator tcp 6000
+				# Talk to the UDP and TCP external hosts
+				start-generator tcp 2000 172.100.0.1 .2
+				sleep .8
+				start-generator udp 3000 172.100.0.1 .3
+			fi
 
-			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2000 172.100.0.1 .2
-			sleep .8
-			start-generator udp 3000 172.100.0.1 .3
-		fi
-
-		if [[ "$HOST" == "protA1" ]]
-		then
-			start-generator udp 5000 172.2.0.11 .4
-		elif [[ "$HOST" == "protB1" ]]
-		then
-			start-generator tcp 6000 172.1.0.11 .3
+			if [[ "$HOST" == "protA1" ]]
+			then
+				start-generator udp 5000 172.2.0.11 .4
+			elif [[ "$HOST" == "protB1" ]]
+			then
+				start-generator tcp 6000 172.1.0.11 .3
+			fi
 		fi
 	fi
 }
@@ -256,94 +282,101 @@ function retrieve-logs {
 	pull-from $ALL - '*.log'
 	
 	mkdir -p "$RESULTSDIR"
-	rm -f "$PULLDIR/config.log"
 	mv "$PULLDIR" "$RESULTSDIR/$1"
+	mkdir -p "$PULLDIR"
+	rm -f "$RESULTSDIR/$1/config.log"
+	rm -f "$RESULTSDIR/$1/build.log"
+	rm -f "$RESULTSDIR/$1/$RUNDB"
 
-	return
+	echo Results saved to "$RESULTSDIR/$1"
 }
 
 # Process all runs in the results director. Farms them out to test hosts
 # for processing, allowing us to parallelize the work.
 # Usage: process-runs
 function process-runs {
-	if [[ $IS_LOCAL ]]
+	if [[ ! $IS_LOCAL ]]
 	then
-		export gateA=00
-		export gateB=00
-		export gateC=00
-		export protA1=00
-		export protB1=00
-		export protC1=00
-		export ext1=00
-		for results in $RESULTSDIR/*
+		echo Must be run from local
+		return
+	fi
+
+	#rm -f "$PULLDIR/$RUNDB"
+
+	export gateA=00
+	export gateB=00
+	export gateC=00
+	export protA1=00
+	export protB1=00
+	export protC1=00
+	export ext1=00
+	for results in $RESULTSDIR/*
+	do
+		# Don't handle if it has already been processed
+		if [ -f "$results/$RUNDB" ]
+		then
+			continue
+		fi
+
+		echo Finding a host to process $results	
+
+		while (( 1 ))
 		do
-			# Don't handle if it has already been processed
-			if [ -f "$results/run.db" ]
+			if [ -z "`ps -A | grep \"^$gateA\"`" ]
 			then
-				continue
+				process-run-remote gateA "$results" &
+				gateA=$!
+				break
+			elif [ -z "`ps -A | grep \"^$gateB\"`" ]
+			then
+				process-run-remote gateB "$results" &
+				gateB=$!
+				break
+			elif [ -z "`ps -A | grep \"^$gateC\"`" ]
+			then
+				process-run-remote gateC "$results" &
+				gateC=$!
+				break
+			elif [ -z "`ps -A | grep \"^$protA1\"`" ]
+			then
+				process-run-remote protA1 "$results" &
+				protA1=$!
+				break
+			elif [ -z "`ps -A | grep \"^$protB1\"`" ]
+			then
+				process-run-remote protB1 "$results" &
+				protB1=$!
+				break
+			elif [ -z "`ps -A | grep \"^$protC1\"`" ]
+			then
+				process-run-remote protC1 "$results" &
+				protC1=$!
+				break
+			elif [ -z "`ps -A | grep \"^$ext1\"`" ]
+			then
+				process-run-remote ext1 "$results" &
+				ext1=$!
+				break
 			fi
 
-			echo Finding a host to process $results	
-
-			while (( 1 ))
-			do
-				if [ -z "`ps -A | grep \"^$gateA\"`" ]
-				then
-					process-run-remote gateA "$results" &
-					gateA=$!
-					break
-				elif [ -z "`ps -A | grep \"^$gateB\"`" ]
-				then
-					process-run-remote gateB "$results" &
-					gateB=$!
-					break
-				elif [ -z "`ps -A | grep \"^$gateC\"`" ]
-				then
-					process-run-remote gateC "$results" &
-					gateC=$!
-					break
-				elif [ -z "`ps -A | grep \"^$protA1\"`" ]
-				then
-					process-run-remote protA1 "$results" &
-					protA1=$!
-					break
-				elif [ -z "`ps -A | grep \"^$protB1\"`" ]
-				then
-					process-run-remote protB1 "$results" &
-					protB1=$!
-					break
-				elif [ -z "`ps -A | grep \"^$protC1\"`" ]
-				then
-					process-run-remote protC1 "$results" &
-					protC1=$!
-					break
-				elif [ -z "`ps -A | grep \"^$ext1\"`" ]
-				then
-					process-run-remote ext1 "$results" &
-					ext1=$!
-					break
-				fi
-
-				# Don't try again too soon
-				echo Waiting for a slot to open up to process $results
-				sleep 10
-			done
+			# Don't try again too soon
+			echo Waiting for a slot to open up to process $results
+			sleep 10
 		done
+	done
 
-		# Make sure everything finishes
-		echo Waiting for final processing to complete
-		wait
-		echo All processing completed
+	# Make sure everything finishes
+	echo Waiting for final processing to complete
+	wait
+	echo All processing completed
 
-
-		# Show final results
-		for results in $RESULTSDIR/*
-		do
-			echo -e '\n\n############################################'
-			echo Showing results for $results
-			scripts/process_run.py -l "$results" -db "$results/run.db" --skip-trace
-		done
-	fi
+	# Show final results
+	for results in $RESULTSDIR/*
+	do
+		echo -e '\n\n############################################'
+		echo Showing results for $results
+		scripts/process_run.py -l "$results" -db "$results/$RUNDB" --skip-trace
+	done
 }
 
 # Process a given run's results on a remote host
@@ -359,24 +392,61 @@ function process-run-remote {
 
 		echo Processing $2 on $1
 
+		clean-pushed "$1"
 		push-to "$1" - scripts/process_run.py "$2"
 		base=`basename "$2"`
 		run-on "$1" - process-run-remote "$base"
 
 		# Prevent one result overwriting another
-		while [ -f "$PULLDIR/run.db" ]
+		backoff=$(($RANDOM % 20 + 2))
+		wait_count=0
+		while [ -f "$PULLDIR/$RUNDB" ]
 		do
-			echo Waiting for run.db to disappear
-			sleep 1
-		done
-		touch "$PULLDIR/run.db"
+			echo $1 waiting for $RUNDB to disappear
+			sleep $(($RANDOM % 5))
 
-		pull-from "$1" - run.db
-		mv "$PULLDIR/run.db" "$2/run.db"
+			# Wait a random number of seconds before continuing regardless. Prevents us getting
+			# locked and noone removing the $RUNDB file
+			wait_count=$(($wait_count + 1))
+
+			if [ -f "$PULLDIR/reset_counts" ]
+			then
+				wait_count=0
+			fi
+
+			if (( $wait_count > $backoff ))
+			then
+				echo $1 brashly continuing on, taking care of frozen $RUNDB
+
+				# Tell everyone else we're taking this
+				touch "$PULLDIR/reset_counts"
+				sleep 10
+				rm "$PULLDIR/reset_counts"
+				break
+			fi
+		done
+
+		mkdir -p "$PULLDIR"
+		touch "$PULLDIR/$RUNDB"
+
+		pull-from "$1" - "$RUNDB"
+		mv "$PULLDIR/$RUNDB" "$2/$RUNDB"
 
 		echo Completed processing of $2
 	else
-		./process_run.py -l "$1" -db run.db
+		./process_run.py -l "$1" -db "$RUNDB"
+	fi
+}
+
+# Stops any processing occuring 
+# Usage: stop-processing
+function stop-processing {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL
+		run-on $ALL - stop-processing
+	else
+		return
 	fi
 }
 
@@ -472,6 +542,12 @@ function stop-arg {
 #        set-latency <delay to gates> <delay to external>
 #        set-latency <delay to gate A> <delay to B> <delay to ext>
 function set-latency {
+	if [ -z $LATENCY ]
+	then
+		echo No latency servers available, unable to set
+		return
+	fi
+
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $LATENCY - 
@@ -508,6 +584,18 @@ function set-latency {
 		sudo tc qdisc replace dev eth3 root netem delay "$toB"
 	fi
 	return
+}
+
+# Sets all server times to the time of the local machine
+# Usage: set-time
+function set-time {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL
+		run-on $ALL - set-time "`date '+%m/%d/%Y +%H:%M:%S'`"
+	else
+		sudo date -s "$@"
+	fi
 }
 
 # The basics
@@ -783,13 +871,20 @@ function run-on {
 	return
 }
 
-# Removes all files in the 'pushed' directory on every server
-# Usage: clean-pushed
+# Removes all files in the 'pushed' directory on every server. If a
+# host is given, only that host is cleaned, otherwise all of them are
+# Usage: clean-pushed [<host>] [<host>] [...]
 function clean-pushed {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $ALL -  
-		run-on $ALL - clean-pushed
+		if [[ "$#" == "0" ]]
+		then
+			push-to $ALL -  
+			run-on $ALL - clean-pushed
+		else
+			push-to $@ -  
+			run-on $@ - clean-pushed
+		fi
 	else
 		sudo rm -rf *
 	fi
@@ -868,7 +963,6 @@ function _main {
 	# For local, we move back up to the parent, giving us nice access to all of the source
 	HOST=`hostname`
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
-	echo $TYPE
 	if [[ "$LOCAL" == "$TYPE" || "$HOST" == "dev" ]]
 	then
 		cd ..

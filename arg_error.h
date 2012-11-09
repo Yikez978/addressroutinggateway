@@ -3,7 +3,7 @@
 
 #include <errno.h>
 
-#define MAX_ERROR_STR_LEN 25
+#define MAX_ERROR_STR_LEN 35
 
 enum {
 	ARG_MIN_ERROR = 90,

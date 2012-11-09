@@ -18,7 +18,7 @@ IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
 PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
 
 # Times on each host may not match up perfectly. How many second on either side do we allow?
-TIME_SLACK=5
+TIME_SLACK=15
 ROW_CACHE_SIZE=50000
 
 def create_schema(db):
@@ -67,19 +67,23 @@ def create_schema(db):
 	#	- out_id (foreign: packet.id)
 	#	- reason_id (foreign: packet.id)
 	c = db.cursor()	
-	c.execute('''CREATE TABLE IF NOT EXISTS systems (
+	c.execute('DROP TABLE IF EXISTS systems')
+	c.execute('''CREATE TABLE systems (
 						id INTEGER, name VARCHAR(25), ip INT, base_ip INT, mask INT,
 						PRIMARY KEY(id ASC))''')
 	
-	c.execute('''CREATE TABLE IF NOT EXISTS reasons (id INTEGER, msg VARCHAR(255),
+	c.execute('DROP TABLE IF EXISTS reasons')
+	c.execute('''CREATE TABLE reasons (id INTEGER, msg VARCHAR(255),
 						PRIMARY KEY(id ASC))''')
 	
+	c.execute('DROP TABLE IF EXISTS settings')
 	c.execute('''CREATE TABLE IF NOT EXISTS settings (
 						id INTEGER,
 						name VARCHAR(20) UNIQUE,
 						value VARCHAR(20),
 						PRIMARY KEY (id ASC))''')
 
+	c.execute('DROP TABLE IF EXISTS packets')
 	c.execute('''CREATE TABLE IF NOT EXISTS packets (
 						id INTEGER,
 						system_id INTEGER,
@@ -112,6 +116,20 @@ def create_schema(db):
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	
 	c.close()
+
+def check_schema(db):
+	valid_db = True
+
+	c = db.cursor()
+
+	c.execute('SELECT count(*) FROM packets')
+	num = c.fetchone()[0]
+	if num == 0:
+		valid_db = False
+
+	c.close()
+
+	return valid_db
 
 ##############################################
 # Manange reasons table
@@ -272,10 +290,10 @@ def add_client(db, name, log):
 			port = m.group(2)
 			break
 	
-	if ip is None:
-		raise IOError('Unable to parse log file for {}. Bad format?'.format(name))
-
-	add_system(db, name, ip)
+	if ip is not None:
+		add_system(db, name, ip)
+	else:
+		print('Unable to find IP for {} in log file'.format(name))
 
 def add_system(db, name, ip, ext_base=None, ext_mask=None):
 	# Add system only if it doesn't already exist. Otherwise, just return the rowid
@@ -743,7 +761,7 @@ def trace_packets(db):
 
 		else:
 			# No matches found. We'll figure this one out later
-			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			#print('Unable to locate corresponding receive for packet {}'.format(packet_id))
 			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
 			failed_count += 1
 
@@ -1233,23 +1251,27 @@ def main(argv):
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
-	do_record = True
-	if os.path.exists(args.database):
-		if args.empty_database:
-			os.unlink(args.database)
-		else:
-			print('Database already exists, skipping data recording.')
-			print('To override this and force a record and trace, give --empty-database on the command line\n')
-			do_record = False
+	already_exists = os.path.exists(args.database)
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
-	if do_record:
+	if not already_exists:
 		try:
 			create_schema(db)
+			do_record = True
 		except sqlite3.OperationalError as e:
 			print("Unable to create database: ", e)
 			return 1
+	else:
+		# This database already existed before, check the data to ensure it's at least somewhat filled
+		if check_schema(db):
+			print('Database already exists, skipping data recording.')
+			print('To override this and force a record and trace, give --empty-database on the command line\n')
+			do_record = False
+		else:
+			print('Database already existed, but was unreadable. Re-recording data\n')
+			create_schema(db)
+			do_record = True
 
 	# Ensure all the systems and settings are in place before we begin
 	if do_record:
