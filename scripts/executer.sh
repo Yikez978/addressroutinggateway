@@ -42,7 +42,8 @@ function start-tests {
 	set-time
 
 	# Do every combination of hop rate (hr), latency, and test
-	for hr in 5000 1000 500
+	# First one is no hopping as a consequence of the hop taking the full test length
+	for hr in $(($runtime * 1000)) 5000 1000 500 100 50 30 20 10 
 	do
 		for latency in 0
 		do
@@ -369,14 +370,47 @@ function process-runs {
 	echo Waiting for final processing to complete
 	wait
 	echo All processing completed
+}
+
+# Shows the results of all processed runs in the results directory.
+# If offset is given, results are displayed without the first and last
+# <offset> seconds in the run included.
+# Usage: show-results [<offset>]
+function show-results {
+	if [[ "$#" == "0" ]]
+	then
+		offset=0
+	else
+		offset=$1
+	fi
 
 	# Show final results
 	for results in $RESULTSDIR/*
 	do
-		echo -e '\n\n############################################'
+		echo -e '\n############################################'
 		echo Showing results for $results
-		scripts/process_run.py -l "$results" -db "$results/$RUNDB" --skip-trace
+
+		if [ -f "$results/$RUNDB" ]
+		then
+			scripts/process_run.py -l "$results" -db "$results/$RUNDB" \
+				--skip-trace --start-offset $offset --end-offset $offset
+		else
+			echo Run not processed yet
+		fi
 	done
+}
+
+# Removes all run databases, allowing process-results to regenerate
+# all data from scratch
+# Usage: clean-processed
+function clean-processed {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	rm -f "$RESULTSDIR/*/run.db"
 }
 
 # Process a given run's results on a remote host

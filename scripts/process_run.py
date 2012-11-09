@@ -79,7 +79,7 @@ def create_schema(db):
 	c.execute('DROP TABLE IF EXISTS settings')
 	c.execute('''CREATE TABLE IF NOT EXISTS settings (
 						id INTEGER,
-						name VARCHAR(20) UNIQUE,
+						name VARCHAR(20),
 						value VARCHAR(20),
 						PRIMARY KEY (id ASC))''')
 
@@ -184,11 +184,16 @@ def read_all_settings(db, logdir):
 			continue
 		
 		if is_gate:
+			# Only need to set hop rate setting once
+			hr_set_name = '{} hop rate'.format(name)
+			if get_setting(db, hr_set_name) is not None:
+				continue
+
 			m = re.search('''-hr([0-9]+ms)''', logName)
 			if m is not None:
-				add_setting(db, '{} hop rate'.format(name), m.group(1))
+				add_setting(db, hr_set_name, m.group(1))
 			else:
-				add_setting(db, '{} hop rate'.format(name), 'unknown')
+				add_setting(db, hr_set_name, 'unknown')
 		else:
 			if logName.find('send') == -1:
 				m = re.search('''listen-(tcp|udp):([0-9]+)\.log''', logName)
@@ -212,6 +217,16 @@ def add_setting(db, name, value):
 	except sqlite3.IntegrityError:
 		c.execute('UPDATE settings SET value=? WHERE name=?', (str(value), name))
 	c.close()
+
+def get_setting(db, name):
+	c = db.cursor()
+	c.execute('SELECT id, value FROM settings WHERE name=?', (name,))
+	result = c.fetchall()
+	c.close()
+	if result:
+		return result
+	else:
+		return None
 
 def show_settings(db):
 	c = db.cursor()
@@ -431,7 +446,7 @@ def record_traffic(db, logdir):
 		if not is_gate and not is_prot and not is_ext:
 			continue
 
-		print('Processing log file for {}'.format(name))
+		print('Processing log file {} for {}'.format(logName, name))
 		
 		with open(logName) as log:
 			if is_gate:
