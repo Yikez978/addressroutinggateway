@@ -259,11 +259,11 @@ def add_all_systems(db, logdir):
 		name = os.path.basename(logName)
 		name = name[:name.find('-')]
 
-		print('\tFound {} with log {}'.format(name, logName))
-
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
+
+		print('\tFound {} with log {}'.format(name, logName))
 
 		if not is_gate and not is_prot and not is_ext:
 			continue
@@ -308,7 +308,7 @@ def add_client(db, name, log):
 	if ip is not None:
 		add_system(db, name, ip)
 	else:
-		print('Unable to find IP for {} in log file'.format(name))
+		raise IOError('Unable to find IP for {} in log file'.format(name))
 
 def add_system(db, name, ip, ext_base=None, ext_mask=None):
 	# Add system only if it doesn't already exist. Otherwise, just return the rowid

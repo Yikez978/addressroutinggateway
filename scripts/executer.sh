@@ -3,6 +3,7 @@ PUSHDIR="~/pushed"
 PULLDIR="pulled"
 RESULTSDIR="results"
 RUNDB="run.db"
+PROCESSLOG="processing.log"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -43,13 +44,16 @@ function start-tests {
 
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
-	for hr in $(($runtime * 1000)) 5000 1000 500 100 50 30 20 10 
+	for repetition in {1..5}
 	do
-		for latency in 0
+		for hr in $(($runtime * 1000)) 1000 500 100 50 30 20 10 5 
 		do
-			for num in 1
+			for latency in 0
 			do
-				start-test $num $runtime $latency $hr 
+				for testnum in 0 1
+				do
+					start-test $testnum $runtime $latency $hr 
+				done
 			done
 		done
 	done
@@ -302,7 +306,7 @@ function process-runs {
 		return
 	fi
 
-	#rm -f "$PULLDIR/$RUNDB"
+	clean-pushed
 
 	export gateA=00
 	export gateB=00
@@ -323,37 +327,37 @@ function process-runs {
 
 		while (( 1 ))
 		do
-			if [ -z "`ps -A | grep \"^$gateA\"`" ]
+			if [ -z "`ps ax | grep -E \"^\s*$gateA\"`" ]
 			then
 				process-run-remote gateA "$results" &
 				gateA=$!
 				break
-			elif [ -z "`ps -A | grep \"^$gateB\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$gateB\"`" ]
 			then
 				process-run-remote gateB "$results" &
 				gateB=$!
 				break
-			elif [ -z "`ps -A | grep \"^$gateC\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$gateC\"`" ]
 			then
 				process-run-remote gateC "$results" &
 				gateC=$!
 				break
-			elif [ -z "`ps -A | grep \"^$protA1\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$protA1\"`" ]
 			then
 				process-run-remote protA1 "$results" &
 				protA1=$!
 				break
-			elif [ -z "`ps -A | grep \"^$protB1\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$protB1\"`" ]
 			then
 				process-run-remote protB1 "$results" &
 				protB1=$!
 				break
-			elif [ -z "`ps -A | grep \"^$protC1\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$protC1\"`" ]
 			then
 				process-run-remote protC1 "$results" &
 				protC1=$!
 				break
-			elif [ -z "`ps -A | grep \"^$ext1\"`" ]
+			elif [ -z "`ps ax | grep -E \"^\s*$ext1\"`" ]
 			then
 				process-run-remote ext1 "$results" &
 				ext1=$!
@@ -364,12 +368,16 @@ function process-runs {
 			echo Waiting for a slot to open up to process $results
 			sleep 10
 		done
+
+		sleep 1
 	done
 
 	# Make sure everything finishes
 	echo Waiting for final processing to complete
 	wait
 	echo All processing completed
+
+	clean-pulled
 }
 
 # Shows the results of all processed runs in the results directory.
@@ -410,7 +418,7 @@ function clean-processed {
 		return
 	fi
 
-	rm -f "$RESULTSDIR/*/run.db"
+	rm -f $RESULTSDIR/*/run.db
 }
 
 # Process a given run's results on a remote host
@@ -464,11 +472,14 @@ function process-run-remote {
 		touch "$PULLDIR/$RUNDB"
 
 		pull-from "$1" - "$RUNDB"
+		pull-from "$1" - "$PROCESSLOG"
 		mv "$PULLDIR/$RUNDB" "$2/$RUNDB"
+		mv "$PULLDIR/$PROCESSLOG" "$2/$PROCESSLOG"
 
-		echo Completed processing of $2
+		echo Completed processing of $2 on $1
 	else
-		./process_run.py -l "$1" -db "$RUNDB"
+		# TBD change back
+		./process_run.py -l "$1" -db "$RUNDB" | tee "$PROCESSLOG"
 	fi
 }
 
@@ -480,7 +491,7 @@ function stop-processing {
 		push-to $ALL
 		run-on $ALL - stop-processing
 	else
-		return
+		_stop-process python
 	fi
 }
 
@@ -552,7 +563,6 @@ function start-arg {
 		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" 2>&1 &
 		disown $!
 	fi
-	return
 }
 
 # Stops ARG on all gateways, first gracefully then forcefully
@@ -566,7 +576,6 @@ function stop-arg {
 		# Send it kill signal
 		_stop-process arg
 	fi
-	return
 }
 
 # Network setup changes
@@ -617,7 +626,6 @@ function set-latency {
 		sudo tc qdisc replace dev eth2 root netem delay "$toA"
 		sudo tc qdisc replace dev eth3 root netem delay "$toB"
 	fi
-	return
 }
 
 # Sets all server times to the time of the local machine
@@ -643,7 +651,6 @@ function reboot {
 	else
 		sudo reboot
 	fi
-	return
 }
 
 # Shuts down all servers
@@ -656,7 +663,6 @@ function shutdown {
 	else
 		sudo shutdown -h 0
 	fi
-	return
 }
 
 # Enables IPv4 forwarding on the gateways
@@ -690,7 +696,6 @@ function disable-forwarding {
 		sudo ifconfig br0 down
 		sudo brctl delbr br0
 	fi
-	return
 }
 
 # Requests the given process stop via SIGINT first, then forces it to die after 5 seconds
@@ -744,7 +749,6 @@ function install-vmware-tools {
 		
 		reboot
 	fi
-	return
 }
 
 # Installs the packages necessary to build ARG on the gates
@@ -772,7 +776,6 @@ function run {
 		echo Calling the command: $@
 		$@
 	fi
-	return
 }
 
 # Helpers for getting needed stuff to test network
@@ -808,8 +811,6 @@ function push-to {
 		echo -e "\t$s"
 		scp -r $files "$s:$PUSHDIR"
 	done
-
-	return
 }
 
 # Retrieves the given file(s) from the given systems
@@ -861,8 +862,6 @@ function pull-from {
 			continue
 		fi
 	done
-
-	return
 }
 
 # Runs the given function on the servers given
@@ -901,8 +900,6 @@ function run-on {
 		echo -e "\t$s"
 		ssh "$s" "$PUSHDIR/`basename $SCRIPT`" $@ 2>&1 | grep -v 'closed by remote host'
 	done
-
-	return
 }
 
 # Removes all files in the 'pushed' directory on every server. If a
@@ -976,7 +973,6 @@ function help {
 		echo Help for $1:
 		grep --before-context=5 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
-	return
 }
 
 # Main controller

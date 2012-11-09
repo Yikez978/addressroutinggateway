@@ -1,0 +1,32 @@
+Host ext1
+	Hostname 10.1.0.165
+	User traherom
+
+Host gateA
+	Hostname 10.1.0.164
+	User traherom
+
+Host gateB
+	Hostname 10.1.0.167
+	User traherom
+
+Host gateC
+	Hostname 10.1.0.160
+	User traherom
+
+Host protA1
+	Hostname 10.1.0.162
+	User traherom
+
+Host protB1
+	Hostname 10.1.0.161
+	User traherom
+
+Host protC1
+	Hostname 10.1.0.163
+	User traherom
+
+Host delay1
+	Hostname 10.1.1.61
+	User traherom
+
