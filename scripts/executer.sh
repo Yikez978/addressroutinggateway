@@ -38,10 +38,6 @@ function start-tests {
 		return
 	fi
 
-	# Make sure times are similar (only used for processing)
-	# TBD remove once NTP works
-	set-time
-
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
 	for repetition in {1..5}
@@ -78,8 +74,14 @@ function start-test {
 
 	stop-test
 
+	# Make sure times are similar (only used for processing)
+	# TBD remove once NTP works
+	set-time
+
 	echo Setting latency to $3
 	set-latency $3
+
+	clean-pushed
 
 	echo Starting collection
 	start-collection
@@ -88,14 +90,14 @@ function start-test {
 	start-arg $4
 	start-generators $1
 
-	echo Running for $2 seconds
+	echo Running experiment $1 with hop rate $4 for $2 seconds
 	eraseline="\r                                \r"
 	i=$2
 	while (( $i ))
 	do
 		echo -ne "$eraseline$i seconds remaining"
 		sleep 1
-		i=`expr $i - 1`
+		i=$(($i - 1))
 	done
 	echo -e "${eraseline}Done running tests"
 
@@ -104,6 +106,7 @@ function start-test {
 
 	d="`date +%Y-%m-%d-%H:%M:%S`-t$1-l$3-hr$4ms"
 	echo Pulling logs into $RESULTSDIR/$d
+	clean-pulled
 	retrieve-logs "$d"
 }
 
@@ -117,6 +120,7 @@ function stop-test {
 
 # Starts traffic generators on the network for the appropriate test
 # Test number may be one of:
+#	0 - Connectivity test (slow packets between each pair that should be able to communicate)
 #	1 - Flood legitimate
 #	2 - Flood illegitimate
 #	3 - Replay
@@ -468,7 +472,7 @@ function process-run-remote {
 			fi
 		done
 
-		mkdir -p "$PULLDIR"
+		clean-pulled
 		touch "$PULLDIR/$RUNDB"
 
 		pull-from "$1" - "$RUNDB"
@@ -479,7 +483,7 @@ function process-run-remote {
 		echo Completed processing of $2 on $1
 	else
 		# TBD change back
-		./process_run.py -l "$1" -db "$RUNDB" | tee "$PROCESSLOG"
+		./process_run.py -l "$1" -db "$RUNDB" 2>&1 | tee "$PROCESSLOG"
 	fi
 }
 
@@ -930,6 +934,7 @@ function clean-pulled {
 		return
 	fi
 	
+	mkdir -p "$PULLDIR"
 	rm -rf "$PULLDIR/*"
 }
 
