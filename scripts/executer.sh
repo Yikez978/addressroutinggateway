@@ -163,8 +163,7 @@ function start-generators {
 				# One UDP and one TCP listener
 				start-generator tcp 2000 
 				start-generator udp 3000 
-			elif [[ "$TYPE" == "prot" ]] 
-			then
+			else
 				# Listen for traffic
 				start-generator udp 5000
 				start-generator tcp 6000
@@ -173,14 +172,27 @@ function start-generators {
 				start-generator tcp 2000 172.100.0.1 .2
 				sleep .8
 				start-generator udp 3000 172.100.0.1 .3
-			fi
 
-			if [[ "$HOST" == "protA1" ]]
-			then
-				start-generator udp 5000 172.2.0.11 .4
-			elif [[ "$HOST" == "protB1" ]]
-			then
-				start-generator tcp 6000 172.1.0.11 .3
+				# Talk to each of the other protected clients
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator udp 5000 172.2.0.11 .4
+					start-generator tcp 6000 172.2.0.11 .1
+					start-generator udp 5000 172.3.0.11 .2
+					start-generator tcp 6000 172.3.0.11 .3
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator udp 5000 172.1.0.11 .4
+					start-generator tcp 6000 172.1.0.11 .3
+					start-generator udp 5000 172.3.0.11 .5
+					start-generator tcp 6000 172.3.0.11 .1
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator udp 5000 172.1.0.11 .2
+					start-generator tcp 6000 172.1.0.11 .4
+					start-generator udp 5000 172.2.0.11 .1
+					start-generator tcp 6000 172.2.0.11 .6
+				fi
 			fi
 		fi
 	fi
@@ -310,8 +322,6 @@ function process-runs {
 		return
 	fi
 
-	clean-pushed
-
 	export gateA=00
 	export gateB=00
 	export gateC=00
@@ -321,6 +331,11 @@ function process-runs {
 	export ext1=00
 	for results in $RESULTSDIR/*
 	do
+		if [ ! -d "$results" ]
+		then
+			continue
+		fi
+
 		# Don't handle if it has already been processed
 		if [ -f "$results/$RUNDB" ]
 		then
@@ -457,6 +472,7 @@ function process-run-remote {
 
 			if [ -f "$PULLDIR/reset_counts" ]
 			then
+				echo $1 processor has seen the reset, continuing to wait
 				wait_count=0
 			fi
 
@@ -936,6 +952,27 @@ function clean-pulled {
 	
 	mkdir -p "$PULLDIR"
 	rm -rf "$PULLDIR/*"
+}
+
+# Ensures Dropbox has finished syncing
+function await-dropbox {
+	# Give dropbox a second to realize it might need to start syncing
+	sleep 1
+
+	while true
+	do
+		s=$(dropbox status)
+		if [[ "$s" == "Idle" ]]
+		then
+			break
+		fi
+
+		echo Dropbox currently says:
+		echo $s
+
+		echo We\'ll give it a bit...
+		sleep 2
+	done
 }
 
 # Adds the helper script and cronjob that allows runcmd-*.sh files

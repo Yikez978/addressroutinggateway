@@ -41,9 +41,9 @@ int main( int argc, char *argv[] )
 	// Get data we need
 	if(argc == 4)
 	{
-		strncpy(name, argv[1], sizeof(name));
-		strncpy(baseIP, argv[2], sizeof(baseIP));
-		strncpy(mask, argv[3], sizeof(mask));
+		strncpy(name, argv[1], sizeof(name) - 1);
+		strncpy(baseIP, argv[2], sizeof(baseIP) - 1);
+		strncpy(mask, argv[3], sizeof(mask) - 1);
 	}
 	else
 	{

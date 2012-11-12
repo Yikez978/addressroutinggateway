@@ -145,7 +145,7 @@ int get_hopper_conf(const struct config_data *config)
 
 		// Get public data for this node. If it's us, we'll get the private key
 		// and IP address/mask in a bit
-		strncpy(currNet->name, currGateName->name, sizeof(currNet->name));
+		strncpy(currNet->name, currGateName->name, sizeof(currNet->name) - 1);
 		read_public_key(config, currNet);
 		mask_array(sizeof(currNet->baseIP), currNet->baseIP, currNet->mask, currNet->baseIP);
 

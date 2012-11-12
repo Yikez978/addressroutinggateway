@@ -33,11 +33,17 @@ int read_config(struct config_data *conf)
 	if(dirPathEnd != NULL)
 	{
 		dirLen = (long)dirPathEnd - (long)&conf->file;
-		strncpy(conf->dir, conf->file, dirLen);
+		if(sizeof(conf->dir) < dirLen + 1)
+		{
+			arglog(LOG_FATAL, "Configuration directory path length is too long (maximum of %i characters)\n", sizeof(conf->dir) - 1);
+			return -ARG_CONFIG_BAD;
+		}
+
+		memcpy(conf->dir, conf->file, dirLen);
 		conf->dir[dirLen] = '\0';
 	}
 	else
-		strncpy(conf->dir, ".", sizeof(conf->dir));
+		strncpy(conf->dir, ".", sizeof(conf->dir) - 1);
 
 	// Read through the file
 	arglog(LOG_DEBUG, "Reading from configuration file %s\n", conf->file);
@@ -54,7 +60,7 @@ int read_config(struct config_data *conf)
 		fclose(confFile);
 		return -ARG_CONFIG_BAD;
 	}
-	strncpy(conf->ourGateName, line, sizeof(conf->ourGateName));
+	strncpy(conf->ourGateName, line, sizeof(conf->ourGateName) - 1);
 	
 	if(get_next_line(confFile, line, MAX_CONF_LINE))
 	{
@@ -62,7 +68,7 @@ int read_config(struct config_data *conf)
 		fclose(confFile);
 		return -ARG_CONFIG_BAD;
 	}
-	strncpy(conf->intDev, line, sizeof(conf->intDev));
+	strncpy(conf->intDev, line, sizeof(conf->intDev) - 1);
 	
 	if(get_next_line(confFile, line, MAX_CONF_LINE))
 	{
@@ -70,7 +76,7 @@ int read_config(struct config_data *conf)
 		fclose(confFile);
 		return -ARG_CONFIG_BAD;
 	}
-	strncpy(conf->extDev, line, sizeof(conf->extDev));
+	strncpy(conf->extDev, line, sizeof(conf->extDev) - 1);
 
 	if(get_next_line(confFile, line, MAX_CONF_LINE))
 	{
@@ -122,7 +128,7 @@ int read_config(struct config_data *conf)
 		if(prevGate != NULL)
 			prevGate->next = currGate;
 
-		strncpy(currGate->name, dent->d_name, len - 4);
+		memcpy(currGate->name, dent->d_name, len - 4);
 		currGate->name[len - 4] = '\0';
 		
 		arglog(LOG_DEBUG, "Found public key for gate %s\n", currGate->name);

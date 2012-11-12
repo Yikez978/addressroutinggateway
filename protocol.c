@@ -334,7 +334,7 @@ int send_arg_trust(struct arg_network_info *local,
 	}
 
 	trust = (struct arg_trust_data*)msg->data;
-	strncpy(trust->name, gate->name, sizeof(trust->name));
+	strncpy(trust->name, gate->name, sizeof(trust->name) - 1);
 	memcpy(trust->baseIP, gate->baseIP, sizeof(trust->baseIP));
 	memcpy(trust->mask, gate->mask, sizeof(trust->mask));
 	if((ret = mpi_write_binary(&gate->rsa.N, trust->n, sizeof(trust->n))))
@@ -404,7 +404,7 @@ int process_arg_trust(struct arg_network_info *local,
 		// Create a new gate
 		newGate = create_arg_network_info();
 		
-		strncpy(newGate->name, trust->name, sizeof(newGate->name));
+		strncpy(newGate->name, trust->name, sizeof(newGate->name) - 1);
 		memcpy(newGate->baseIP, trust->baseIP, sizeof(newGate->baseIP));
 		memcpy(newGate->mask, trust->mask, sizeof(newGate->mask));
 		if((ret = mpi_read_binary(&newGate->rsa.N, trust->n, sizeof(trust->n))))

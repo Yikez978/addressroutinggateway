@@ -41,7 +41,7 @@ static int arg_init(char *configPath, char *gateName)
 	init_director_locks();
 
 	// Read in main config
-	strncpy(conf.file, configPath, sizeof(conf.file));
+	strncpy(conf.file, configPath, sizeof(conf.file) - 1);
 	if(read_config(&conf))
 	{
 		arglog(LOG_ALERT, "Unable to read in main configuration from %s\n", configPath);
@@ -50,7 +50,7 @@ static int arg_init(char *configPath, char *gateName)
 
 	// For testing, the command line overrides what the config says our name is
 	if(gateName != NULL)
-		strncpy(conf.ourGateName, gateName, sizeof(conf.ourGateName));
+		strncpy(conf.ourGateName, gateName, sizeof(conf.ourGateName) - 1);
 
 	// Init various components
 	if(init_hopper(&conf))

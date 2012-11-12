@@ -46,8 +46,8 @@ int init_director(struct config_data *config)
 	arglog(LOG_DEBUG, "Director init\n");
 
 	// Initialize data and start pcap stuff
-	strncpy(intData.dev, config->intDev, sizeof(intData.dev));
-	strncpy(extData.dev, config->extDev, sizeof(extData.dev));
+	strncpy(intData.dev, config->intDev, sizeof(intData.dev) - 1);
+	strncpy(extData.dev, config->extDev, sizeof(extData.dev) - 1);
 
 	arglog(LOG_ALERT, "Internal device is %s, external is %s\n", intData.dev, extData.dev);
 
