@@ -8,7 +8,6 @@ import sys
 import time
 import os
 import os.path
-import pcap
 import sqlite3
 import argparse
 import re
@@ -60,12 +59,10 @@ def create_schema(db):
 	#	- truth_failed (bool) - True if the true source or destination of the packet could not be determined
 	#	- reason_id (foreign: reseasons.id) - Text describing what happened with this packet
 	#
-	# transforms
+	# settings
 	#	- id (PK)
-	#	- gate_id (foreign: system.id)
-	#	- in_id (foreign: packet.id)
-	#	- out_id (foreign: packet.id)
-	#	- reason_id (foreign: packet.id)
+	#	- name (text) - Name of the setting
+	#	- value (text) - Value of setting
 	c = db.cursor()	
 	c.execute('DROP TABLE IF EXISTS systems')
 	c.execute('''CREATE TABLE systems (
@@ -1037,8 +1034,10 @@ def for_all_traces(db, callback):
 
 ########################################
 # Collect results and stats!
-def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
+def generate_stats(db, begin_time_buffer=None, end_time_buffer=None, parsable=False):
 	c = db.cursor()
+
+	stats = {}
 
 	# Get the absolute (rather than relative) times to generate stats on
 	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
@@ -1050,45 +1049,80 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	abs_end_time = c.fetchone()[0]
 	if end_time_buffer is not None:
 		abs_end_time -= end_time_buffer
+	
+	if parsable:
+		stats['begin-time'] = abs_begin_time
+		stats['end-time'] = abs_begin_time
+		stats['length'] = abs_end_time - abs_begin_time
+	else:
+		print('--- Statistics ---')
+		print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
+			abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
 
-	print('--- Statistics ---')
-	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
-		abs_begin_time, abs_end_time, abs_end_time - abs_begin_time))
-
+	# Trace problems
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
 					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
 	failed_trace_count, failed_truth_count = c.fetchone()
-	print('Failed traces (unable to find a corresponding receive): {} packets'.format(failed_trace_count))
-	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(failed_truth_count))
+	if parsable:
+		stats['failed-traces'] = failed_trace_count
+		stats['failed-truth'] = failed_truth_count
+	else:
+		print('Failed traces (unable to find a corresponding receive): {} packets'.format(failed_trace_count))
+		print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(failed_truth_count))
 
 	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
-	print('\nValid packets sent: {}'.format(sent_count))
-	print('Valid packets received: {}'.format(receive_count))
-	print('Valid packets lost: {}'.format(sent_count - receive_count))
-	print('Valid packet loss rate: {}'.format(loss_rate))
+	if parsable:
+		stats['valid-sent'] = sent_count
+		stats['valid-recv'] = receive_count
+		stats['valid-loss-rate'] = loss_rate
+	else:
+		print('\nValid packets sent: {}'.format(sent_count))
+		print('Valid packets received: {}'.format(receive_count))
+		print('Valid packets lost: {}'.format(sent_count - receive_count))
+		print('Valid packet loss rate: {}'.format(loss_rate))
 
 	loss_rate, sent_count, receive_count = invalid_loss_rate(db, abs_begin_time, abs_end_time)
-	print('\nInvalid packets sent: {}'.format(sent_count))
-	print('Invalid packets received: {}'.format(receive_count))
-	print('Invalid packets lost: {}'.format(sent_count - receive_count))
-	print('Invalid packet loss rate: {}'.format(loss_rate))
+	if parsable:
+		stats['invalid-sent'] = sent_count
+		stats['invalid-recv'] = receive_count
+		stats['invalid-loss-rate'] = loss_rate
+	else:
+		print('\nInvalid packets sent: {}'.format(sent_count))
+		print('Invalid packets received: {}'.format(receive_count))
+		print('Invalid packets lost: {}'.format(sent_count - receive_count))
+		print('Invalid packet loss rate: {}'.format(loss_rate))
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
 	losses = loss_methods(db, abs_begin_time, abs_end_time)
-	print('\nLosses:')
-	for msg, packets in losses.iteritems():
-		print('  {}: {} packets ({})'.format(msg, len(packets), packets[:10]))
+	if parsable:
+		for msg, packets in losses.iteritems():
+			stats['loss \'{}\''.format(msg)] = len(packets)
+	else:
+		print('\nLosses:')
+		for msg, packets in losses.iteritems():
+			print('  {}: {} packets ({})'.format(msg, len(packets), packets[:10]))
 	
 	# Latency introduced by ARG
 	avgs = avg_latency(db, abs_begin_time, abs_end_time)
-	print('\nAverage packet latency: (take with a grain of salt)')
-	print('Overall average: {:.1f} ms'.format(avgs[0]))
-	print('NATed average: {:.1f} ms'.format(avgs[1]))
-	print('Wrapped average: {:.1f} ms'.format(avgs[2]))
+	if parsable:
+		stats['latency-overall'] = avgs[0]
+		stats['latency-nat'] = avgs[1]
+		stats['latency-wrapped'] = avgs[2]
+	else:
+		print('\nAverage packet latency: (take with a grain of salt)')
+		print('Overall average: {:.1f} ms'.format(avgs[0]))
+		print('NATed average: {:.1f} ms'.format(avgs[1]))
+		print('Wrapped average: {:.1f} ms'.format(avgs[2]))
 
 	c.close()
+
+	if parsable:
+		return stats
+
+def generate_parsable_stats(db, begin_time_buffer=None, end_time_buffer=None):
+	return generate_stats(db, begin_time_buffer, end_time_buffer, True)
 
 def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
@@ -1179,7 +1213,8 @@ def loss_methods(db, begin, end):
 
 def avg_latency(db, begin, end):
 	# Get the average latency for packets that passed through the NAT
-	# and packets that were wrapped
+	# and packets that were wrapped. ASSUMES NODES ARE CONNECTED DIRECTLY
+	# TO GATES!
 	c = db.cursor()
 	c.execute('''SELECT AVG(p2.time - p1.time) AS latency FROM packets AS p1
 					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
@@ -1262,6 +1297,7 @@ def main(argv):
 	parser.add_argument('--start-offset', type=int, default=0, help='How many seconds to ignore at the beginning of a run')
 	parser.add_argument('--end-offset', type=int, default=0, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
+	parser.add_argument('--parsable', action='store_true', help='Output a comma-separated list of important values')
 	args = parser.parse_args(argv[1:])
 
 	# Ensure database is empty
@@ -1323,10 +1359,13 @@ def main(argv):
 			print('To display the cycles, specify --show-cycles on the command line')
 
 	# Collect stats
-	print('\n----------------------')
-	show_settings(db)
-	print()
-	generate_stats(db, args.start_offset, args.end_offset)
+	if not args.parsable:
+		print('\n----------------------')
+		show_settings(db)
+		print()
+		generate_stats(db, args.start_offset, args.end_offset)
+	else:
+		generate_parsable_stats(db, args.start_offset, args.end_offset)
 
 	# All done
 	db.commit()

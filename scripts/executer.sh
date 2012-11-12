@@ -4,6 +4,7 @@ PULLDIR="pulled"
 RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
+TEMPFILE=".executer.$$.tmp"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -83,8 +84,8 @@ function start-test {
 
 	clean-pushed
 
-	echo Starting collection
-	start-collection
+	#echo Starting collection
+	#start-collection
 
 	echo Beginning experiment $1 with hop rate $4
 	start-arg $4
@@ -513,6 +514,52 @@ function stop-processing {
 	else
 		_stop-process python
 	fi
+}
+
+# Consolidates all the already-processed results into a CSV file.
+# Use process-runs to process all available results. See show-results
+# for details of <offset>
+# Usage: consolidate-results <csv> [<offset>]
+function consolidate-results {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run locally
+		return
+	fi
+
+	offset=0
+	if [[ "$#" == "2" ]]
+	then
+		offset=$2
+	fi
+
+	show_status=1
+	if [[ "$#" == "0" ]]
+	then
+		show_status=
+	fi
+
+	for results in $RESULTSDIR/*
+	do
+		if [ -f "$results/$RUNDB" ]
+		then
+			if [[ $show_status ]]
+			then
+				echo Working on $results
+			fi
+
+			scripts/process_run.py -l "$results" -db "$results/$RUNDB" \
+						--parsable --skip-trace --start-offset $offset --end-offset $offset |
+					grep -A 50 'BEGIN STATS' | grep -v 'BEGIN STATS' >"$TEMPFILE"
+
+			# The majority of stuff is consistent for all runs
+			grep -v '^loss' "$TEMPFILE" | sort | awk '{ printf "%s,",$2 }'
+			echo
+		fi
+	done
+
+	# Header of CSV
+	rm "$TEMPFILE"
 }
 
 # Run-make does a full build on _all_ gates and saves the binary to ~
@@ -973,6 +1020,8 @@ function await-dropbox {
 		echo We\'ll give it a bit...
 		sleep 2
 	done
+
+	echo Dropbox is idle!
 }
 
 # Adds the helper script and cronjob that allows runcmd-*.sh files
