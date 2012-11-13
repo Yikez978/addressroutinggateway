@@ -255,6 +255,22 @@ def get_test_number(db):
 	else:
 		return None
 
+def get_hop_rate(db):
+	# Returns the hop rate(s) of the gates. If all of them are the same,
+	# returns it as a singe number
+	c = db.cursor()
+
+	c.execute('SELECT value FROM settings WHERE name LIKE "%hop rate"')
+	rates = [atoi(x[0]) for x in c.fetchall()]
+
+	c.close()
+
+	rates = list(set(rates))
+	if len(rates) == 1:
+		return rates[0]
+	else:
+		return rates
+
 ##############################################
 # Manange system table
 def add_all_systems(db, logdir):
@@ -1045,6 +1061,17 @@ def for_all_traces(db, callback):
 	c.close()
 
 	return failures
+
+def atoi(a):
+	i = 0
+	while a:
+		try:
+			i = int(a)
+			break
+		except:
+			a = a[:-1]
+
+	return i
 
 ########################################
 # Collect results and stats!
