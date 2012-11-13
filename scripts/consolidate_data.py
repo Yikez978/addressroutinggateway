@@ -38,7 +38,16 @@ def get_stats(dbs, begin_time_buffer=None, end_time_buffer=None):
 
 	all_stats = list()
 	for db in dbs:
-		all_stats.append(generate_parsable_stats(db, begin_time_buffer, end_time_buffer))
+		stats = generate_stats(db, begin_time_buffer, end_time_buffer)
+
+		# We also need to know what test was being run
+		stats[0]['test-num'] = get_test_number(db)
+
+		# We only care about the number of times each loss method was used
+		loss_counts = {k.replace(' ', '.').lower(): len(packets) for k, packets in stats[1].iteritems()}
+
+		all_stats.append((stats[0], loss_counts))
+
 		print('.', end='')
 		sys.stdout.flush()
 
@@ -50,34 +59,44 @@ def get_headers(all_stats):
 	# represented fully in all of the results
 	print('Getting unique headers...', end='')
 
-	headers = set()
-	for stats in all_stats:
-		headers |= set(stats.keys())
+	stat_headers = set()
+	loss_headers = set()
+	for s in all_stats:
+		stats, losses = s
+		stat_headers |= set(stats.keys())
+		loss_headers |= set(losses.keys())
+
 		print('.', end='')
 		sys.stdout.flush()
 
 	print('done')
-	return list(headers)
+	return (list(stat_headers), list(loss_headers))
 
 def create_csv(csv_path, headers, all_stats):
 	# Creates and outputs a CSV file containing the stats
 	print('Creating CSV at {}...'.format(csv_path), end='')
 
 	with open(csv_path, 'w') as csv:
-		# Header
-		for h in sorted(headers):
-			csv.write('"{}",'.format(h))
+		# Header (settings, normal, and loss causes)
+		for header in headers:
+			for h in sorted(header):
+				csv.write('"{}",'.format(h))
+
 		csv.write('\n')
 
 		# Data
 		for stats in all_stats:
-			print('.', end='')
-			for h in sorted(headers):
-				try:
-					csv.write('{},'.format(stats[h]))
-				except KeyError:
-					csv.write(',')
+			for i in range(len(headers)):
+				for h in sorted(headers[i]):
+					try:
+						csv.write('{},'.format(stats[i][h]))
+					except KeyError:
+						csv.write(',')
+
 			csv.write('\n')
+
+			print('.', end='')
+			sys.stdout.flush()
 
 	print('done')
 

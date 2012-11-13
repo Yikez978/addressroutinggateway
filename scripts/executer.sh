@@ -314,8 +314,10 @@ function retrieve-logs {
 }
 
 # Process all runs in the results director. Farms them out to test hosts
-# for processing, allowing us to parallelize the work.
-# Usage: process-runs
+# for processing, allowing us to parallelize the work. For details of 
+# offset, see show-results. Has no effect on processing, only consolidated
+# results CSV.
+# Usage: process-runs [<offset>]
 function process-runs {
 	if [[ ! $IS_LOCAL ]]
 	then
@@ -395,6 +397,13 @@ function process-runs {
 	# Make sure everything finishes
 	echo Waiting for final processing to complete
 	wait
+
+
+	# Create consolidated CSV
+	csv="$RESULTSDIR/consolidated.$$.csv"
+	echo Creating consolidated CSV in $csv
+	consolidate-results "$csv" $offset
+
 	echo All processing completed
 
 	clean-pulled
