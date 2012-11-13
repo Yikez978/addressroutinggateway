@@ -527,39 +527,20 @@ function consolidate-results {
 		return
 	fi
 
+	if [[ "$#" -lt 1 ]]
+	then
+		echo CSV file to save to not given
+		help consolidate-results
+		return
+	fi
+
 	offset=0
 	if [[ "$#" == "2" ]]
 	then
 		offset=$2
 	fi
 
-	show_status=1
-	if [[ "$#" == "0" ]]
-	then
-		show_status=
-	fi
-
-	for results in $RESULTSDIR/*
-	do
-		if [ -f "$results/$RUNDB" ]
-		then
-			if [[ $show_status ]]
-			then
-				echo Working on $results
-			fi
-
-			scripts/process_run.py -l "$results" -db "$results/$RUNDB" \
-						--parsable --skip-trace --start-offset $offset --end-offset $offset |
-					grep -A 50 'BEGIN STATS' | grep -v 'BEGIN STATS' >"$TEMPFILE"
-
-			# The majority of stuff is consistent for all runs
-			grep -v '^loss' "$TEMPFILE" | sort | awk '{ printf "%s,",$2 }'
-			echo
-		fi
-	done
-
-	# Header of CSV
-	rm "$TEMPFILE"
+	scripts/consolidate_data.py -o "$1" -r "$RESULTSDIR" --start-offset "$offset" --end-offset "$offset"
 }
 
 # Run-make does a full build on _all_ gates and saves the binary to ~

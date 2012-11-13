@@ -117,14 +117,17 @@ def create_schema(db):
 def check_schema(db):
 	valid_db = True
 
-	c = db.cursor()
+	try:
+		c = db.cursor()
 
-	c.execute('SELECT count(*) FROM packets')
-	num = c.fetchone()[0]
-	if num == 0:
+		c.execute('SELECT count(*) FROM packets')
+		num = c.fetchone()[0]
+		if num == 0:
+			valid_db = False
+
+		c.close()
+	except sqlite3.OperationalError as e:
 		valid_db = False
-
-	c.close()
 
 	return valid_db
 
