@@ -15,7 +15,8 @@ import threading
 import hashlib
 import signal
 
-MAX_PACKET_SIZE = 1400
+# Max packet size should allow for the MTU of EthII, including 40 bytes for IP/UDP/TCP and ARG header
+MAX_PACKET_SIZE = 1500 - 40 - 30 - 136
 
 # Support functions
 def log(msg):
@@ -28,15 +29,16 @@ def log_local_addr(port):
 	ip = socket.gethostbyname(socket.gethostname())
 	log('LOCAL ADDRESS: {}:{}'.format(ip, port))
 
-def log_send(proto, ip, port, buf):
+def log_send(proto, ip, port, buf, is_valid=True):
 	m = hashlib.md5()
 	m.update(buf)
-	log('Sent {}:{} to {}:{}'.format(proto, m.hexdigest(), ip, port))
+	log('Sent {} {}:{} to {}:{}'.format('valid' if is_valid else 'invalid',
+		proto, m.hexdigest(), ip, port))
 
 def log_recv(proto, ip, port, buf):
 	m = hashlib.md5()
 	m.update(buf)
-	log('Received {}:{} from {}:{}'.format(proto, m.hexdigest(), ip, port))
+	log('Received valid {}:{} from {}:{}'.format(proto, m.hexdigest(), ip, port))
 	pass
 
 def randbytes(size):
@@ -44,8 +46,8 @@ def randbytes(size):
 	return b''.join([random.choice(string.ascii_lowercase) for x in range(size)])
 
 # Basic senders and receivers
-def tcp_sender(ip, port, delay=1, size=None):
-	log('Starting a TCP sender to {}:{}'.format(ip, port))
+def tcp_sender(ip, port, delay=1, size=None, is_valid=True):
+	log('Starting a {} TCP sender to {}:{}'.format('valid' if is_valid else 'invalid', ip, port))
 	log_local_addr(port)
 
 	try:
@@ -72,7 +74,7 @@ def tcp_sender(ip, port, delay=1, size=None):
 			# Delay next packet
 			time.sleep(delay)
 			s.sendall(buf) # TBD, change to send and ensure each packet gets logged
-			log_send(6, ip, port, buf)
+			log_send(6, ip, port, buf, is_valid)
 
 			# Get response back?
 			try:
@@ -146,8 +148,8 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 	conn.close()
 	log('Connection to {}:{} lost'.format(ip, port))
 		
-def udp_sender(ip, port, delay=1, size=None):
-	log('Starting a UDP sender to {}:{}'.format(ip, port))
+def udp_sender(ip, port, delay=1, size=None, is_valid=True):
+	log('Starting a {} UDP sender to {}:{}'.format('valid' if is_valid else 'invalid', ip, port))
 	log_local_addr(port)
 
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -166,7 +168,7 @@ def udp_sender(ip, port, delay=1, size=None):
 			
 			# Send
 			s.sendto(buf, (ip, port))
-			log_send(17, ip, port, buf)
+			log_send(17, ip, port, buf, is_valid)
 
 			# Get response back?
 			try:
@@ -217,9 +219,8 @@ def end_traffic(sig, stack):
 def main(argv):
 	# Parse command line
 	parser = argparse.ArgumentParser(add_help=False, description='Process an ARG test network run')
-	#parser.add_argument('host', default=socket.gethostname(), nargs='?',
-	#	help='Host to run as (ext1, protA1, etc). Defaults to current hostname')
 	parser.add_argument('-t', '--type', required=True, help='TCP of traffic to work with (TCP, UDP, or ARG)')
+	parser.add_argument('--is-invalid', action='store_true', help='Set if this traffic generator should NOT get its traffic through. Only affects logging, does not change operation of traffic.')
 	parser.add_argument('-h', '--host', help='Host to send to')
 	parser.add_argument('-l', '--listen', action='store_true', help='For TCP or UDP, \
 			makes this end into the server')
@@ -251,12 +252,12 @@ def main(argv):
 			if args.listen:
 				tcp_receiver(args.port, echo=args.echo, size=args.size)
 			else:
-				tcp_sender(args.host, args.port, delay=args.delay, size=args.size)
+				tcp_sender(args.host, args.port, delay=args.delay, size=args.size, is_valid=not args.is_invalid)
 		elif args.type.lower() == 'udp':
 			if args.listen:
 				udp_receiver(args.port, echo=args.echo, size=args.size)
 			else:
-				udp_sender(args.host, args.port, delay=args.delay, size=args.size)
+				udp_sender(args.host, args.port, delay=args.delay, size=args.size, is_valid=not args.is_invalid)
 		else:
 			log('Type {} not yet handled'.format(args.type))
 	finally:

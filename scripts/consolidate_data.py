@@ -33,6 +33,10 @@ def get_databases(result_dir):
 	print('done')
 	return dbs
 
+def close_databases(dbs):
+	for db in dbs:
+		db.close()
+
 def get_stats(dbs, begin_time_buffer=None, end_time_buffer=None):
 	print('Getting stats...', end='')
 
@@ -113,6 +117,7 @@ def main(argv):
 	all_stats = get_stats(dbs)
 	headers = get_headers(all_stats)
 	create_csv(args.csv, headers, all_stats)
+	close_databases(dbs)
 
 if __name__ == '__main__':
 	sys.exit(main(sys.argv))

@@ -41,13 +41,13 @@ function start-tests {
 
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
-	for repetition in {1..5}
+	for repetition in {1..2}
 	do
-		for hr in $(($runtime * 1000)) 1000 500 100 50 30 20 10 5 
+		for hr in $(($runtime * 1000)) 1000 500 100 50 25 10 
 		do
 			for latency in 0
 			do
-				for testnum in 0 1
+				for testnum in 0 1 2
 				do
 					start-test $testnum $runtime $latency $hr 
 				done
@@ -84,8 +84,8 @@ function start-test {
 
 	clean-pushed
 
-	#echo Starting collection
-	#start-collection
+	echo Starting collection
+	start-collection
 
 	echo Beginning experiment $1 with hop rate $4
 	start-arg $4
@@ -121,7 +121,7 @@ function stop-test {
 
 # Starts traffic generators on the network for the appropriate test
 # Test number may be one of:
-#	0 - Connectivity test (slow packets between each pair that should be able to communicate)
+#	0 - UDP Connectivity test (slow packets between each pair that should be able to communicate)
 #	1 - Flood legitimate
 #	2 - Flood illegitimate
 #	3 - Replay
@@ -139,71 +139,108 @@ function start-generators {
 			if [[ "$TYPE" == "ext" ]]
 			then	
 				start-generator udp 2000
+				start-generator tcp 4000
 			else
 				start-generator udp 3000
+				start-generator tcp 5000
 				start-generator udp 2000 172.100.0.1 5
+				start-generator tcp 4000 172.100.0.1 5
+				sleep 1
 				
 				if [[ "$HOST" == "protA1" ]]
 				then
 					start-generator udp 3000 172.2.0.11 5
+					start-generator tcp 5000 172.2.0.11 5
+					sleep 1
 					start-generator udp 3000 172.3.0.11 5
+					start-generator tcp 5000 172.3.0.11 5
 				elif [[ "$HOST" == "protB1" ]]
 				then
 					start-generator udp 3000 172.1.0.11 5
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
 					start-generator udp 3000 172.3.0.11 5
+					start-generator tcp 5000 172.3.0.11 5
 				elif [[ "$HOST" == "protC1" ]]
 				then
 					start-generator udp 3000 172.1.0.11 5
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
 					start-generator udp 3000 172.2.0.11 5
+					start-generator tcp 5000 172.2.0.11 5
 				fi
 			fi
-		else
+		elif [[ "$1" == "1" ]]
+		then
 			# What host are we?
 			if [[ "$TYPE" == "ext" ]]
 			then
 				# One UDP and one TCP listener
-				start-generator tcp 2000 
-				start-generator udp 3000 
+				start-generator tcp 2001 
+				start-generator udp 3001 
 			else
 				# Listen for traffic
-				start-generator udp 5000
-				start-generator tcp 6000
+				start-generator udp 5001
+				start-generator tcp 6001
 
 				# Talk to the UDP and TCP external hosts
-				start-generator tcp 2000 172.100.0.1 .2
+				start-generator tcp 2001 172.100.0.1 .2
 				sleep .8
-				start-generator udp 3000 172.100.0.1 .3
+				start-generator udp 3001 172.100.0.1 .3
 
 				# Talk to each of the other protected clients
 				if [[ "$HOST" == "protA1" ]]
 				then
-					start-generator udp 5000 172.2.0.11 .4
-					start-generator tcp 6000 172.2.0.11 .1
-					start-generator udp 5000 172.3.0.11 .2
-					start-generator tcp 6000 172.3.0.11 .3
+					start-generator udp 5001 172.2.0.11 .4
+					start-generator tcp 6001 172.2.0.11 .1
+					start-generator udp 5001 172.3.0.11 .2
+					start-generator tcp 6001 172.3.0.11 .3
 				elif [[ "$HOST" == "protB1" ]]
 				then
-					start-generator udp 5000 172.1.0.11 .4
-					start-generator tcp 6000 172.1.0.11 .3
-					start-generator udp 5000 172.3.0.11 .5
-					start-generator tcp 6000 172.3.0.11 .1
+					start-generator udp 5001 172.1.0.11 .4
+					start-generator tcp 6001 172.1.0.11 .3
+					start-generator udp 5001 172.3.0.11 .5
+					start-generator tcp 6001 172.3.0.11 .1
 				elif [[ "$HOST" == "protC1" ]]
 				then
-					start-generator udp 5000 172.1.0.11 .2
-					start-generator tcp 6000 172.1.0.11 .4
-					start-generator udp 5000 172.2.0.11 .1
-					start-generator tcp 6000 172.2.0.11 .6
+					start-generator udp 5001 172.1.0.11 .2
+					start-generator tcp 6001 172.1.0.11 .4
+					start-generator udp 5001 172.2.0.11 .1
+					start-generator tcp 6001 172.2.0.11 .6
 				fi
 			fi
+		elif [[ "$1" == "2" ]]
+		then
+			if [[ "$TYPE" == "ext" ]]
+			then
+				# Listen for traffic, although for this test we don't expect any to come in
+				start-generator tcp 2002
+				start-generator udp 3002
+
+				# Attempt to send traffic IN to the protected clients
+				start-generator tcp 5002 172.1.0.11 .3 0 
+				start-generator udp 6002 172.1.0.11 .4 0
+				start-generator tcp 5002 172.2.0.11 .1 0
+				start-generator udp 6002 172.2.0.11 .2 0
+				start-generator tcp 5002 172.3.0.11 .5 0
+				start-generator udp 6002 172.3.0.11 .2 0
+			else
+				start-generator tcp 5002
+				start-generator udp 6002
+			fi
+		else
+			echo Test number invalid
+			help start-generators
 		fi
 	fi
 }
 
 # Starts a single generator on the current or--if local--given host
-# Usage: start-generator [<host>] <type> <port> [<host> <delay>]
+# Usage: start-generator [<host>] <type> <port> [<host> <delay> [<valid>]]
 #	type - tcp or udp
 #	host - If given, generator connects to the given host. If not, generator enters listening mode
 #	delay - Listeners always send instantly. Senders send one packet every <delay> seconds (may be decimal)
+#	is_valid - default to true, 0 if not valid traffic
 function start-generator {
 	if [[ $IS_LOCAL ]]
 	then
@@ -219,12 +256,18 @@ function start-generator {
 			filename="`hostname`-listen-$1:$2.log"
 			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" 2>&1 &
 			disown $!
-		elif [[ "$#" == 4 ]]
+		elif (( $# >= 4 ))
 		then
 			# Send
+			invalid=
+			if [[ "$#" == 5 && "$5" == "0" ]]
+			then
+				invalid="--is-invalid"
+			fi
+
 			echo $1 sender created to $3:$2 with $4 second delay
 			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
-			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" >"$filename" 2>&1 &
+			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" $invalid >"$filename" 2>&1 &
 			disown $!
 		else
 			help start-generator
@@ -397,12 +440,6 @@ function process-runs {
 	# Make sure everything finishes
 	echo Waiting for final processing to complete
 	wait
-
-
-	# Create consolidated CSV
-	csv="$RESULTSDIR/consolidated.$$.csv"
-	echo Creating consolidated CSV in $csv
-	consolidate-results "$csv" $offset
 
 	echo All processing completed
 

@@ -310,7 +310,7 @@ int send_packet(const struct packet_data *packet)
 	if(sendto(sock, (uint8_t*)packet->data + packet->linkLayerLen, len,
 		0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
 	{
-		arglog(LOG_DEBUG, "Normal send failed: %i\n", errno);
+		arglog(LOG_DEBUG, "Normal send failed, errno %i. Msg size %i\n", errno, len);
 		return -errno;
 	}
 

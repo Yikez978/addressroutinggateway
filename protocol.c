@@ -113,7 +113,7 @@ int process_arg_pong(struct arg_network_info *local,
 					  const struct packet_data *packet)
 {
 	int ret;
-	char status = 0;
+	int status = 0;
 	struct argmsg *msg = NULL;
 	uint32_t *id = 0;
 	
@@ -230,7 +230,7 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 								const struct packet_data *packet)
 {
 	int ret;
-	char status = 0;
+	int status = 0;
 	struct argmsg *msg = NULL;
 	struct arg_conn_data *connData = NULL; 
 
@@ -369,7 +369,7 @@ int process_arg_trust(struct arg_network_info *local,
 						struct arg_network_info *remote,
 						const struct packet_data *packet)
 {
-	char status = 0;
+	int status = 0;
 	int ret = 0;
 	struct argmsg *msg = NULL;
 	struct arg_trust_data *trust = NULL;

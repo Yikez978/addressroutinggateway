@@ -6,7 +6,7 @@
 #define MAX_ERROR_STR_LEN 35
 
 enum {
-	ARG_MIN_ERROR = 90,
+	ARG_MIN_ERROR = 150,
 
 	// Message errors
 	ARG_SEQ_BAD = ARG_MIN_ERROR,

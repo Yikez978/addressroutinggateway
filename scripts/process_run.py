@@ -498,7 +498,7 @@ def record_client_traffic(db, name, log):
 	count = 0
 	log_line_num = 0
 
-	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
+	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) (valid|invalid) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
 	c.execute('BEGIN TRANSACTION');
 
@@ -512,8 +512,9 @@ def record_client_traffic(db, name, log):
 		if m is None:
 			continue
 
-		time, direction, proto, hash, their_ip, port = m.groups()
+		time, direction, valid, proto, hash, their_ip, port = m.groups()
 		time = float(time)
+		is_valid = (valid == 'valid')
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)
 
@@ -564,11 +565,11 @@ def record_client_traffic(db, name, log):
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
-		c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+		c.execute('''INSERT INTO packets (system_id, time, is_send, is_valid, proto,
 							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 							hash, log_line)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-						(this_id, time, is_send, proto,
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+						(this_id, time, is_send, is_valid, proto,
 							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 							hash, log_line_num))
 
@@ -599,7 +600,6 @@ def record_gate_traffic(db, name, log):
 
 	for line in log:
 		log_line_num += 1
-		# transforms are handled later to ensure that all packets are in the system
 		# Example lines:
 		# 353608.535795917 LOG0 Outbound: Accept: Admin: sent: /p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:2f67e51d456961704b08f6ec186dd182
 		# 353609.935773424 LOG0 Inbound: Accept: Admin: pong accepted: p:253 s:172.2.196.104:0 d:172.1.113.38:0 hash:9c05e526c46e5f4214f90201dd5e3b58/
@@ -1103,15 +1103,17 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['failed.truth'] = failed_truth_count
 
 	# Valid sends vs receives (loss rate)
-	loss_rate, sent_count, receive_count = valid_loss_rate(db, abs_begin_time, abs_end_time)
+	loss_rate, sent_count, receive_count, lost_packets = valid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['valid.sent'] = sent_count
 	stats['valid.recv'] = receive_count
 	stats['valid.loss.rate'] = loss_rate
+	stats['valid.loss.examples'] = lost_packets
 
-	loss_rate, sent_count, receive_count = invalid_loss_rate(db, abs_begin_time, abs_end_time)
+	loss_rate, sent_count, receive_count, not_lost_packets = invalid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['invalid.sent'] = sent_count
 	stats['invalid.recv'] = receive_count
 	stats['invalid.loss.rate'] = loss_rate
+	stats['invalid.recvd.examples'] = not_lost_packets
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
@@ -1138,12 +1140,12 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 
 	print('\nValid packets sent: {}'.format(stats['valid.sent']))
 	print('Valid packets received: {}'.format(stats['valid.recv']))
-	print('Valid packets lost: {}'.format(stats['valid.sent'] . stats['valid.recv']))
+	print('Valid packets lost: {} ({})'.format(stats['valid.sent'] - stats['valid.recv'], stats['valid.loss.examples'][:10]))
 	print('Valid packet loss rate: {}'.format(stats['valid.loss.rate']))
 
 	print('\nInvalid packets sent: {}'.format(stats['invalid.sent']))
-	print('Invalid packets received: {}'.format(stats['invalid.recv']))
-	print('Invalid packets lost: {}'.format(stats['invalid.sent'] . stats['invalid.recv']))
+	print('Invalid packets received: {} ({})'.format(stats['invalid.recv'], stats['invalid.recvd.examples'][:10]))
+	print('Invalid packets lost: {}'.format(stats['invalid.sent'] - stats['invalid.recv']))
 	print('Invalid packet loss rate: {}'.format(stats['invalid.loss.rate']))
 
 	print('\nLosses:')
@@ -1159,15 +1161,16 @@ def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
 	# that actually reached their intended destination (ideally 0)
 	c = db.cursor()
-	c.execute('''SELECT count(*) FROM packets 
+	c.execute('''SELECT p1.id FROM packets AS p1 
 					JOIN systems ON system_id=systems.id
 					WHERE name NOT LIKE 'gate%'
 						AND is_send=1
 						AND is_valid=1
 						AND time BETWEEN ? AND ?''', (begin, end))	
-	sends = c.fetchone()[0]
-	
-	c.execute('''SELECT count(*) FROM packets AS p1
+	sent = c.fetchall()
+	send_count = len(sent)
+
+	c.execute('''SELECT p1.id FROM packets AS p1
 					JOIN systems ON p1.system_id=systems.id
 					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
 					WHERE name NOT LIKE 'gate%'
@@ -1175,27 +1178,33 @@ def valid_loss_rate(db, begin, end):
 						AND p1.is_send=1
 						AND p1.is_valid=1
 						AND p1.time BETWEEN ? AND ?''', (begin, end))	
-	receives = c.fetchone()[0]
+	recvd = c.fetchall()
+	recv_count = len(recvd)
+
 	c.close()
+
+	# Get the IDs of the packets we lost
+	lost = [x[0] for x in set(sent) - set(recvd)]
 	
-	if sends > 0:
-		return ((sends - receives)/sends, sends, receives)
+	if send_count > 0:
+		return ((send_count - recv_count)/send_count, send_count, recv_count, lost)
 	else:
-		return (0, 0, 0)
+		return (0, 0, 0, [])
 
 def invalid_loss_rate(db, begin, end):
 	# Compare the number of sent _invalid_ packets to the number of sent invalid packets
 	# that actually reached their intended destination (ideally 100%)
 	c = db.cursor()
-	c.execute('''SELECT count(*) FROM packets 
+	c.execute('''SELECT p1.id FROM packets AS p1
 					JOIN systems ON system_id=systems.id
 					WHERE name NOT LIKE 'gate%'
 						AND is_send=1
 						AND is_valid=0
 						AND time BETWEEN ? AND ?''', (begin, end))	
-	sends = c.fetchone()[0]
+	sent = c.fetchall()
+	send_count = len(sent)
 	
-	c.execute('''SELECT count(*) FROM packets AS p1
+	c.execute('''SELECT p1.id FROM packets AS p1
 					JOIN systems ON p1.system_id=systems.id
 					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
 					WHERE name NOT LIKE 'gate%'
@@ -1203,13 +1212,17 @@ def invalid_loss_rate(db, begin, end):
 						AND p1.is_send=1
 						AND p1.is_valid=0
 						AND p1.time BETWEEN ? AND ?''', (begin, end))	
-	receives = c.fetchone()[0]
+	recvd = c.fetchall()
+	recv_count = len(recvd)
 	c.close()
 
-	if sends > 0:
-		return ((sends - receives)/sends, sends, receives)
+	# Get the IDs of the packets we DIDN'T lose
+	not_lost = [x[0] for x in recvd]
+
+	if send_count > 0:
+		return ((send_count - recv_count)/send_count, send_count, recv_count, not_lost)
 	else:
-		return (1, 0, 0)
+		return (1, 0, 0, [])
 
 def loss_methods(db, begin, end):
 	# Get sent packets that didn't make it to their destination
@@ -1379,14 +1392,15 @@ def main(argv):
 		return 1
 
 	# Check for problems
-	cycles = check_for_trace_cycles(db)
-	if cycles:
-		print('WARNING: Cycles found in trace data. Results may be incorrect')
-		if args.show_cycles:
-			for id in cycles:
-				show_trace(db, id)
-		else:
-			print('To display the cycles, specify --show-cycles on the command line')
+	if not args.skip_trace:
+		cycles = check_for_trace_cycles(db)
+		if cycles:
+			print('WARNING: Cycles found in trace data. Results may be incorrect')
+			if args.show_cycles:
+				for id in cycles:
+					show_trace(db, id)
+			else:
+				print('To display the cycles, specify --show-cycles on the command line')
 
 	# Collect stats
 	print('\n----------------------')
