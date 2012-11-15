@@ -95,8 +95,10 @@ int process_arg_ping(struct arg_network_info *local,
 
 	if(msg->len == sizeof(remote->proto.pingID))
 	{
-		// Echo back their data
-		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg, "pong sent", packet)) < 0)
+		// Echo back their data. We log the two steps separately, preventing the processor from
+		// tracing the packet back from the receiver to the original ping sender
+		arglog_result(packet, NULL, 1, 1, "Admin", "ping accepted");
+		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg, "pong sent", NULL)) < 0)
 			arglog(LOG_DEBUG, "Failed to send pong\n");
 	}
 	else
