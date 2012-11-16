@@ -9,6 +9,7 @@
 *.pyc
 *.db
 modules.order
+.DS_Store
 *.mod.c
 .tmp_versions
 *~
