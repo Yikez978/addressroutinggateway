@@ -41,13 +41,13 @@ function start-tests {
 
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
-	for repetition in {1..2}
+	for repetition in {1..5}
 	do
-		for hr in $(($runtime * 1000)) 1000 500 100 50 25 10 
+		for hr in $(($runtime * 1000)) 1000 
 		do
 			for latency in 0
 			do
-				for testnum in 0 1 2
+				for testnum in {0..4}
 				do
 					start-test $testnum $runtime $latency $hr 
 				done
@@ -121,10 +121,13 @@ function stop-test {
 
 # Starts traffic generators on the network for the appropriate test
 # Test number may be one of:
-#	0 - UDP Connectivity test (slow packets between each pair that should be able to communicate)
-#	1 - Flood legitimate
-#	2 - Flood illegitimate
-#	3 - Replay
+#	0 - UDP NAT connectivity test (slow packets between each pair that should be able to communicate)
+#	1 - UDP Hopper connectivity test
+#	2 - TCP NAT test
+#	3 - TCP Hopper connectivity
+#	4 - Composite connectivity test (all the above)
+#	5 - Flood legitimate
+#	6 - Flood illegitimate
 # Usage: start-generators <test num>
 function start-generators {
 	if [[ $IS_LOCAL ]]
@@ -139,38 +142,78 @@ function start-generators {
 			if [[ "$TYPE" == "ext" ]]
 			then	
 				start-generator udp 2000
-				start-generator tcp 4000
 			else
 				start-generator udp 3000
-				start-generator tcp 5000
 				start-generator udp 2000 172.100.0.1 5
-				start-generator tcp 4000 172.100.0.1 5
-				sleep 1
+			fi
+		elif [[ "$1" == "1" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" != "ext" ]]
+			then	
+				start-generator udp 3000
 				
 				if [[ "$HOST" == "protA1" ]]
 				then
 					start-generator udp 3000 172.2.0.11 5
-					start-generator tcp 5000 172.2.0.11 5
 					sleep 1
 					start-generator udp 3000 172.3.0.11 5
-					start-generator tcp 5000 172.3.0.11 5
 				elif [[ "$HOST" == "protB1" ]]
 				then
 					start-generator udp 3000 172.1.0.11 5
-					start-generator tcp 5000 172.1.0.11 5
 					sleep 1
 					start-generator udp 3000 172.3.0.11 5
-					start-generator tcp 5000 172.3.0.11 5
 				elif [[ "$HOST" == "protC1" ]]
 				then
 					start-generator udp 3000 172.1.0.11 5
-					start-generator tcp 5000 172.1.0.11 5
 					sleep 1
 					start-generator udp 3000 172.2.0.11 5
+				fi
+			fi
+		elif [[ "$1" == "2" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" == "ext" ]]
+			then	
+				start-generator tcp 4000
+			else
+				start-generator tcp 4000 172.100.0.1 5
+			fi
+		elif [[ "$1" == "3" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" != "ext" ]]
+			then
+				start-generator tcp 5000
+				
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator tcp 5000 172.2.0.11 5
+					sleep 1
+					start-generator tcp 5000 172.3.0.11 5
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
+					start-generator tcp 5000 172.3.0.11 5
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
 					start-generator tcp 5000 172.2.0.11 5
 				fi
 			fi
-		elif [[ "$1" == "1" ]]
+		elif [[ "$1" == "4" ]]
+		then
+			# Composite other connectivity tests
+			start-generators 0
+			sleep 1
+			start-generators 1
+			sleep 1
+			start-generators 2
+			sleep 1
+			start-generators 3
+		elif [[ "$1" == "5" ]]
 		then
 			# What host are we?
 			if [[ "$TYPE" == "ext" ]]
@@ -209,7 +252,7 @@ function start-generators {
 					start-generator tcp 6001 172.2.0.11 .6
 				fi
 			fi
-		elif [[ "$1" == "2" ]]
+		elif [[ "$1" == "6" ]]
 		then
 			if [[ "$TYPE" == "ext" ]]
 			then

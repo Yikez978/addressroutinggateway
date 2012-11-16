@@ -94,7 +94,7 @@ def create_csv(csv_path, headers, all_stats):
 			for i in range(len(headers)):
 				for h in sorted(headers[i]):
 					try:
-						csv.write('{},'.format(stats[i][h]))
+						csv.write('"{}",'.format(stats[i][h]))
 					except KeyError:
 						csv.write(',')
 
