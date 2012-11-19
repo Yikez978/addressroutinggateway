@@ -11,6 +11,8 @@ import os.path
 import sqlite3
 import argparse
 import re
+import pcap
+import scapy.all
 from glob import glob
 
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
@@ -95,6 +97,7 @@ def create_schema(db):
 						dest_id INT,
 						true_src_id INT,
 						true_dest_id INT,
+						full_hash CHARACTER(32),
 						hash CHARACTER(32),
 						next_hop_id INT DEFAULT NULL,
 						terminal_hop_id INT DEFAULT NULL,
@@ -460,11 +463,14 @@ def record_traffic(db, logdir):
 	c.execute('DELETE FROM packets')
 	c.close()
 
-	# Go through each log file and record what packets each host believes it sent
-	for logName in glob(os.path.join(logdir, '*.log')):
-		# Determine what type of log this is. Alters parsing and processing
+	# Go through each log file and record what packets each host sent
+	for logName in glob(os.path.join(logdir, '*.pcap')):
+		# Determine who this log belongs to
 		name = os.path.basename(logName)
-		name = name[:name.find('-')]
+		m = re.match('^([a-zA-Z0-9]+).*', name)
+		if m is None:
+			raise Exception('Unable to get name from {}'.format(name))
+		name = m.group(1)
 
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
@@ -475,13 +481,55 @@ def record_traffic(db, logdir):
 
 		print('Processing log file {} for {}'.format(logName, name))
 		
-		with open(logName) as log:
-			if is_gate:
-				record_gate_traffic(db, name, log)
-			else:
-				record_client_traffic(db, name, log) 
+		p = pcap.pcapObject()
+		p.open_offline(logName.encode('utf-8'))
+		
+		count = 0
+		while True:
+			packet = p.next()
+			if packet is None:
+				break
 
-def record_client_traffic(db, name, log): 
+			data, time = packet[1:]
+			print(data)
+			for c in data:
+				print('{0} {1} {1:0>x} '.format(c, ord(c)), end='')
+			print()
+			packet = scapy.packet.Packet.dissect(scapy.all.IP(), data)
+			print(packet)
+			break
+
+			if is_gate:
+				record_gate_traffic(db, name, time, packet)
+			else:
+				record_client_traffic(db, name, time, packet)
+
+			count += 1
+			if count % 1000 == 0:
+				print('\tProcessed {} packets so far'.format(count))
+
+		print('\t{} total packets processed'.format(count))
+	
+def record_client_traffic(db, name, time, packet):
+	
+	
+	
+
+	return
+	c = db.cursor()
+	c.execute('''INSERT INTO packets (system_id, time, is_send, is_valid, proto,
+						src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+						hash, log_line)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+					(this_id, time, is_send, is_valid, protcol,
+						src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+						hash, log_line_num))
+	c.close()
+
+def record_gate_traffic(db, name, time, packet):
+	pass	
+
+def record_client_traffic_supplemental(db, name, log): 
 	this_id = get_system(db, name=name)
 	this_ip = None
 
@@ -581,7 +629,7 @@ def record_client_traffic(db, name, log):
 	db.commit()
 	c.close()
 
-def record_gate_traffic(db, name, log):
+def record_gate_traffic_supplemental(db, name, log):
 	this_id = get_system(db, name=name)
 	this_ip = None
 	network = name[4]

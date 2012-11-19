@@ -118,10 +118,56 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	arglog(LOG_DEBUG, "(which is a part of %i bytes)", packet->unknown_len);
 	printRaw(packet->len, packet->data);*/
 
-	// Hash content of packet
+	// Hash whole packet, skipping checksums and TTL
+	struct md5_context ctx;
 	uint8_t md5sumRaw[16];
+
+	md5_starts(&ctx);
+
+	if(packet->ipv4)
+	{
+		// IPv4 header except the checksum
+		int sizeToCheck = 10;
+		md5_update(&ctx, packet->ipv4, sizeToCheck);
+		md5_update(&ctx, (uint8_t*)packet->ipv4 + sizeToCheck + sizeof(packet->ipv4->check),
+			packet->ipv4->ihl*4 - sizeToCheck - sizeof(packet->ipv4->check));
+		
+		// Transport layer
+		if(packet->tcp)
+		{
+			sizeToCheck = 16;
+			md5_update(&ctx, packet->tcp, sizeToCheck);
+			md5_update(&ctx, (uint8_t*)packet->tcp + sizeToCheck + sizeof(packet->tcp->check),
+				packet->tcp->offset*4 - sizeToCheck - sizeof(packet->tcp->check));
+		}
+		else if(packet->udp)
+		{
+			sizeToCheck = 6;
+			md5_update(&ctx, packet->udp, sizeToCheck);
+		}
+		else if(packet->icmp)
+		{
+			sizeToCheck = 2;
+			md5_update(&ctx, packet->icmp, sizeToCheck);
+		}
+		else if(packet->arg)
+		{
+			md5_update(&ctx, packet->arg, sizeof(struct arghdr));
+		}
+
+		// Remainder
+		md5_update(&ctx, packet->unknown_data, packet->unknown_len);
+	}
+	else
+	{
+		// Screw it, do the whole packet minus the link layer
+		md5_update(&ctx, packet->data + linkLayerLen, packet->data_len - packet->linkLayerLen);
+	}
+	
+	md5_finish(&ctx, md5sumRaw);
+	
+	// Convert to hex string
 	char md5sum[33] = "";
-	md5(packet->unknown_data, packet->unknown_len, md5sumRaw);
 	for(int i = 0; i < sizeof(md5sumRaw); i++)
 		sprintf(md5sum + (2 * i), "%02x", (int)md5sumRaw[i]);
 	md5sum[sizeof(md5sum) - 1] = '\0';
