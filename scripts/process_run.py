@@ -89,7 +89,7 @@ def create_schema(db):
 						system_id INTEGER,
 						log_line INT,
 						time DOUBLE,
-						is_send TINYINT,
+						is_send TINYINT DEFAULT NULL,
 						is_valid TINYINT DEFAULT 1,
 						proto SHORTINT,
 						src_ip INT,
@@ -510,32 +510,47 @@ def record_traffic(db, logdir):
 			src_id = get_system(db, ip=src_ip)
 			dest_id = get_system(db, ip=dest_ip)
 
-			# Is the destination or source actually us?
-			# This must be checked because the gateways and external clients may see some
-			# traffic that isn't truly to them (maybe... the switch will block most of it)
-			#if src_id != system_id and dest_id != system_id:
-			#	continue
-
 			# Direction?
-			is_send = False
 			if src_id == system_id:
 				is_send = True
 			elif dest_id == system_id:
 				is_send = False
 			else:
-				print('bah')
+				# Unknown. We'll have to use the gate logs (that's when this happens)
+				# to figure it out
+				is_send = None
 
+			# Determine packet intentions as much as possible
+			true_src_id = None
+			true_dest_id = None
+			if is_prot or is_ext:
+				# If we're a client or external host, then we are the true source or destination
+				if is_send == True:
+					true_src_id = system_id
+				elif is_send == False:
+					true_dest_id = system_id
+				else:
+					print('Client packet found that was not intended for it, dropping')
+					continue
+
+			if is_prot:
+				# Protected clients know who they actually send/receive from
+				if is_send:
+					true_dest_id = dest_id
+				else:
+					true_src_id = src_id
+
+			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
 
 			c = db.cursor()
 			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-								src_ip, dest_ip, src_id, dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								full_hash, hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 							(system_id, time, is_send, ip_layer.proto,
-								src_ip, dest_ip, src_id, dest_id, #true_src_id, true_dest_id,
+								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								full_hash, partial_hash,))
-			print(c.lastrowid)
 			c.close()
 
 			count += 1
