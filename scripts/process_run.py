@@ -517,6 +517,7 @@ def record_traffic(db, logdir):
 			#	continue
 
 			# Direction?
+			is_send = False
 			if src_id == system_id:
 				is_send = True
 			elif dest_id == system_id:
@@ -534,6 +535,7 @@ def record_traffic(db, logdir):
 							(system_id, time, is_send, ip_layer.proto,
 								src_ip, dest_ip, src_id, dest_id, #true_src_id, true_dest_id,
 								full_hash, partial_hash,))
+			print(c.lastrowid)
 			c.close()
 
 			count += 1
@@ -1474,7 +1476,11 @@ def main(argv):
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
-	already_exists = os.path.exists(args.database)
+	if args.empty_database:
+		os.unlink(args.database)
+		already_exists = False
+	else:
+		already_exists = os.path.exists(args.database)
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
