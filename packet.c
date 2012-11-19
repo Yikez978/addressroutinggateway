@@ -118,7 +118,7 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	arglog(LOG_DEBUG, "(which is a part of %i bytes)", packet->unknown_len);
 	printRaw(packet->len, packet->data);*/
 
-	// Hash whole packet, skipping checksums and TTL
+	// Hash whole packet, skipping checksums 
 	struct md5_context ctx;
 	uint8_t md5sumRaw[16];
 

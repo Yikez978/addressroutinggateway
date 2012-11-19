@@ -13,6 +13,7 @@ import argparse
 import re
 import pcap
 import scapy.all
+import hashlib
 from glob import glob
 
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
@@ -483,6 +484,10 @@ def record_traffic(db, logdir):
 		
 		p = pcap.pcapObject()
 		p.open_offline(logName.encode('utf-8'))
+
+		# Grab the system ID for this log
+		system_id = get_system(db, name=name)
+		system_ip = get_system(db, id=system_id)
 		
 		count = 0
 		while True:
@@ -491,18 +496,45 @@ def record_traffic(db, logdir):
 				break
 
 			data, time = packet[1:]
-			print(data)
-			for c in data:
-				print('{0} {1} {1:0>x} '.format(c, ord(c)), end='')
-			print()
-			packet = scapy.packet.Packet.dissect(scapy.all.IP(), data)
-			print(packet)
-			break
+			packet = scapy.all.Ether(data)
 
-			if is_gate:
-				record_gate_traffic(db, name, time, packet)
+			# Skip packets we don't care about
+			if not packet.haslayer(scapy.layers.inet.IP):
+				continue
+
+			# Who is this packet to and from?
+			ip_layer = packet.getlayer(scapy.layers.inet.IP)
+			src_ip = inet_aton_integer(ip_layer.src)
+			dest_ip = inet_aton_integer(ip_layer.dst)
+
+			src_id = get_system(db, ip=src_ip)
+			dest_id = get_system(db, ip=dest_ip)
+
+			# Is the destination or source actually us?
+			# This must be checked because the gateways and external clients may see some
+			# traffic that isn't truly to them (maybe... the switch will block most of it)
+			#if src_id != system_id and dest_id != system_id:
+			#	continue
+
+			# Direction?
+			if src_id == system_id:
+				is_send = True
+			elif dest_id == system_id:
+				is_send = False
 			else:
-				record_client_traffic(db, name, time, packet)
+				print('bah')
+
+			full_hash, partial_hash = md5_packet(packet)
+
+			c = db.cursor()
+			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+								src_ip, dest_ip, src_id, dest_id,
+								full_hash, hash)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							(system_id, time, is_send, ip_layer.proto,
+								src_ip, dest_ip, src_id, dest_id, #true_src_id, true_dest_id,
+								full_hash, partial_hash,))
+			c.close()
 
 			count += 1
 			if count % 1000 == 0:
@@ -511,20 +543,9 @@ def record_traffic(db, logdir):
 		print('\t{} total packets processed'.format(count))
 	
 def record_client_traffic(db, name, time, packet):
-	
-	
-	
-
+	# Do nothing for now
 	return
-	c = db.cursor()
-	c.execute('''INSERT INTO packets (system_id, time, is_send, is_valid, proto,
-						src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-						hash, log_line)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-					(this_id, time, is_send, is_valid, protcol,
-						src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-						hash, log_line_num))
-	c.close()
+
 
 def record_gate_traffic(db, name, time, packet):
 	pass	
@@ -1354,7 +1375,7 @@ def avg_latency(db, begin, end):
 	return [x*1000 for x in (overall, nat, hopper)]
 	
 ########################################
-# Helper utilities
+# Helpers
 def inet_aton_integer(ip):
 	octets = ip.split('.')
 	n = 0
@@ -1377,6 +1398,66 @@ def get_time_limits(db):
 	c.close()
 	return (beg, end)
 
+def md5_packet(pkt):
+	# Returns both md5 of the full packet from the IP layer down,
+	# excluding the checksums at each layer. Understands IPv4, UDP, TCP, ICMP, and ARG
+	full = hashlib.md5()
+	partial = hashlib.md5()
+
+	if pkt.haslayer(scapy.layers.inet.IP):
+		# IPv4, skip checksum
+		ip = pkt.getlayer(scapy.layers.inet.IP)
+		size_to_check = 10
+		full.update(str(ip)[:size_to_check])
+		full.update(str(ip)[size_to_check + 2:ip.ihl*4 - size_to_check - 2])
+
+		payload = None
+
+		# TCP
+		if pkt.haslayer(scapy.layers.inet.TCP):
+			tcp = pkt.getlayer(scapy.layers.inet.IP)
+			size_to_check = 16
+			full.update(str(tcp)[:size_to_check])
+			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4 - size_to_check - 2])
+
+			payload = tcp.payload
+
+		# UDP
+		elif pkt.haslayer(scapy.layers.inet.UDP):
+			udp = pkt.getlayer(scapy.layers.inet.UDP)
+			size_to_check = 6
+			full.update(str(udp)[:size_to_check])
+
+			payload = udp.payload
+
+		# ICMP
+		elif pkt.haslayer(scapy.layers.inet.ICMP):
+			icmp = pkt.getlayer(scapy.layers.inet.ICMP)
+			size_to_check = 2
+			full.update(str(icmp)[:size_to_check])
+
+			payload = icmp.payload
+
+		# ARG. We don't bother to teach scapy how to parse us, we
+		# just grab everything after IP
+		elif ip.proto == 253:
+			full.update(str(ip.payload))
+			partial.update(str(ip.payload)[136:])
+
+		# And all the stuff under transport
+		if payload is not None:
+			full.update(str(payload))
+			partial.update(str(payload))
+
+	else:
+		# Just cover everything except the Ethernet layer
+		full.update(str(pkt.payload))
+		partial = full
+
+	return (full.hexdigest(), partial.hexdigest())	
+
+#########################################
+# Main!
 def main(argv):
 	# Parse command line
 	parser = argparse.ArgumentParser(description='Process an ARG test network run')

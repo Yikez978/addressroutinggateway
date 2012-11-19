@@ -348,15 +348,15 @@ function start-collection {
 			file2="`hostname`-outer.pcap" 
 			echo Starting traffic collection to $file1 and $file2
 			
-			sudo tcpdump -i eth2 -w "$file1" -n not arp &
+			sudo tcpdump -i eth2 -w "$file1" -n ip and not arp &
 			disown $!
-			sudo tcpdump -i eth1 -w "$file2" -n not arp &
+			sudo tcpdump -i eth1 -w "$file2" -n ip and not arp &
 			disown $!
 		else
 			# Dump traffic on just the one
 			filename="`hostname`.pcap" 
 			echo Starting traffic collection to $filename
-			sudo tcpdump -i eth1 -w "$filename" -n not arp &
+			sudo tcpdump -i eth1 -w "$filename" -n ip and not arp &
 			disown $! 
 		fi
 		sleep 1
