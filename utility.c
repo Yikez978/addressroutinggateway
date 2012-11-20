@@ -23,9 +23,6 @@ void printRaw(int len, const void *buf)
 			printf("\n[0x%04x]  ", i);
 		
 		printf("%02x ", bufC[i]);
-	
-		if(i % 8 == 0)
-			print(' ');
 	}
 
 	printf("\n");

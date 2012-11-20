@@ -455,7 +455,7 @@ def get_system(db, name=None, ip=None, id=None):
 		return r
 
 	else:
-		raise Exception('Name or IP must be given for retrieval')
+		raise Exception('Name, ID, or IP must be given for retrieval')
 
 ###############################################
 # Parse sends
@@ -469,14 +469,12 @@ def record_traffic_pcap(db, logdir):
 	for logName in glob(os.path.join(logdir, '*.pcap')):
 		# Determine who this log belongs to
 		name = os.path.basename(logName)
-		network = name[4]
 
-		m = re.match('^([a-zA-Z0-9]+)(?:|-(inner|outer)).*', name)
+		m = re.match('^([a-zA-Z0-9]+?)(?:|-(inner|outer))\.', name)
 		if m is None:
 			raise Exception('Unable to get name from {}'.format(name))
 		name = m.group(1)
 
-		print(m.group(2))
 		is_inner_log = (m.group(2) == 'inner')
 
 		is_gate = name.startswith('gate')
@@ -486,8 +484,13 @@ def record_traffic_pcap(db, logdir):
 		if not is_gate and not is_prot and not is_ext:
 			continue
 
+		if not is_ext:
+			network = name[4]
+
 		if is_gate:
 			prot_client_id = get_system(db, name='prot{}1'.format(network))
+		elif is_prot:
+			gate_id = get_system(db, name='gate{}'.format(network))
 
 		print('Processing pcap file {} for {}'.format(logName, name))
 		
@@ -496,12 +499,12 @@ def record_traffic_pcap(db, logdir):
 
 		# Grab the system ID for this log
 		system_id = get_system(db, name=name)
+		if system_id is None:
+			print('\tSkipping, this system is not in the database. There were likely no log files')
+			continue
+
 		system_ip = get_system(db, id=system_id)
 
-		# TBD remove after testing
-		if system_id != 2:
-			continue
-		
 		pcap_count = 0
 		count = 0
 		while True:
@@ -525,7 +528,7 @@ def record_traffic_pcap(db, logdir):
 			src_id = get_system(db, ip=src_ip)
 			dest_id = get_system(db, ip=dest_ip)
 
-			# Direction?
+			# Direction? NOTE: is_send may be None, indicating we don't know
 			if src_id == system_id:
 				is_send = True
 			elif dest_id == system_id:
@@ -539,6 +542,14 @@ def record_traffic_pcap(db, logdir):
 					is_send = True
 			else:
 				is_send = None
+
+			# Protected clients actually have to jump through the gate,
+			# that's the first destination for their packets
+			if is_prot:
+				if is_send == True:
+					dest_id = gate_id
+				elif is_send == False:
+					src_id = gate_id
 
 			# Determine packet intentions as much as possible
 			true_src_id = None
@@ -564,24 +575,24 @@ def record_traffic_pcap(db, logdir):
 				if is_inner_log:
 					# Outbound packets on the inside interface have a true source of the protected client
 					# Likewise, inbound packets there have a true dest of the protected client
-					if is_send:
+					if is_send == True:
 						true_dest_id = prot_client_id
-					else:
+					elif is_send == False:
 						true_src_id = prot_client_id
 				else:
 					# Outbound packets on the external interface that are NOT ARG packets must
 					# have originated from the client and must be intended for the external host
 					if ip_layer.proto != 253:
-						if is_send:
+						if is_send == True:
 							true_src_id = prot_client_id
 							true_dest_id = get_system(db, name='ext1')
-						else:
+						elif is_send == False:
 							true_dest_id = prot_client_id
 							true_src_id = get_system(db, name='ext1')
 
 			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
-			print('system', system_id, full_hash, partial_hash)
+			print('hash', full_hash)
 
 			c = db.cursor()
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
@@ -793,14 +804,22 @@ def record_gate_traffic_log(db, name, log):
 						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))
 						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))
 
-			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-								hash, reason_id, log_line)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-							(this_id, time, is_send, in_proto,
-								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-								hash, reason_id, log_line_num))
-			in_packet_id = c.lastrowid
+			c.execute('''SELECT id FROM packets WHERE system_id=? AND full_hash=?''', (this_id, hash))
+			in_packet_id = c.fetchone()
+			if in_packet_id is not None:
+				in_packet_id = in_packet_id[0]
+				c.execute('''UPDATE packets SET log_line=? AND reason_id=?  WHERE id=?''',
+								(log_line_num, reason_id, in_packet_id))
+			else:
+				print('Unable to find match for inbound packet with full hash {}, line {}'.format(hash, log_line_num))
+
+			#c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+			#					src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+			#					hash, reason_id, log_line)
+			#				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+			#				(this_id, time, is_send, in_proto,
+			#					src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+			#					hash, reason_id, log_line_num))
 		else:
 			in_packet_id = None
 
@@ -839,14 +858,22 @@ def record_gate_traffic_log(db, name, log):
 					true_src_id = get_system(db, ip=src_ip)
 					true_dest_id = dest_id
 
-			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
-								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-								hash, reason_id, log_line)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-							(this_id, time, is_send, out_proto,
-								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-								hash, reason_id, log_line_num))
-			out_packet_id = c.lastrowid
+			c.execute('''SELECT id FROM packets WHERE system_id=? AND full_hash=?''', (this_id, hash))
+			out_packet_id = c.fetchone()
+			if out_packet_id is not None:
+				out_packet_id = out_packet_id[0]
+				c.execute('''UPDATE packets SET log_line=? AND reason_id=?  WHERE id=?''',
+								(log_line_num, reason_id, out_packet_id))
+			else:
+				print('Unable to find match for outbound packet with full hash {}, line {}'.format(hash, log_line_num))
+
+			#c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+			#					src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+			#					hash, reason_id, log_line)
+			#				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+			#				(this_id, time, is_send, out_proto,
+			#					src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
+			#					hash, reason_id, log_line_num))
 		else:
 			out_packet_id = None
 
@@ -1016,16 +1043,14 @@ def complete_packet_intentions(db):
 					src_found = True
 					true_src_id = src
 				elif true_src_id != src:
-					raise Exception('Problem! Packet {} has a different true \
-						source than {} but is in the same trace'.format(packet_id, curr_id))
+					raise Exception('Problem! Packet {} has a different true source than {} but is in the same trace'.format(packet_id, curr_id))
 
 			if dest is not None:
 				if true_dest_id is None:
 					dest_found = True
 					true_dest_id = dest
 				elif true_dest_id != dest:
-					raise Exception('Problem! Packet {} has a different true \
-						dest than {} but is in the same trace'.format(packet_id, curr_id))
+					raise Exception('Problem! Packet {} has a different true dest than {} but is in the same trace'.format(packet_id, curr_id))
 
 			curr_id = next_id
 
@@ -1475,7 +1500,7 @@ def print_raw(string):
 		if curr % 16 == 0:
 			print('{:0>4x}   '.format(curr), end='')
 
-		print('{:0>2X} '.format(ord(c)), end='')
+		print('{:0>2x} '.format(ord(c)), end='')
 
 		curr += 1
 		if curr % 16 == 0:
@@ -1492,19 +1517,12 @@ def md5_packet(pkt):
 	full = hashlib.md5()
 	partial = hashlib.md5()
 
-	print('Hashing')
-	scapy.all.hexdump(pkt)
-
 	if pkt.haslayer(scapy.layers.inet.IP):
-		# IPv4, skip checksum
+		# IPv4, skip ID, fragment info, checksum, and TTL
 		ip = pkt.getlayer(scapy.layers.inet.IP)
-		size_to_check = 10
-		full.update(str(ip)[:size_to_check])
-		full.update(str(ip)[size_to_check + 2:ip.ihl*4])
-
-		print('IP')
-		print_raw(str(ip)[:size_to_check])
-		print_raw(str(ip)[size_to_check + 2:ip.ihl*4])
+		full.update(str(ip)[:4])
+		full.update(str(ip)[9])
+		full.update(str(ip)[12:ip.ihl*4])
 
 		payload = None
 
@@ -1515,10 +1533,6 @@ def md5_packet(pkt):
 			full.update(str(tcp)[:size_to_check])
 			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4])
 			
-			print('TCP')
-			print_raw(str(tcp)[:size_to_check])
-			print_raw(str(tcp)[size_to_check + 2:tcp.dataofs*4])
-
 			payload = tcp.payload
 
 		# UDP
@@ -1526,9 +1540,6 @@ def md5_packet(pkt):
 			udp = pkt.getlayer(scapy.layers.inet.UDP)
 			size_to_check = 6
 			full.update(str(udp)[:size_to_check])
-
-			print('UDP')
-			print_raw(str(udp)[:size_to_check])
 
 			payload = udp.payload
 
@@ -1538,27 +1549,35 @@ def md5_packet(pkt):
 			size_to_check = 2
 			full.update(str(icmp)[:size_to_check])
 
-			print('ICMP')
-			print_raw(str(icmp)[:size_to_check])
-
 			payload = icmp.payload
 
-		# ARG. We don't bother to teach scapy how to parse us, we
-		# just grab everything after IP
-		elif ip.proto == 253:
-			full.update(str(ip.payload))
-			partial.update(str(ip.payload)[192:])
+		# ARG
+		elif pkt.haslayer(ARGPacket):
+			ip.show()
+			arg = pkt.getlayer(ARGPacket)
+			full.update(str(arg)[:136])
+
+			print('Hashing')
+			scapy.all.hexdump(pkt)
+
+			print('IP')
+			print_raw(str(ip)[:4])
+			print_raw(str(ip)[9])
+			print_raw(str(ip)[12:ip.ihl*4])
 
 			print('ARG')
-			print_raw(str(ip.payload)[192:])
+			print_raw(str(arg)[:136])
+
+			payload = arg.payload
 
 		# And all the stuff under transport
 		if payload is not None:
 			full.update(str(payload))
 			partial.update(str(payload))
-
-			print('Unknown')
-			print_raw(str(payload))
+			
+			if pkt.haslayer(ARGPacket):
+				print('Unknown')
+				print_raw(str(payload))
 
 	else:
 		# Just cover everything except the Ethernet layer
@@ -1566,6 +1585,17 @@ def md5_packet(pkt):
 		partial = full
 
 	return (full.hexdigest(), partial.hexdigest())	
+
+########################################
+# Teach scapy how to parse ARG packets
+class ARGPacket(scapy.packet.Packet):
+	name = "ARGPacket "
+	fields_desc = [	scapy.fields.ByteField("version", 1),
+					scapy.fields.ByteField("type", 0),
+					scapy.fields.ShortField("len", 0),
+					scapy.fields.IntField("seq", 0),
+					scapy.fields.XBitField("sig", None, 128*8) ]
+scapy.all.bind_layers(scapy.layers.inet.IP, ARGPacket, proto=253)
 
 #########################################
 # Main!
@@ -1585,11 +1615,10 @@ def main(argv):
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
-	if args.empty_database:
+	already_exists = os.path.exists(args.database)
+	if args.empty_database and already_exists:
 		os.unlink(args.database)
 		already_exists = False
-	else:
-		already_exists = os.path.exists(args.database)
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
@@ -1630,14 +1659,8 @@ def main(argv):
 		# was meant to go (many were already resolved above, but NAT traffic needs
 		# additional assistance)
 		trace_packets(db)
-		complete_packet_intentions(db)
-		locate_trace_terminations(db)
-	elif do_record:
-		print('--skip-trace was specified but new data was recorded. Unable to provide stats')
-		return 1
+		# Check for problems
 
-	# Check for problems
-	if not args.skip_trace:
 		cycles = check_for_trace_cycles(db)
 		if cycles:
 			print('WARNING: Cycles found in trace data. Results may be incorrect')
@@ -1646,6 +1669,12 @@ def main(argv):
 					show_trace(db, id)
 			else:
 				print('To display the cycles, specify --show-cycles on the command line')
+
+		complete_packet_intentions(db)
+		locate_trace_terminations(db)
+	elif do_record:
+		print('--skip-trace was specified but new data was recorded. Unable to provide stats')
+		return 1
 
 	# Collect stats
 	print('\n----------------------')

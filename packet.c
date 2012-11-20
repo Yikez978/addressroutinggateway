@@ -126,14 +126,18 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 	{
 		arglog(LOG_DEBUG, "Components:\n");
 
-		// IPv4 header except the checksum
+		// IPv4 header except the checksum, ID, fragmentation, and TTL
+		// Reall this is the first 4 bytes, protocol, and everything after the checksum
+		md5_update(&ctx, (uint8_t*)packet->ipv4, 4);
+		md5_update(&ctx, &packet->ipv4->protocol, sizeof(packet->ipv4->protocol));
+
 		int sizeToCheck = 10;
-		md5_update(&ctx, (uint8_t*)packet->ipv4, sizeToCheck);
 		md5_update(&ctx, (uint8_t*)packet->ipv4 + sizeToCheck + sizeof(packet->ipv4->check),
 			packet->ipv4->ihl*4 - sizeToCheck - sizeof(packet->ipv4->check));
 
 		arglog(LOG_DEBUG, "IP");
-		printRaw(sizeToCheck, packet->ipv4);
+		printRaw(4, packet->ipv4);
+		printRaw(sizeof(packet->ipv4->protocol), &packet->ipv4->protocol);
 		printRaw(packet->ipv4->ihl*4 - sizeToCheck - sizeof(packet->ipv4->check),
 			(uint8_t*)packet->ipv4 + sizeToCheck + sizeof(packet->ipv4->check));
 		
@@ -171,7 +175,7 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 			md5_update(&ctx, (uint8_t*)packet->arg, sizeof(struct arghdr));
 
 			arglog(LOG_DEBUG, "ARG");
-			printRaw(sizeToCheck, packet->arg);
+			printRaw(sizeof(struct arghdr), packet->arg);
 		}
 
 		// Remainder
