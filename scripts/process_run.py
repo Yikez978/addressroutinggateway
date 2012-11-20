@@ -88,7 +88,7 @@ def create_schema(db):
 						id INTEGER,
 						system_id INTEGER,
 						log_line INT,
-						pcap_packet INT,
+						pcap_log_line INT,
 						time DOUBLE,
 						is_send TINYINT DEFAULT NULL,
 						is_valid TINYINT DEFAULT 1,
@@ -469,10 +469,15 @@ def record_traffic_pcap(db, logdir):
 	for logName in glob(os.path.join(logdir, '*.pcap')):
 		# Determine who this log belongs to
 		name = os.path.basename(logName)
-		m = re.match('^([a-zA-Z0-9]+).*', name)
+		network = name[4]
+
+		m = re.match('^([a-zA-Z0-9]+)(?:|-(inner|outer)).*', name)
 		if m is None:
 			raise Exception('Unable to get name from {}'.format(name))
 		name = m.group(1)
+
+		print(m.group(2))
+		is_inner_log = (m.group(2) == 'inner')
 
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
@@ -480,6 +485,9 @@ def record_traffic_pcap(db, logdir):
 
 		if not is_gate and not is_prot and not is_ext:
 			continue
+
+		if is_gate:
+			prot_client_id = get_system(db, name='prot{}1'.format(network))
 
 		print('Processing pcap file {} for {}'.format(logName, name))
 		
@@ -494,6 +502,7 @@ def record_traffic_pcap(db, logdir):
 		if system_id != 2:
 			continue
 		
+		pcap_count = 0
 		count = 0
 		while True:
 			packet = p.next()
@@ -501,6 +510,7 @@ def record_traffic_pcap(db, logdir):
 				break
 
 			data, time = packet[1:]
+			pcap_count += 1
 			packet = scapy.all.Ether(data)
 
 			# Skip packets we don't care about
@@ -520,9 +530,14 @@ def record_traffic_pcap(db, logdir):
 				is_send = True
 			elif dest_id == system_id:
 				is_send = False
+			elif is_gate and is_inner_log:
+				# Use our knowledge of the network to determine direction.
+				# For the inner log, packets from the prot client are receives.
+				if src_id == prot_client_id:
+					is_send = False
+				else:
+					is_send = True
 			else:
-				# Unknown. We'll have to use the gate logs (that's when this happens)
-				# to figure it out
 				is_send = None
 
 			# Determine packet intentions as much as possible
@@ -545,16 +560,36 @@ def record_traffic_pcap(db, logdir):
 				else:
 					true_src_id = src_id
 
+			if is_gate:
+				if is_inner_log:
+					# Outbound packets on the inside interface have a true source of the protected client
+					# Likewise, inbound packets there have a true dest of the protected client
+					if is_send:
+						true_dest_id = prot_client_id
+					else:
+						true_src_id = prot_client_id
+				else:
+					# Outbound packets on the external interface that are NOT ARG packets must
+					# have originated from the client and must be intended for the external host
+					if ip_layer.proto != 253:
+						if is_send:
+							true_src_id = prot_client_id
+							true_dest_id = get_system(db, name='ext1')
+						else:
+							true_dest_id = prot_client_id
+							true_src_id = get_system(db, name='ext1')
+
 			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
 			print('system', system_id, full_hash, partial_hash)
 
 			c = db.cursor()
-			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
+			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
+								is_send, proto,
 								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								full_hash, hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-							(system_id, time, is_send, ip_layer.proto,
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							(system_id, time, pcap_count, is_send, ip_layer.proto,
 								src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
 								full_hash, partial_hash,))
 			c.close()
@@ -1475,7 +1510,7 @@ def md5_packet(pkt):
 
 		# TCP
 		if pkt.haslayer(scapy.layers.inet.TCP):
-			tcp = pkt.getlayer(scapy.layers.inet.IP)
+			tcp = pkt.getlayer(scapy.layers.inet.TCP)
 			size_to_check = 16
 			full.update(str(tcp)[:size_to_check])
 			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4])
