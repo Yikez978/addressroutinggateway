@@ -458,7 +458,7 @@ def get_system(db, name=None, ip=None, id=None):
 
 ###############################################
 # Parse sends
-def record_traffic(db, logdir):
+def record_traffic_pcap(db, logdir):
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
 	c.execute('DELETE FROM packets')
@@ -480,7 +480,7 @@ def record_traffic(db, logdir):
 		if not is_gate and not is_prot and not is_ext:
 			continue
 
-		print('Processing log file {} for {}'.format(logName, name))
+		print('Processing pcap file {} for {}'.format(logName, name))
 		
 		p = pcap.pcapObject()
 		p.open_offline(logName.encode('utf-8'))
@@ -542,6 +542,8 @@ def record_traffic(db, logdir):
 
 			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
+			scapy.all.hexdump(packet)
+			print('system', system_id, full_hash, partial_hash)
 
 			c = db.cursor()
 			c.execute('''INSERT INTO packets (system_id, time, is_send, proto,
@@ -558,16 +560,31 @@ def record_traffic(db, logdir):
 				print('\tProcessed {} packets so far'.format(count))
 
 		print('\t{} total packets processed'.format(count))
-	
-def record_client_traffic(db, name, time, packet):
-	# Do nothing for now
-	return
 
+def record_traffic_logs(db, logdir):
+	# Go through each log files and record what packets each host believes it sent
+	# Use this information to augment what we pulled from the pcap logs earlier
+	for logName in glob(os.path.join(logdir, '*.log')):
+		# Determine what type of log this is. Alters parsing and processing
+		name = os.path.basename(logName)
+		name = name[:name.find('-')]
 
-def record_gate_traffic(db, name, time, packet):
-	pass	
+		is_gate = name.startswith('gate')
+		is_prot = name.startswith('prot')
+		is_ext = name.startswith('ext')
 
-def record_client_traffic_supplemental(db, name, log): 
+		if not is_gate and not is_prot and not is_ext:
+			continue
+
+		print('Processing log file {} for {}'.format(logName, name))
+		
+		with open(logName) as log:
+ 			if is_gate:
+				record_gate_traffic_log(db, name, log)
+ 			else:
+				record_client_traffic_log(db, name, log) 
+
+def record_client_traffic_log(db, name, log): 
 	this_id = get_system(db, name=name)
 	this_ip = None
 
@@ -651,13 +668,10 @@ def record_client_traffic_supplemental(db, name, log):
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
-		c.execute('''INSERT INTO packets (system_id, time, is_send, is_valid, proto,
-							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-							hash, log_line)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-						(this_id, time, is_send, is_valid, proto,
-							src_ip, dest_ip, src_id, dest_id, true_src_id, true_dest_id,
-							hash, log_line_num))
+		c.execute('''UPDATE packets SET is_send=?, is_valid=?,
+							true_src_id=?, true_dest_id=?, log_line=?
+						WHERE system_id=? AND hash=?''',
+						(is_send, is_valid, true_src_id, true_dest_id, log_line_num, this_id, hash))
 
 		count += 1
 		if count % 1000 == 0:
@@ -667,7 +681,7 @@ def record_client_traffic_supplemental(db, name, log):
 	db.commit()
 	c.close()
 
-def record_gate_traffic_supplemental(db, name, log):
+def record_gate_traffic_log(db, name, log):
 	this_id = get_system(db, name=name)
 	this_ip = None
 	network = name[4]
@@ -1528,7 +1542,8 @@ def main(argv):
 	# Trace packets
 	if do_record:
 		# What did each host attempt to do?
-		record_traffic(db, args.logdir)
+		record_traffic_pcap(db, args.logdir)
+		record_traffic_logs(db, args.logdir)
 
 	if not args.skip_trace:
 		# Follow each packet through the network and figure out where each packet
