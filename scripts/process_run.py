@@ -88,6 +88,7 @@ def create_schema(db):
 						id INTEGER,
 						system_id INTEGER,
 						log_line INT,
+						pcap_packet INT,
 						time DOUBLE,
 						is_send TINYINT DEFAULT NULL,
 						is_valid TINYINT DEFAULT 1,
@@ -488,6 +489,10 @@ def record_traffic_pcap(db, logdir):
 		# Grab the system ID for this log
 		system_id = get_system(db, name=name)
 		system_ip = get_system(db, id=system_id)
+
+		# TBD remove after testing
+		if system_id != 2:
+			continue
 		
 		count = 0
 		while True:
@@ -542,7 +547,6 @@ def record_traffic_pcap(db, logdir):
 
 			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
-			scapy.all.hexdump(packet)
 			print('system', system_id, full_hash, partial_hash)
 
 			c = db.cursor()
@@ -1429,18 +1433,43 @@ def get_time_limits(db):
 	c.close()
 	return (beg, end)
 
+def print_raw(string):
+	# Prints the raw bytes of a string in hex
+	curr = 0
+	for c in string:
+		if curr % 16 == 0:
+			print('{:0>4x}   '.format(curr), end='')
+
+		print('{:0>2X} '.format(ord(c)), end='')
+
+		curr += 1
+		if curr % 16 == 0:
+			print()
+		elif curr % 8 == 0:
+			print(' ', end='')
+
+	if curr % 16 != 0:
+		print()
+
 def md5_packet(pkt):
 	# Returns both md5 of the full packet from the IP layer down,
 	# excluding the checksums at each layer. Understands IPv4, UDP, TCP, ICMP, and ARG
 	full = hashlib.md5()
 	partial = hashlib.md5()
 
+	print('Hashing')
+	scapy.all.hexdump(pkt)
+
 	if pkt.haslayer(scapy.layers.inet.IP):
 		# IPv4, skip checksum
 		ip = pkt.getlayer(scapy.layers.inet.IP)
 		size_to_check = 10
 		full.update(str(ip)[:size_to_check])
-		full.update(str(ip)[size_to_check + 2:ip.ihl*4 - size_to_check - 2])
+		full.update(str(ip)[size_to_check + 2:ip.ihl*4])
+
+		print('IP')
+		print_raw(str(ip)[:size_to_check])
+		print_raw(str(ip)[size_to_check + 2:ip.ihl*4])
 
 		payload = None
 
@@ -1449,7 +1478,11 @@ def md5_packet(pkt):
 			tcp = pkt.getlayer(scapy.layers.inet.IP)
 			size_to_check = 16
 			full.update(str(tcp)[:size_to_check])
-			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4 - size_to_check - 2])
+			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4])
+			
+			print('TCP')
+			print_raw(str(tcp)[:size_to_check])
+			print_raw(str(tcp)[size_to_check + 2:tcp.dataofs*4])
 
 			payload = tcp.payload
 
@@ -1459,6 +1492,9 @@ def md5_packet(pkt):
 			size_to_check = 6
 			full.update(str(udp)[:size_to_check])
 
+			print('UDP')
+			print_raw(str(udp)[:size_to_check])
+
 			payload = udp.payload
 
 		# ICMP
@@ -1467,18 +1503,27 @@ def md5_packet(pkt):
 			size_to_check = 2
 			full.update(str(icmp)[:size_to_check])
 
+			print('ICMP')
+			print_raw(str(icmp)[:size_to_check])
+
 			payload = icmp.payload
 
 		# ARG. We don't bother to teach scapy how to parse us, we
 		# just grab everything after IP
 		elif ip.proto == 253:
 			full.update(str(ip.payload))
-			partial.update(str(ip.payload)[136:])
+			partial.update(str(ip.payload)[192:])
+
+			print('ARG')
+			print_raw(str(ip.payload)[192:])
 
 		# And all the stuff under transport
 		if payload is not None:
 			full.update(str(payload))
 			partial.update(str(payload))
+
+			print('Unknown')
+			print_raw(str(payload))
 
 	else:
 		# Just cover everything except the Ethernet layer
