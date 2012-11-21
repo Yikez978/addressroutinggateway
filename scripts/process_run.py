@@ -522,6 +522,9 @@ def record_traffic_pcap(db, logdir):
 			if not packet.haslayer(scapy.layers.inet.IP):
 				continue
 
+			# Hashes
+			full_hash, partial_hash = md5_packet(packet)
+
 			# Who is this packet to and from?
 			ip_layer = packet.getlayer(scapy.layers.inet.IP)
 			src_ip = inet_aton_integer(ip_layer.src)
@@ -530,9 +533,61 @@ def record_traffic_pcap(db, logdir):
 			src_id = get_system(db, ip=src_ip)
 			dest_id = get_system(db, ip=dest_ip)
 
-			# Hashes
-			full_hash, partial_hash = md5_packet(packet)
+			# Direction? NOTE: is_send may be None, indicating we don't know
+			# We use this to help determine the src_id and dest_id, which are
+			# the next system this packet should hit (rather than the ID that the
+			# IP indicates, which may not be what we went)
+			if src_id == system_id:
+				is_send = True
+			elif dest_id == system_id:
+				is_send = False
+			elif is_gate and is_inner_log:
+				# Use our knowledge of the network to determine direction.
+				# For the inner log, packets from the prot client are receives.
+				if src_id == prot_client_id:
+					is_send = False
+				else:
+					is_send = True
+			else:
+				# Unable to tell
+				print('Unable to tell direction of packet with full hash {}, pcap line {}'.format(full_hash, pcap_count))
+				is_send = None
 
+			# Determine who the next system to see this packet should be
+			if is_prot:
+				# Protected clients actually have to jump through the gate,
+				# that's the first destination for their packets
+				if is_send == True:
+					dest_id = gate_id
+				elif is_send == False:
+					src_id = gate_id	
+			elif is_ext:
+				# External clients must send their packets through the gate of
+				# the correct network. Fortunately for us, that's already taken care
+				# of. However, TBD make SURE the gate ID is chosen. If the packet
+				# happens to use the protected client's IP, that won't be true
+				pass
+			else:
+				if is_inner_log:
+					if is_send == True:
+						# Gate sending to the inside must be shooting for it's client and the packet
+						# comes from us
+						dest_id = prot_client_id
+						src_id = system_id
+					elif is_send == False:
+						# Gate receiving on inside must be from protected and going through us
+						dest_id = system_id
+						src_id = prot_client_id
+				else:
+					if is_send == True:
+						# Gate sending out already has the correct dest_id, but the source is us
+						# no matter what. Really, this is probably already true from above, but
+						# if that logic changes this fact will still hold true
+						src_id = system_id
+					elif is_send == False:
+						dest_id = system_id
+
+			# Insert it
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
 								proto, src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash)
@@ -810,7 +865,6 @@ def record_gate_traffic_log(db, name, log):
 
 		# If this was a transformation/a send in response to a receive, record the linkage
 		if in_packet_id is not None and out_packet_id is not None:
-			print('transform seen')
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
 
 		if module == 'Admin':
@@ -1588,8 +1642,8 @@ def main(argv):
 			else:
 				print('To display the cycles, specify --show-cycles on the command line')
 
-		#complete_packet_intentions(db)
-		##locate_trace_terminations(db)
+		complete_packet_intentions(db)
+		locate_trace_terminations(db)
 	elif do_record:
 		print('--skip-trace was specified but new data was recorded. Unable to provide stats')
 		return 1
