@@ -537,6 +537,7 @@ def record_traffic_pcap(db, logdir):
 			# We use this to help determine the src_id and dest_id, which are
 			# the next system this packet should hit (rather than the ID that the
 			# IP indicates, which may not be what we went)
+			is_send = None
 			if src_id == system_id:
 				is_send = True
 			elif dest_id == system_id:
@@ -712,12 +713,25 @@ def record_client_traffic_log(db, name, log):
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
-		c.execute('''UPDATE packets SET is_send=?, is_valid=?,
-							true_src_id=?, true_dest_id=?, log_line=?
-						WHERE system_id=? AND partial_hash=?''',
-						(is_send, is_valid,
-							true_src_id, true_dest_id, log_line_num,
-							this_id, partial_hash))
+		c.execute('''SELECT id FROM packets 
+						WHERE system_id=?
+							AND src_id=?
+							AND dest_id=?
+							AND log_line IS NULL
+							AND partial_hash=?
+						ORDER BY id
+						LIMIT 1''',
+						(this_id, src_id, dest_id, partial_hash))
+		packet_id = c.fetchone()
+		if packet_id is not None:
+			c.execute('''UPDATE packets SET is_send=?, is_valid=?,
+								true_src_id=?, true_dest_id=?, log_line=?
+							WHERE id=?''',
+							(is_send, is_valid,
+								true_src_id, true_dest_id, log_line_num,
+								packet_id[0]))
+		else:
+			print('Unable to find packet matching for client log line {}, partial hash {}'.format(log_line_num, partial_hash))
 
 		count += 1
 		if count % 1000 == 0:
@@ -800,7 +814,15 @@ def record_gate_traffic_log(db, name, log):
 						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))
 						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))
 
-			c.execute('''SELECT id FROM packets WHERE system_id=? AND full_hash=?''', (this_id, full_hash))
+			c.execute('''SELECT id FROM packets
+							WHERE system_id=?
+								AND src_id=?
+								AND dest_id=?
+								AND log_line IS NULL
+								AND full_hash=?
+							ORDER BY id
+							LIMIT 1''',
+							(this_id, src_id, dest_id, full_hash))
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
@@ -849,7 +871,12 @@ def record_gate_traffic_log(db, name, log):
 					true_src_id = get_system(db, ip=src_ip)
 					true_dest_id = dest_id
 
-			c.execute('''SELECT id FROM packets WHERE system_id=? AND full_hash=?''', (this_id, full_hash))
+			c.execute('''SELECT id FROM packets
+							WHERE system_id=?
+								AND log_line IS NULL
+								AND full_hash=?
+							ORDER BY id
+							LIMIT 1''', (this_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
@@ -1003,7 +1030,6 @@ def complete_packet_intentions(db):
 		# Find the beginning of this trace
 		c = db.cursor()
 		curr_id = packet_id
-		print('On packet {}'.format(packet_id))
 		while True:
 			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
 			prev_id = c.fetchone()
@@ -1011,7 +1037,6 @@ def complete_packet_intentions(db):
 				break
 
 			curr_id = prev_id[0]
-			print('Digging into {}'.format(curr_id))
 
 		# Run down this trace to find the true source and dest
 		true_src_id = row[1]
@@ -1247,6 +1272,10 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['time.end'] = abs_end_time
 	stats['time.total'] = abs_end_time - abs_begin_time
 
+	# Total packets
+	c.execute('''SELECT count(*) FROM packets WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+	stats['total.packets'] = c.fetchone()[0]
+
 	# Trace problems
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
 					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
@@ -1287,6 +1316,7 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('--- Statistics ---')
 	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
 		stats['time.begin'], stats['time.end'], stats['time.total']))
+	print('Total packets: {} packets'.format(stats['total.packets']))
 	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
 	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
 
@@ -1403,6 +1433,10 @@ def loss_methods(db, begin, end):
 				packet_cats[reason_msg] = [packet_id,]
 		else:
 			packet_cats['Unknown'].append(packet_id)
+	
+	# Remove unknown category if it is unused
+	if not packet_cats['Unknown']:
+		del packet_cats['Unknown']
 
 	c.close()
 	return packet_cats
@@ -1580,15 +1614,23 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('-t', '--skip-trace', action='store_true', help='Do not ensure tracing is complete')
-	parser.add_argument('--start-offset', type=int, default=0, help='How many seconds to ignore at the beginning of a run')
-	parser.add_argument('--end-offset', type=int, default=0, help='How many seconds to ignore at the end of a run')
+	parser.add_argument('--offset', type=int, default=0, help='How many seconds to ignore at beginning AND end of run. Overriden by --start-offset and --end-offset')
+	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
+	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
 	args = parser.parse_args(argv[1:])
+
+	# Offsets
+	if args.start_offset is None:
+		args.start_offset = args.offset
+	if args.end_offset is None:
+		args.end_offset = args.offset
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
 	already_exists = os.path.exists(args.database)
 	if args.empty_database and already_exists:
+		print('Clearing data in the current database')
 		os.unlink(args.database)
 		already_exists = False
 
@@ -1599,7 +1641,7 @@ def main(argv):
 			create_schema(db)
 			do_record = True
 		except sqlite3.OperationalError as e:
-			print("Unable to create database: ", e)
+			print('Unable to create database: ', e)
 			return 1
 	else:
 		# This database already existed before, check the data to ensure it's at least somewhat filled
@@ -1631,8 +1673,8 @@ def main(argv):
 		# was meant to go (many were already resolved above, but NAT traffic needs
 		# additional assistance)
 		trace_packets(db)
-		# Check for problems
 
+		# Check for problems
 		cycles = check_for_trace_cycles(db)
 		if cycles:
 			print('WARNING: Cycles found in trace data. Results may be incorrect')
@@ -1649,10 +1691,13 @@ def main(argv):
 		return 1
 
 	# Collect stats
-	print('\n----------------------')
-	show_settings(db)
-	print()
-	print_stats(db, args.start_offset, args.end_offset)
+	if check_schema(db):
+		print('\n----------------------')
+		show_settings(db)
+		print()
+		print_stats(db, args.start_offset, args.end_offset)
+	else:
+		print('Database is still invalid, unable to generate stats. Check run data')
 
 	# All done
 	db.commit()

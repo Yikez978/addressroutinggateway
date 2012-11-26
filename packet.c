@@ -113,8 +113,8 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 		return;
 	}
 
-	arglog(LOG_DEBUG, "Hashing");
-	printRaw(packet->len, packet->data);
+	//arglog(LOG_DEBUG, "Hashing");
+	//printRaw(packet->len, packet->data);
 
 	// Hash whole packet, skipping checksums 
 	md5_context ctx;
@@ -135,12 +135,6 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 		md5_update(&ctx, (uint8_t*)packet->ipv4 + sizeToCheck + sizeof(packet->ipv4->check),
 			packet->ipv4->ihl*4 - sizeToCheck - sizeof(packet->ipv4->check));
 
-		arglog(LOG_DEBUG, "IP");
-		printRaw(4, packet->ipv4);
-		printRaw(sizeof(packet->ipv4->protocol), &packet->ipv4->protocol);
-		printRaw(packet->ipv4->ihl*4 - sizeToCheck - sizeof(packet->ipv4->check),
-			(uint8_t*)packet->ipv4 + sizeToCheck + sizeof(packet->ipv4->check));
-		
 		// Transport layer
 		if(packet->tcp)
 		{
@@ -148,41 +142,24 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 			md5_update(&ctx, (uint8_t*)packet->tcp, sizeToCheck);
 			md5_update(&ctx, (uint8_t*)packet->tcp + sizeToCheck + sizeof(packet->tcp->check),
 				packet->tcp->doff*4 - sizeToCheck - sizeof(packet->tcp->check));
-
-			arglog(LOG_DEBUG, "TCP");
-			printRaw(sizeToCheck, packet->tcp);
-			printRaw(packet->tcp->doff*4 - sizeToCheck - sizeof(packet->tcp->check),
-				(uint8_t*)packet->tcp + sizeToCheck + sizeof(packet->tcp->check));
 		}
 		else if(packet->udp)
 		{
 			sizeToCheck = 6;
 			md5_update(&ctx, (uint8_t*)packet->udp, sizeToCheck);
-
-			arglog(LOG_DEBUG, "UDP");
-			printRaw(sizeToCheck, packet->udp);
 		}
 		else if(packet->icmp)
 		{
 			sizeToCheck = 2;
 			md5_update(&ctx, (uint8_t*)packet->icmp, sizeToCheck);
-
-			arglog(LOG_DEBUG, "ICMP");
-			printRaw(sizeToCheck, packet->icmp);
 		}
 		else if(packet->arg)
 		{
 			md5_update(&ctx, (uint8_t*)packet->arg, sizeof(struct arghdr));
-
-			arglog(LOG_DEBUG, "ARG");
-			printRaw(sizeof(struct arghdr), packet->arg);
 		}
 
 		// Remainder
 		md5_update(&ctx, packet->unknown_data, packet->unknown_len);
-
-		arglog(LOG_DEBUG, "Unknown");
-		printRaw(packet->unknown_len, packet->unknown_data);
 	}
 	else
 	{

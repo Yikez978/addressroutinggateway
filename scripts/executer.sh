@@ -411,6 +411,7 @@ function process-runs {
 		return
 	fi
 
+	export local=00
 	export gateA=00
 	export gateB=00
 	export gateC=00
@@ -469,6 +470,11 @@ function process-runs {
 			then
 				process-run-remote ext1 "$results" &
 				ext1=$!
+				break
+			elif [ -z "`ps ax | grep -E \"^\s*$local\"`" ]
+			then
+				process-run "$results" &
+				local=$!
 				break
 			fi
 
@@ -531,7 +537,7 @@ function clean-processed {
 }
 
 # Process a given run's results on a remote host
-# Usage: process-run <host> <results dir>
+# Usage: process-run-remote <host> <results dir>
 function process-run-remote {
 	if [[ $IS_LOCAL ]]
 	then
@@ -588,9 +594,68 @@ function process-run-remote {
 
 		echo Completed processing of $2 on $1
 	else
-		# TBD change back
 		./process_run.py -l "$1" -db "$RUNDB" 2>&1 | tee "$PROCESSLOG"
 	fi
+}
+
+# Processes new results as they come in. Works locally only,
+# as the assumption is that this runs while tests are being executed
+# Usage: monitor-runs
+function monitor-runs {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run locally
+		return
+	fi
+
+	while true
+	do
+		# Any un-processed results?
+		for results in $RESULTSDIR/*
+		do
+			if [ ! -d "$results" ]
+			then
+				continue
+			fi
+
+			# Don't handle if it has already been processed
+			if [ -f "$results/$RUNDB" ]
+			then
+				continue
+			fi
+
+			to_handle="$results"
+		done
+
+		if [[ ! $to_handle ]]
+		then
+			echo No new results, waiting
+			sleep 5
+			continue
+		fi
+
+		# Wait a bit. This prevents us jumping on a results directory too quickly, before
+		# all of the data has downloaded
+		echo Found new results to process, waiting for it to settle
+		sleep 10
+
+		process-run "$to_handle"
+		to_handle=
+	done
+}
+
+# Process a given run's results locally
+# Usage: process-run <results dir>
+function process-run {
+	if [[ "$#" != "1" ]]
+	then
+		echo Not enough parameters given
+		help process-run
+	fi
+
+	echo Processing $1 on $HOST
+	scripts/process_run.py -l "$1" -db "$1/$RUNDB" 2>&1 | tee "$1/$PROCESSLOG"
+	echo Completed processing of $1 on $HOST
 }
 
 # Stops any processing occuring 

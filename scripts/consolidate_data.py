@@ -85,6 +85,9 @@ def create_csv(csv_path, headers, all_stats):
 		# Header (settings, normal, and loss causes)
 		for header in headers:
 			for h in sorted(header):
+				if h.endswith('.examples'):
+					continue
+
 				csv.write('"{}",'.format(h))
 
 		csv.write('\n')
@@ -93,6 +96,9 @@ def create_csv(csv_path, headers, all_stats):
 		for stats in all_stats:
 			for i in range(len(headers)):
 				for h in sorted(headers[i]):
+					if h.endswith('.examples'):
+						continue
+
 					try:
 						csv.write('"{}",'.format(stats[i][h]))
 					except KeyError:
