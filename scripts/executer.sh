@@ -43,7 +43,7 @@ function start-tests {
 	# First one is no hopping as a consequence of the hop taking the full test length
 	for repetition in {1..5}
 	do
-		for hr in $(($runtime * 1000)) 1000 
+		for hr in $(($runtime * 1000)) 1000 100 50 10 3
 		do
 			for latency in 0
 			do
