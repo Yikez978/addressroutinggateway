@@ -392,6 +392,7 @@ int process_arg_trust(struct arg_network_info *local,
 		curr = local;
 		while(curr != NULL)
 		{
+			arglog(LOG_DEBUG, "Checking if %s matches %s (curr ip %x, mask %x. Trust ip %x, mask %x)\n", curr->name, trust->name, curr->baseIP, curr->mask, trust->baseIP, trust->mask);
 			if(mask_array_cmp(sizeof(trust->baseIP), curr->mask, curr->baseIP, trust->baseIP) == 0)
 			{
 				arglog(LOG_ALERT, "Already know about %s\n", trust->name);
@@ -848,10 +849,18 @@ int process_arg_packet(struct arg_network_info *local,
 	if(recheckSeq)
 	{
 		if(*msg == NULL)
+		{
+			arglog(LOG_DEBUG, "Failing sequence number check because message is null (got %u, should be > %u)\n",
+				ntohl(packet->arg->seq), remote->proto.inSeqNum);
 			return -ARG_SEQ_BAD;
-		
+		}
+
 		if(memcmp(((struct arg_conn_data*)out->data)->iv, remote->iv, sizeof(remote->iv)) == 0)
+		{
+			arglog(LOG_DEBUG, "Failing sequence number check because IV did not change in new connection data (replay?) (got %u, should be > %u)\n",
+				ntohl(packet->arg->seq), remote->proto.inSeqNum);
 			return -ARG_SEQ_BAD;
+		}
 		
 		remote->proto.inSeqNum = ntohl(packet->arg->seq);
 	}

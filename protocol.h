@@ -108,8 +108,8 @@ typedef struct arg_conn_data {
 
 typedef struct arg_trust_data {
 	char name[MAX_NAME_SIZE];
-	uint32_t baseIP[ADDR_SIZE];
-	uint32_t mask[ADDR_SIZE];
+	uint8_t baseIP[ADDR_SIZE];
+	uint8_t mask[ADDR_SIZE];
 	uint8_t n[130];
 	uint8_t e[10];
 } arg_trust_data;

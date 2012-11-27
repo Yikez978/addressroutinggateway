@@ -20,103 +20,103 @@ ALL="$GATES $EXT $PROT"
 # Starts the given test number 
 # Usage: start-tests [<time>]
 function start-tests {
-if [[ ! $IS_LOCAL ]]
-then
-	echo Must be run from local
-	return
-fi
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
 
-runtime=900
-if [[ "$#" == 1 ]]
-then
-	runtime=$1
-fi
+	runtime=900
+	if [[ "$#" == 1 ]]
+	then
+		runtime=$1
+	fi
 
-# Ensure we have the newest build
-if ! run-make
-then
-	echo Fix build problems before continuing
-	return
-fi
+	# Ensure we have the newest build
+	if ! run-make
+	then
+		echo Fix build problems before continuing
+		return
+	fi
 
-# Do every combination of hop rate (hr), latency, and test
-# First one is no hopping as a consequence of the hop taking the full test length
-for repetition in {1..5}
-do
-	for hr in $(($runtime * 1000)) 1000 
+	# Do every combination of hop rate (hr), latency, and test
+	# First one is no hopping as a consequence of the hop taking the full test length
+	for repetition in {1..5}
 	do
-		for latency in 0
+		for hr in $(($runtime * 1000)) 1000 
 		do
-			for testnum in {0..4}
+			for latency in 0
 			do
-				start-test $testnum $runtime $latency $hr 
+				for testnum in {0..4}
+				do
+					start-test $testnum $runtime $latency $hr 
+				done
 			done
 		done
 	done
-done
 }
 
 # Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
 # with <delay> latency (see set-latency), with ARG hopping every <hop rate> milliseconds.
 # Usage: start-test <test num> <time> <latency> <hop rate>
 function start-test {
-if [[ ! $IS_LOCAL ]]
-then
-	echo Must be run from local
-	return
-fi
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
 
-if [[ "$#" != 4 ]]
-then
-	echo Incorrect number of arguments given
-	help start-test
-	return
-fi
+	if [[ "$#" != 4 ]]
+	then
+		echo Incorrect number of arguments given
+		help start-test
+		return
+	fi
 
-stop-test
+	stop-test
 
-# Make sure times are similar (only used for processing)
-# TBD remove once NTP works
-set-time
+	# Make sure times are similar (only used for processing)
+	# TBD remove once NTP works
+	set-time
 
-echo Setting latency to $3
-set-latency $3
+	echo Setting latency to $3
+	set-latency $3
 
-clean-pushed
+	clean-pushed
 
-echo Starting collection
-start-collection
+	echo Starting collection
+	start-collection
 
-echo Beginning experiment $1 with hop rate $4
-start-arg $4
-start-generators $1
+	echo Beginning experiment $1 with hop rate $4
+	start-arg $4
+	start-generators $1
 
-echo Running experiment $1 with hop rate $4 for $2 seconds
-eraseline="\r                                \r"
-i=$2
-while (( $i ))
-do
-	echo -ne "$eraseline$i seconds remaining"
-	sleep 1
-	i=$(($i - 1))
-done
-echo -e "${eraseline}Done running tests"
+	echo Running experiment $1 with hop rate $4 for $2 seconds
+	eraseline="\r                                \r"
+	i=$2
+	while (( $i ))
+	do
+		echo -ne "$eraseline$i seconds remaining"
+		sleep 1
+		i=$(($i - 1))
+	done
+	echo -e "${eraseline}Done running tests"
 
-echo Ending experiment $1
-stop-test
+	echo Ending experiment $1
+	stop-test
 
-d="`date +%Y-%m-%d-%H:%M:%S`-t$1-l$3-hr$4ms"
-echo Pulling logs into $RESULTSDIR/$d
-clean-pulled
-retrieve-logs "$d"
+	d="`date +%Y-%m-%d-%H:%M:%S`-t$1-l$3-hr$4ms"
+	echo Pulling logs into $RESULTSDIR/$d
+	clean-pulled
+	retrieve-logs "$d"
 }
 
 # Ensures all components of a test are dead (gateways, collectors, etc)
 # Usage: stop-test
 function stop-test {
-stop-generators
-stop-collection
-stop-arg
+	stop-generators
+	stop-arg
+	stop-collection
 }
 
 # Starts traffic generators on the network for the appropriate test
@@ -130,152 +130,152 @@ stop-arg
 #	6 - Flood illegitimate
 # Usage: start-generators <test num>
 function start-generators {
-if [[ $IS_LOCAL ]]
-then
-	push-to $EXT $PROT - scripts/gen_traffic.py
-	run-on $EXT $PROT - start-generators $1
-else
-	# What test are we running?
-	if [[ "$1" == "0" ]]
+	if [[ $IS_LOCAL ]]
 	then
-		# Simple test to check connectivity
-		if [[ "$TYPE" == "ext" ]]
-		then	
-			start-generator udp 2000
-		else
-			start-generator udp 3000
-			start-generator udp 2000 172.100.0.1 5
-		fi
-	elif [[ "$1" == "1" ]]
-	then
-		# Simple test to check connectivity
-		if [[ "$TYPE" != "ext" ]]
-		then	
-			start-generator udp 3000
-			
-			if [[ "$HOST" == "protA1" ]]
-			then
-				start-generator udp 3000 172.2.0.11 5
-				sleep 1
-				start-generator udp 3000 172.3.0.11 5
-			elif [[ "$HOST" == "protB1" ]]
-			then
-				start-generator udp 3000 172.1.0.11 5
-				sleep 1
-				start-generator udp 3000 172.3.0.11 5
-			elif [[ "$HOST" == "protC1" ]]
-			then
-				start-generator udp 3000 172.1.0.11 5
-				sleep 1
-				start-generator udp 3000 172.2.0.11 5
-			fi
-		fi
-	elif [[ "$1" == "2" ]]
-	then
-		# Simple test to check connectivity
-		if [[ "$TYPE" == "ext" ]]
-		then	
-			start-generator tcp 4000
-		else
-			start-generator tcp 4000 172.100.0.1 5
-		fi
-	elif [[ "$1" == "3" ]]
-	then
-		# Simple test to check connectivity
-		if [[ "$TYPE" != "ext" ]]
-		then
-			start-generator tcp 5000
-			
-			if [[ "$HOST" == "protA1" ]]
-			then
-				start-generator tcp 5000 172.2.0.11 5
-				sleep 1
-				start-generator tcp 5000 172.3.0.11 5
-			elif [[ "$HOST" == "protB1" ]]
-			then
-				start-generator tcp 5000 172.1.0.11 5
-				sleep 1
-				start-generator tcp 5000 172.3.0.11 5
-			elif [[ "$HOST" == "protC1" ]]
-			then
-				start-generator tcp 5000 172.1.0.11 5
-				sleep 1
-				start-generator tcp 5000 172.2.0.11 5
-			fi
-		fi
-	elif [[ "$1" == "4" ]]
-	then
-		# Composite other connectivity tests
-		start-generators 0
-		sleep 1
-		start-generators 1
-		sleep 1
-		start-generators 2
-		sleep 1
-		start-generators 3
-	elif [[ "$1" == "5" ]]
-	then
-		# What host are we?
-		if [[ "$TYPE" == "ext" ]]
-		then
-			# One UDP and one TCP listener
-			start-generator tcp 2001 
-			start-generator udp 3001 
-		else
-			# Listen for traffic
-			start-generator udp 5001
-			start-generator tcp 6001
-
-			# Talk to the UDP and TCP external hosts
-			start-generator tcp 2001 172.100.0.1 .2
-			sleep .8
-			start-generator udp 3001 172.100.0.1 .3
-
-			# Talk to each of the other protected clients
-			if [[ "$HOST" == "protA1" ]]
-			then
-				start-generator udp 5001 172.2.0.11 .4
-				start-generator tcp 6001 172.2.0.11 .1
-				start-generator udp 5001 172.3.0.11 .2
-				start-generator tcp 6001 172.3.0.11 .3
-			elif [[ "$HOST" == "protB1" ]]
-			then
-				start-generator udp 5001 172.1.0.11 .4
-				start-generator tcp 6001 172.1.0.11 .3
-				start-generator udp 5001 172.3.0.11 .5
-				start-generator tcp 6001 172.3.0.11 .1
-			elif [[ "$HOST" == "protC1" ]]
-			then
-				start-generator udp 5001 172.1.0.11 .2
-				start-generator tcp 6001 172.1.0.11 .4
-				start-generator udp 5001 172.2.0.11 .1
-				start-generator tcp 6001 172.2.0.11 .6
-			fi
-		fi
-	elif [[ "$1" == "6" ]]
-	then
-		if [[ "$TYPE" == "ext" ]]
-		then
-			# Listen for traffic, although for this test we don't expect any to come in
-			start-generator tcp 2002
-			start-generator udp 3002
-
-			# Attempt to send traffic IN to the protected clients
-			start-generator tcp 5002 172.1.0.11 .3 0 
-			start-generator udp 6002 172.1.0.11 .4 0
-			start-generator tcp 5002 172.2.0.11 .1 0
-			start-generator udp 6002 172.2.0.11 .2 0
-			start-generator tcp 5002 172.3.0.11 .5 0
-			start-generator udp 6002 172.3.0.11 .2 0
-		else
-			start-generator tcp 5002
-			start-generator udp 6002
-		fi
+		push-to $EXT $PROT - scripts/gen_traffic.py
+		run-on $EXT $PROT - start-generators $1
 	else
-		echo Test number invalid
-		help start-generators
+		# What test are we running?
+		if [[ "$1" == "0" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" == "ext" ]]
+			then	
+				start-generator udp 2000
+			else
+				start-generator udp 3000
+				start-generator udp 2000 172.100.0.1 5
+			fi
+		elif [[ "$1" == "1" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" != "ext" ]]
+			then	
+				start-generator udp 3000
+				
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator udp 3000 172.2.0.11 5
+					sleep 1
+					start-generator udp 3000 172.3.0.11 5
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator udp 3000 172.1.0.11 5
+					sleep 1
+					start-generator udp 3000 172.3.0.11 5
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator udp 3000 172.1.0.11 5
+					sleep 1
+					start-generator udp 3000 172.2.0.11 5
+				fi
+			fi
+		elif [[ "$1" == "2" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" == "ext" ]]
+			then	
+				start-generator tcp 4000
+			else
+				start-generator tcp 4000 172.100.0.1 5
+			fi
+		elif [[ "$1" == "3" ]]
+		then
+			# Simple test to check connectivity
+			if [[ "$TYPE" != "ext" ]]
+			then
+				start-generator tcp 5000
+				
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator tcp 5000 172.2.0.11 5
+					sleep 1
+					start-generator tcp 5000 172.3.0.11 5
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
+					start-generator tcp 5000 172.3.0.11 5
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator tcp 5000 172.1.0.11 5
+					sleep 1
+					start-generator tcp 5000 172.2.0.11 5
+				fi
+			fi
+		elif [[ "$1" == "4" ]]
+		then
+			# Composite other connectivity tests
+			start-generators 0
+			sleep 1
+			start-generators 1
+			sleep 1
+			start-generators 2
+			sleep 1
+			start-generators 3
+		elif [[ "$1" == "5" ]]
+		then
+			# What host are we?
+			if [[ "$TYPE" == "ext" ]]
+			then
+				# One UDP and one TCP listener
+				start-generator tcp 2001 
+				start-generator udp 3001 
+			else
+				# Listen for traffic
+				start-generator udp 5001
+				start-generator tcp 6001
+
+				# Talk to the UDP and TCP external hosts
+				start-generator tcp 2001 172.100.0.1 .2
+				sleep .8
+				start-generator udp 3001 172.100.0.1 .3
+
+				# Talk to each of the other protected clients
+				if [[ "$HOST" == "protA1" ]]
+				then
+					start-generator udp 5001 172.2.0.11 .4
+					start-generator tcp 6001 172.2.0.11 .1
+					start-generator udp 5001 172.3.0.11 .2
+					start-generator tcp 6001 172.3.0.11 .3
+				elif [[ "$HOST" == "protB1" ]]
+				then
+					start-generator udp 5001 172.1.0.11 .4
+					start-generator tcp 6001 172.1.0.11 .3
+					start-generator udp 5001 172.3.0.11 .5
+					start-generator tcp 6001 172.3.0.11 .1
+				elif [[ "$HOST" == "protC1" ]]
+				then
+					start-generator udp 5001 172.1.0.11 .2
+					start-generator tcp 6001 172.1.0.11 .4
+					start-generator udp 5001 172.2.0.11 .1
+					start-generator tcp 6001 172.2.0.11 .6
+				fi
+			fi
+		elif [[ "$1" == "6" ]]
+		then
+			if [[ "$TYPE" == "ext" ]]
+			then
+				# Listen for traffic, although for this test we don't expect any to come in
+				start-generator tcp 2002
+				start-generator udp 3002
+
+				# Attempt to send traffic IN to the protected clients
+				start-generator tcp 5002 172.1.0.11 .3 0 
+				start-generator udp 6002 172.1.0.11 .4 0
+				start-generator tcp 5002 172.2.0.11 .1 0
+				start-generator udp 6002 172.2.0.11 .2 0
+				start-generator tcp 5002 172.3.0.11 .5 0
+				start-generator udp 6002 172.3.0.11 .2 0
+			else
+				start-generator tcp 5002
+				start-generator udp 6002
+			fi
+		else
+			echo Test number invalid
+			help start-generators
+		fi
 	fi
-fi
 }
 
 # Starts a single generator on the current or--if local--given host
@@ -285,118 +285,118 @@ fi
 #	delay - Listeners always send instantly. Senders send one packet every <delay> seconds (may be decimal)
 #	is_valid - default to true, 0 if not valid traffic
 function start-generator {
-if [[ $IS_LOCAL ]]
-then
-	tohost=$1
-	push-to $tohost - scripts/gen_traffic.py
-	shift
-	run-on $tohost - start-generator $@
-else
-	if [[ "$#" == 2 ]]
+	if [[ $IS_LOCAL ]]
 	then
-		# Listen
-		echo $1 listener created on port $2
-		filename="`hostname`-listen-$1:$2.log"
-		./gen_traffic.py -l -t "$1" -p "$2" >"$filename" 2>&1 &
-		disown $!
-	elif (( $# >= 4 ))
-	then
-		# Send
-		invalid=
-		if [[ "$#" == 5 && "$5" == "0" ]]
-		then
-			invalid="--is-invalid"
-		fi
-
-		echo $1 sender created to $3:$2 with $4 second delay
-		filename="`hostname`-send-$1-$3:$2-delay:$4.log"
-		./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" $invalid >"$filename" 2>&1 &
-		disown $!
+		tohost=$1
+		push-to $tohost - scripts/gen_traffic.py
+		shift
+		run-on $tohost - start-generator $@
 	else
-		help start-generator
+		if [[ "$#" == 2 ]]
+		then
+			# Listen
+			echo $1 listener created on port $2
+			filename="`hostname`-listen-$1:$2.log"
+			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" 2>&1 &
+			disown $!
+		elif (( $# >= 4 ))
+		then
+			# Send
+			invalid=
+			if [[ "$#" == 5 && "$5" == "0" ]]
+			then
+				invalid="--is-invalid"
+			fi
+
+			echo $1 sender created to $3:$2 with $4 second delay
+			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
+			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" $invalid >"$filename" 2>&1 &
+			disown $!
+		else
+			help start-generator
+		fi
 	fi
-fi
 }
 
 # Stops traffic generators on the network
 # Usage: stops-generators
 function stop-generators {
-if [[ $IS_LOCAL ]]
-then
-	push-to $ALL - 
-	run-on $ALL - stop-generators
-else
-	_stop-process python
-fi
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL - 
+		run-on $ALL - stop-generators
+	else
+		_stop-process python
+	fi
 }
 
 # Starts tcpdump running on all hosts on the test network
 # Usage: start-collection
 function start-collection {
-if [[ $IS_LOCAL ]]
-then
-	push-to $ALL -
-	run-on $ALL - start-collection
-else
-	# Stop any other currently running dumps
-	stop-collection
-
-	if [[ "$TYPE" == "gate" ]]
+	if [[ $IS_LOCAL ]]
 	then
-		# Have two interfaces to capture on for gates
-		file1="`hostname`-inner.pcap"
-		file2="`hostname`-outer.pcap" 
-		echo Starting traffic collection to $file1 and $file2
-		
-		sudo tcpdump -i eth2 -w "$file1" -n ip and not arp &
-		disown $!
-		sudo tcpdump -i eth1 -w "$file2" -n ip and not arp &
-		disown $!
+		push-to $ALL -
+		run-on $ALL - start-collection
 	else
-		# Dump traffic on just the one
-		filename="`hostname`.pcap" 
-		echo Starting traffic collection to $filename
-		sudo tcpdump -i eth1 -w "$filename" -n ip and not arp &
-		disown $! 
+		# Stop any other currently running dumps
+		stop-collection
+
+		if [[ "$TYPE" == "gate" ]]
+		then
+			# Have two interfaces to capture on for gates
+			file1="`hostname`-inner.pcap"
+			file2="`hostname`-outer.pcap" 
+			echo Starting traffic collection to $file1 and $file2
+			
+			sudo tcpdump -i eth2 -w "$file1" -n ip and not arp &
+			disown $!
+			sudo tcpdump -i eth1 -w "$file2" -n ip and not arp &
+			disown $!
+		else
+			# Dump traffic on just the one
+			filename="`hostname`.pcap" 
+			echo Starting traffic collection to $filename
+			sudo tcpdump -i eth1 -w "$filename" -n ip and not arp &
+			disown $! 
+		fi
+		sleep 1
 	fi
-	sleep 1
-fi
 }
 
 # Stops tcpdumps running on all systems
 # Usage: stop-collection
 function stop-collection {
-if [[ $IS_LOCAL ]]
-then
-	push-to $ALL
-	run-on $ALL - stop-collection
-else
-	_stop-process tcpdump
-fi
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $ALL
+		run-on $ALL - stop-collection
+	else
+		_stop-process tcpdump
+	fi
 }
 
 # Downloads the logs (pcap, ARG gateway, and traffic generator) to the local system
 # Saves to the given directory name within $RESULTSDIR
 # Usage: retrieve-logs <dir>
 function retrieve-logs {
-if [[ ! $IS_LOCAL ]]
-then
-	echo Must be run from local
-	return
-fi
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
 
-clean-pulled
-pull-from $ALL - '*.pcap'
-pull-from $ALL - '*.log'
+	clean-pulled
+	pull-from $ALL - '*.pcap'
+	pull-from $ALL - '*.log'
 
-mkdir -p "$RESULTSDIR"
-mv "$PULLDIR" "$RESULTSDIR/$1"
-mkdir -p "$PULLDIR"
-rm -f "$RESULTSDIR/$1/config.log"
-rm -f "$RESULTSDIR/$1/build.log"
-rm -f "$RESULTSDIR/$1/$RUNDB"
+	mkdir -p "$RESULTSDIR"
+	mv "$PULLDIR" "$RESULTSDIR/$1"
+	mkdir -p "$PULLDIR"
+	rm -f "$RESULTSDIR/$1/config.log"
+	rm -f "$RESULTSDIR/$1/build.log"
+	rm -f "$RESULTSDIR/$1/$RUNDB"
 
-echo Results saved to "$RESULTSDIR/$1"
+	echo Results saved to "$RESULTSDIR/$1"
 }
 
 # Process all runs in the results director. Farms them out to test hosts

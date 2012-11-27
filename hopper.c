@@ -289,6 +289,7 @@ struct arg_network_info *create_arg_network_info(void)
 
 	newInfo->hopInterval = UINT32_MAX;
 	newInfo->proto.outSeqNum = 1;
+	newInfo->proto.inSeqNum = 0;
 
 	return newInfo;
 }
