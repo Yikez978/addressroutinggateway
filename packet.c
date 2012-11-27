@@ -124,7 +124,7 @@ void create_packet_id(const struct packet_data *packet, char *buf, int buflen)
 
 	if(packet->ipv4)
 	{
-		arglog(LOG_DEBUG, "Components:\n");
+		//arglog(LOG_DEBUG, "Components:\n");
 
 		// IPv4 header except the checksum, ID, fragmentation, and TTL
 		// Reall this is the first 4 bytes, protocol, and everything after the checksum

@@ -588,13 +588,16 @@ def record_traffic_pcap(db, logdir):
 					elif is_send == False:
 						dest_id = system_id
 
+			if is_send is None:
+				raise Exception('pcap processing failed to determine if packet was send or receive')
+
 			# Insert it
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
-								proto, src_ip, dest_ip, src_id, dest_id,
+								is_send, proto, src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-							(system_id, time, pcap_count, ip_layer.proto,
-								src_ip, dest_ip, src_id, dest_id,
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							(system_id, time, pcap_count,
+								is_send, ip_layer.proto, src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash,))
 
 			count += 1
@@ -724,14 +727,13 @@ def record_client_traffic_log(db, name, log):
 						(this_id, src_id, dest_id, partial_hash))
 		packet_id = c.fetchone()
 		if packet_id is not None:
-			c.execute('''UPDATE packets SET is_send=?, is_valid=?,
+			c.execute('''UPDATE packets SET is_valid=?,
 								true_src_id=?, true_dest_id=?, log_line=?
 							WHERE id=?''',
-							(is_send, is_valid,
-								true_src_id, true_dest_id, log_line_num,
+							(is_valid, true_src_id, true_dest_id, log_line_num,
 								packet_id[0]))
 		else:
-			print('Unable to find packet matching for client log line {}, partial hash {}'.format(log_line_num, partial_hash))
+			print('Unable to find matching packet for client log line {}, partial hash {}'.format(log_line_num, partial_hash))
 
 		count += 1
 		if count % 1000 == 0:
@@ -826,9 +828,9 @@ def record_gate_traffic_log(db, name, log):
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?, is_send=?,
+				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
 								true_src_id=?, true_dest_id=? WHERE id=?''',
-								(log_line_num, reason_id, is_send,
+								(log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									in_packet_id))
 			else:
@@ -880,9 +882,9 @@ def record_gate_traffic_log(db, name, log):
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?, is_send=?,
+				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
 								true_src_id=?, true_dest_id=? WHERE id=?''',
-								(log_line_num, reason_id, is_send,
+								(log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									out_packet_id))
 			else:
@@ -931,7 +933,8 @@ def trace_packets(db):
 	while True:
 		if curr_packet >= len(hopless_packets):
 			print('\tGrabbing packets that need processing')
-			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto FROM packets
+			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto
+							FROM packets
 							WHERE is_send=1
 								AND trace_failed=0
 								AND next_hop_id IS NULL
@@ -948,20 +951,28 @@ def trace_packets(db):
 		system_id, packet_id, packet_time, full_hash, src_id, dest_id, proto = sent_packet
 
 		# Find corresponding received packet
-		c.execute('''SELECT id, next_hop_id, system_id FROM packets
-						WHERE is_send=0
-							AND NOT system_id=?
-							AND src_id=? AND dest_id=?
-							AND full_hash=?
-							AND NOT id=?
-							AND proto=?
-							AND time > ? AND time < ?
-						ORDER BY next_hop_id DESC, id ASC''',
-						(system_id, src_id, dest_id, 
-							full_hash, packet_id,
-							proto,
+		# Receive packet must be reasonably similar in time, have the same data,
+		# and not already be the "next hop" for another packet
+		c.execute('''SELECT p1.id, p1.next_hop_id, p1.system_id
+						FROM packets AS p1
+						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
+						WHERE p1.is_send=0						-- Looking for receives
+							AND p2.next_hop_id IS NULL			-- Can't be matched already
+							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
+							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
+							AND p1.proto=?
+							AND p1.full_hash=?
+							AND NOT p1.id=?						-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
+							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
+						ORDER BY p1.id ASC						-- Match earlier packets first''',
+						(system_id,
+							src_id, dest_id, proto, full_hash,
+							packet_id,
 							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
 		receives = c.fetchall()
+
+		if src_id is None or dest_id is None:
+			raise Exception('dammit')
 		
 		if len(receives) == 1:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
@@ -1331,8 +1342,11 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('Invalid packet loss rate: {}'.format(stats['invalid.loss.rate']))
 
 	print('\nLosses:')
-	for msg, packets in losses.iteritems():
-		print('  {}: {} packets ({})'.format(msg, len(packets), packets[:10]))
+	if losses:
+		for msg, packets in losses.iteritems():
+			print('  {}: {} packets ({})'.format(msg, len(packets), packets[:100]))
+	else:
+		print('  None!')
 
 	print('\nAverage packet latency: (take with a grain of salt)')
 	print('Overall average: {:.1f} ms'.format(stats['latency.overall']))
@@ -1345,18 +1359,15 @@ def valid_loss_rate(db, begin, end):
 	c = db.cursor()
 	c.execute('''SELECT p1.id FROM packets AS p1 
 					JOIN systems ON system_id=systems.id
-					WHERE name NOT LIKE 'gate%'
-						AND is_send=1
+					WHERE is_send=1
 						AND is_valid=1
 						AND time BETWEEN ? AND ?''', (begin, end))	
 	sent = c.fetchall()
 	send_count = len(sent)
 
 	c.execute('''SELECT p1.id FROM packets AS p1
-					JOIN systems ON p1.system_id=systems.id
 					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
-					WHERE name NOT LIKE 'gate%'
-						AND p1.true_dest_id=p2.system_id
+					WHERE p1.true_dest_id=p2.system_id
 						AND p1.is_send=1
 						AND p1.is_valid=1
 						AND p1.time BETWEEN ? AND ?''', (begin, end))	
@@ -1409,7 +1420,8 @@ def invalid_loss_rate(db, begin, end):
 def loss_methods(db, begin, end):
 	# Get sent packets that didn't make it to their destination
 	c = db.cursor()
-	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name FROM packets AS p1
+	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name, p2.is_send
+					FROM packets AS p1
 					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
 					LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
 					JOIN systems ON p2.system_id=systems.id
@@ -1417,26 +1429,31 @@ def loss_methods(db, begin, end):
 						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
 						AND p1.time BETWEEN ? AND ?''', (begin, end))
 	
-	packet_cats = {'Unknown': list()}
+	packet_cats = {'Unknown': list(), 'Lost on wire': list()}
 	for row in c:
-		packet_id, reason_msg, next_hop_id, name = row
+		packet_id, reason_msg, next_hop_id, name, terminated_in_send = row
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
 
-		# The gate was the last place to see the packet. However, if it forwarded it,
-		# then we don't want to blame them... file it under "unknown"
-		if reason_msg is not None:
-			try:
-				packet_cats[reason_msg].append(packet_id)
-			except KeyError:
-				packet_cats[reason_msg] = [packet_id,]
+		# If the final packet we traced to is a send (ie, the gateway forwarded it on but
+		# the rececipient never saw it), then file it under "unknown"
+		if terminated_in_send:
+			packet_cats['Lost on wire'].append(packet_id)
 		else:
-			packet_cats['Unknown'].append(packet_id)
+			if reason_msg is not None:
+				try:
+					packet_cats[reason_msg].append(packet_id)
+				except KeyError:
+					packet_cats[reason_msg] = [packet_id,]
+			else:
+				packet_cats['Unknown'].append(packet_id)
 	
 	# Remove unknown category if it is unused
 	if not packet_cats['Unknown']:
 		del packet_cats['Unknown']
+	if not packet_cats['Lost on wire']:
+		del packet_cats['Lost on wire']
 
 	c.close()
 	return packet_cats

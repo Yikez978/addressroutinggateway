@@ -530,8 +530,6 @@ int process_arg_wrapped(struct arg_network_info *local,
 	parse_packet(newPacket);
 	if((ret = send_packet(newPacket)) >= 0)
 		arglog_result(packet, newPacket, 1, 1, "Hopper", "unwrapped");
-	/*else
-		arglog_result(packet, newPacket, 1, 0, "Unwrap", "failed to send");*/
 
 	pthread_mutex_unlock(&remote->lock);
 

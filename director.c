@@ -321,7 +321,7 @@ void direct_inbound(const struct packet_data *packet)
 			if((ret = do_arg_unwrap(packet, gate)) < 0)
 			{
 				arg_strerror_r(ret, error, sizeof(error));
-				arglog_result(packet, NULL, 0, 0, "Unwrap", error);
+				arglog_result(packet, NULL, 0, 0, "Hopper", error);
 			}
 		}
 	}
