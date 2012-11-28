@@ -536,7 +536,7 @@ def record_traffic_pcap(db, logdir):
 			# Direction? NOTE: is_send may be None, indicating we don't know
 			# We use this to help determine the src_id and dest_id, which are
 			# the next system this packet should hit (rather than the ID that the
-			# IP indicates, which may not be what we went)
+			# IP indicates, which may not be what we want)
 			is_send = None
 			if src_id == system_id:
 				is_send = True
@@ -551,8 +551,8 @@ def record_traffic_pcap(db, logdir):
 					is_send = True
 			else:
 				# Unable to tell
-				print('Unable to tell direction of packet with full hash {}, pcap line {}'.format(full_hash, pcap_count))
-				is_send = None
+				print('Unable to tell direction of packet with full hash {}, pcap line {}. Discarding'.format(full_hash, pcap_count))
+				continue
 
 			# Determine who the next system to see this packet should be
 			if is_prot:
@@ -661,6 +661,11 @@ def record_client_traffic_log(db, name, log):
 		# 1351452800.14 LOG4 Received 6:33f773e74690b9dfe714f80d6e3d8c39 from 172.2.20.0:40869
 		m = client_re.match(line)
 		if m is None:
+
+			# Stop all processing if the script died improperly... the results are bad
+			if line.find('ERROR') != -1 or line.find('Traceback') != -1:
+				raise Exception('Run corrupted, at least one traffic generator died')
+
 			continue
 
 		time, direction, valid, proto, partial_hash, their_ip, port = m.groups()
@@ -733,7 +738,7 @@ def record_client_traffic_log(db, name, log):
 							(is_valid, true_src_id, true_dest_id, log_line_num,
 								packet_id[0]))
 		else:
-			print('Unable to find matching packet for client log line {}, partial hash {}'.format(log_line_num, partial_hash))
+			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line))
 
 		count += 1
 		if count % 1000 == 0:
@@ -834,7 +839,7 @@ def record_gate_traffic_log(db, name, log):
 									true_src_id, true_dest_id,
 									in_packet_id))
 			else:
-				print('Unable to find match for inbound packet with full hash {}, line {}'.format(full_hash, log_line_num))
+				print('Unable to find match for inbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line))
 		else:
 			in_packet_id = None
 
@@ -1571,16 +1576,26 @@ def md5_packet(pkt):
 			size_to_check = 16
 			full.update(str(tcp)[:size_to_check])
 			full.update(str(tcp)[size_to_check + 2:tcp.dataofs*4])
-			
-			payload = tcp.payload
 
+			if False and tcp.len == 12:
+				print('udp')
+				print(str(ip)[:4].encode('hex'))
+				print(str(ip)[9].encode('hex'))
+				print(str(ip)[12:ip.ihl*4].encode('hex'))
+
+			payload = pkt.getlayer(scapy.packet.Raw)
+			if payload is not None:
+				payload = str(payload)[:ip.len-tcp.dataofs*4]
+			
 		# UDP
 		elif pkt.haslayer(scapy.layers.inet.UDP):
 			udp = pkt.getlayer(scapy.layers.inet.UDP)
 			size_to_check = 6
 			full.update(str(udp)[:size_to_check])
 
-			payload = udp.payload
+			payload = pkt.getlayer(scapy.packet.Raw)
+			if payload is not None:
+				payload = str(payload)[:udp.len-8]
 
 		# ICMP
 		elif pkt.haslayer(scapy.layers.inet.ICMP):
@@ -1588,19 +1603,20 @@ def md5_packet(pkt):
 			size_to_check = 2
 			full.update(str(icmp)[:size_to_check])
 
-			payload = icmp.payload
-
 		# ARG
 		elif pkt.haslayer(ARGPacket):
 			arg = pkt.getlayer(ARGPacket)
 			full.update(str(arg)[:136])
 
-			payload = arg.payload
-
 		# And all the stuff under transport
+		if payload is None:
+			payload = pkt.getlayer(scapy.packet.Raw)
+			if payload is not None:
+				payload = str(payload)
+
 		if payload is not None:
-			full.update(str(payload))
-			partial.update(str(payload))
+			full.update(payload)
+			partial.update(payload)
 			
 	else:
 		# Just cover everything except the Ethernet layer

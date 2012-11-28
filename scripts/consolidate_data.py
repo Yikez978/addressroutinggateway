@@ -113,11 +113,18 @@ def create_csv(csv_path, headers, all_stats):
 
 def main(argv):
 	parser = argparse.ArgumentParser(description='Process an ARG test network run')
-	parser.add_argument('--start-offset', type=int, default=0, help='How many seconds to ignore at the beginning of a run')
-	parser.add_argument('--end-offset', type=int, default=0, help='How many seconds to ignore at the end of a run')
+	parser.add_argument('--offset', type=int, default=0, help='How many seconds to ignore at beginning AND end of run. Overriden by --start-offset and --end-offset')
+	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
+	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('-r', '--results-dir', default='.', help='Directory with results. Only already-filled DB files will be processed.')
 	parser.add_argument('-o', '--csv', required=True, help='CSV file to save consolidated results to')
 	args = parser.parse_args(argv[1:])
+
+	# Offsets
+	if args.start_offset is None:
+		args.start_offset = args.offset
+	if args.end_offset is None:
+		args.end_offset = args.offset
 
 	dbs = get_databases(args.results_dir)
 	all_stats = get_stats(dbs)

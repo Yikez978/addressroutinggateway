@@ -49,7 +49,11 @@ function start-tests {
 			do
 				for testnum in {0..4}
 				do
+					echo On repetition $repetition, hop rate $hr, test num $testnum with latency $latency
 					start-test $testnum $runtime $latency $hr 
+
+					#echo Waiting to begin next test
+					#sleep 10
 				done
 			done
 		done
@@ -681,7 +685,7 @@ function stop-processing {
 # Consolidates all the already-processed results into a CSV file.
 # Use process-runs to process all available results. See show-results
 # for details of <offset>
-# Usage: consolidate-results <csv> [<offset>]
+# Usage: consolidate-results [<offset>] [<csv>]
 function consolidate-results {
 	if [[ ! $IS_LOCAL ]]
 	then
@@ -689,20 +693,20 @@ function consolidate-results {
 		return
 	fi
 
-	if [[ "$#" -lt 1 ]]
+	if [[ "$#" -lt 2 ]]
 	then
-		echo CSV file to save to not given
-		help consolidate-results
-		return
+		csv="$RESULTSDIR/consolidated.$$.csv" 
+	else
+		csv="$2"
 	fi
 
 	offset=0
-	if [[ "$#" == "2" ]]
+	if [[ "$#" != "0" ]]
 	then
-		offset=$2
+		offset=$1
 	fi
 
-	scripts/consolidate_data.py -o "$1" -r "$RESULTSDIR" --offset "$offset"
+	scripts/consolidate_data.py -o "$csv" -r "$RESULTSDIR" --offset "$offset"
 }
 
 # Run-make does a full build on _all_ gates and saves the binary to ~

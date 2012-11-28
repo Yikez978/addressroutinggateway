@@ -16,7 +16,7 @@ import hashlib
 import signal
 
 # Max packet size should allow for the MTU of EthII, including 40 bytes for IP/UDP/TCP and ARG header
-MAX_PACKET_SIZE = 1500 - 40 - 30 - 136
+MAX_PACKET_SIZE = 1500 - 40 - 30 - 136 - 1
 
 # Support functions
 def log(msg):
@@ -99,6 +99,7 @@ def tcp_receiver(port, echo=False, size=None):
 	stopper = threading.Event()
 
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	s.bind(('', port))
 	s.listen(1)
 
@@ -189,6 +190,7 @@ def udp_receiver(port, echo=False, size=None):
 	log_local_addr(port)
 	
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	s.bind(('', port))
 
 	try:
@@ -236,7 +238,7 @@ def main(argv):
 	parser.add_argument('-o', '--output', default=None, help='Logs to the given file, rather than stdout')
 
 	args = parser.parse_args(argv[1:])
-
+	
 	# Log to file?
 	output_file = None
 	if args.output is not None:
@@ -260,6 +262,9 @@ def main(argv):
 				udp_sender(args.host, args.port, delay=args.delay, size=args.size, is_valid=not args.is_invalid)
 		else:
 			log('Type {} not yet handled'.format(args.type))
+	except Exception as e:
+		log('ERROR: Dying expectedly from exception {}'.format(e))
+		raise e
 	finally:
 		# Close log file
 		if output_file is not None:
