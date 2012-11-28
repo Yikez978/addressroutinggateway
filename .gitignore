@@ -31,4 +31,5 @@ autom4te.cache
 compile
 pulled
 results
+conf/main-gate*.conf
 

@@ -774,6 +774,15 @@ function start-arg {
 		push-to $GATES - arg conf
 		run-on $GATES - start-arg $@
 	else
+		# GateA and GateC don't get to know about each other
+		if [[ "$HOST" == "gateA" ]]
+		then
+			rm conf/*gateC*
+		elif [[ "$HOST" == "gateC" ]]
+		then
+			rm conf/*gateA*
+		fi
+
 		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" 2>&1 &
 		disown $!
 	fi
