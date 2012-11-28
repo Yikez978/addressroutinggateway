@@ -412,8 +412,9 @@ def check_systems(db):
 	print('Everything appears fine')
 	return True
 
-def get_system(db, name=None, ip=None, id=None):
+def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 	# Gets a system ID based on the given name or ip
+	# If prefer_gate is True, matches against ONLY the base_ip/mask, not ip
 	if name is not None:
 		c = db.cursor()
 		c.execute('SELECT id FROM systems WHERE name=?', (name,))
@@ -431,19 +432,16 @@ def get_system(db, name=None, ip=None, id=None):
 			ip = inet_aton_integer(ip)
 
 		c = db.cursor()
-		c.execute('SELECT id, ip, name FROM systems WHERE ip=? OR (mask & ? = mask & base_ip)', (ip, ip))
-		rows = c.fetchall()
+		c.execute('''SELECT id, ip, name
+						FROM systems
+						WHERE ip=? OR (mask & ? = mask & base_ip)
+						ORDER BY base_ip {}
+						LIMIT 1'''.format('DESC' if prefer_gate else 'ASC'), (ip, ip))
+		row = c.fetchone()
 		c.close()
 
-		if len(rows) == 1:
-			return rows[0][0]
-		elif len(rows) > 1:
-			for r in rows:
-				if r[1] == ip:
-					return r[0]
-
-			print(rows)
-			raise Exception('Found multiple systems matching IP {}, but none were an exact match. Bad configuration?'.format(ip))
+		if row is not None:
+			return row[0]
 		else:
 			return None
 
@@ -564,10 +562,11 @@ def record_traffic_pcap(db, logdir):
 					src_id = gate_id	
 			elif is_ext:
 				# External clients must send their packets through the gate of
-				# the correct network. Fortunately for us, that's already taken care
-				# of. However, TBD make SURE the gate ID is chosen. If the packet
-				# happens to use the protected client's IP, that won't be true
-				pass
+				# the correct network.
+				if is_send == True:
+					dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
+				elif is_send == False:
+					src_id = get_system(db, ip=src_ip, prefer_gate=True)
 			else:
 				if is_inner_log:
 					if is_send == True:
@@ -587,9 +586,6 @@ def record_traffic_pcap(db, logdir):
 						src_id = system_id
 					elif is_send == False:
 						dest_id = system_id
-
-			if is_send is None:
-				raise Exception('pcap processing failed to determine if packet was send or receive')
 
 			# Insert it
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
@@ -633,8 +629,8 @@ def record_traffic_logs(db, logdir):
 				record_client_traffic_log(db, name, log) 
 
 def record_client_traffic_log(db, name, log): 
-	this_id = get_system(db, name=name)
-	this_ip = None
+	system_id = get_system(db, name=name)
+	system_ip = None
 
 	is_prot = name.startswith('prot')
 	is_ext = name.startswith('ext')
@@ -677,9 +673,9 @@ def record_client_traffic_log(db, name, log):
 		if direction == 'Received':
 			is_send = False
 
-			dest_ip = this_ip
-			dest_id = this_id
-			true_dest_id = this_id
+			dest_ip = system_ip
+			dest_id = system_id
+			true_dest_id = system_id
 
 			src_ip = their_ip
 
@@ -701,9 +697,9 @@ def record_client_traffic_log(db, name, log):
 		else: 
 			is_send = True
 
-			src_ip = this_ip
-			src_id = this_id
-			true_src_id = this_id
+			src_ip = system_ip
+			src_id = system_id
+			true_src_id = system_id
 
 			dest_ip = their_ip
 
@@ -729,7 +725,7 @@ def record_client_traffic_log(db, name, log):
 							AND partial_hash=?
 						ORDER BY id
 						LIMIT 1''',
-						(this_id, src_id, dest_id, partial_hash))
+						(system_id, src_id, dest_id, partial_hash))
 		packet_id = c.fetchone()
 		if packet_id is not None:
 			c.execute('''UPDATE packets SET is_valid=?,
@@ -738,7 +734,7 @@ def record_client_traffic_log(db, name, log):
 							(is_valid, true_src_id, true_dest_id, log_line_num,
 								packet_id[0]))
 		else:
-			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line))
+			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
 
 		count += 1
 		if count % 1000 == 0:
@@ -749,8 +745,8 @@ def record_client_traffic_log(db, name, log):
 	c.close()
 
 def record_gate_traffic_log(db, name, log):
-	this_id = get_system(db, name=name)
-	this_ip = None
+	system_id = get_system(db, name=name)
+	system_ip = None
 	network = name[4]
 	prot_id = get_system(db, name='prot{}1'.format(network))
 
@@ -794,7 +790,7 @@ def record_gate_traffic_log(db, name, log):
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(in_dip)
-			dest_id = this_id
+			dest_id = system_id
 			true_dest_id = None
 
 			full_hash = in_full_hash
@@ -814,8 +810,7 @@ def record_gate_traffic_log(db, name, log):
 				# forwarded the packet.
 				if module == 'Admin':
 					true_src_id = src_id
-					true_dest_id = this_id
-					
+					true_dest_id = system_id
 				else:
 					if out_sip is not None:
 						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))
@@ -829,7 +824,7 @@ def record_gate_traffic_log(db, name, log):
 								AND full_hash=?
 							ORDER BY id
 							LIMIT 1''',
-							(this_id, src_id, dest_id, full_hash))
+							(system_id, src_id, dest_id, full_hash))
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
@@ -839,7 +834,7 @@ def record_gate_traffic_log(db, name, log):
 									true_src_id, true_dest_id,
 									in_packet_id))
 			else:
-				print('Unable to find match for inbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line))
+				print('Unable to find match for inbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
 			in_packet_id = None
 
@@ -847,7 +842,7 @@ def record_gate_traffic_log(db, name, log):
 			is_send = True
 
 			src_ip = inet_aton_integer(out_sip)
-			src_id = this_id
+			src_id = system_id
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(out_dip)
@@ -859,7 +854,7 @@ def record_gate_traffic_log(db, name, log):
 			if direction == 'Outbound':
 				if module == 'Admin':
 					# Straight forward enough, we're sending an admin packet to another gate
-					true_src_id = this_id
+					true_src_id = system_id
 					true_dest_id = dest_id
 
 				else:
@@ -871,7 +866,7 @@ def record_gate_traffic_log(db, name, log):
 
 			else:
 				if module == 'Admin':
-					true_src_id = this_id
+					true_src_id = system_id
 					true_dest_id = dest_id
 
 				else:
@@ -883,7 +878,7 @@ def record_gate_traffic_log(db, name, log):
 								AND log_line IS NULL
 								AND full_hash=?
 							ORDER BY id
-							LIMIT 1''', (this_id, full_hash))
+							LIMIT 1''', (system_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
@@ -893,7 +888,7 @@ def record_gate_traffic_log(db, name, log):
 									true_src_id, true_dest_id,
 									out_packet_id))
 			else:
-				print('Unable to find match for outbound packet with full hash {}, line {}'.format(full_hash, log_line_num))
+				print('Unable to find match for outbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
 			out_packet_id = None
 

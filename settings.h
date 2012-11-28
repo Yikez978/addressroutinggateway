@@ -11,10 +11,10 @@
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 60
+#define CONNECT_WAIT_TIME 45
 
 // Maximum number of seconds to wait for new data before declaring a gate disconnected
-#define MAX_UPDATE_TIME 300
+#define MAX_UPDATE_TIME 120
 
 // Number of seconds to wait before trying initial connection (gives all the other threads time to
 // be ready to receive. Easier than an overkill barrier.)

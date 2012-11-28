@@ -81,6 +81,9 @@ struct arg_network_info *create_arg_network_info(void);
 struct arg_network_info *remove_arg_network(struct arg_network_info *network);
 void remove_all_associated_arg_networks(void);
 
+void print_associated_networks(void);
+void print_network(const struct arg_network_info *network);
+
 // Adds a network to the table
 void add_network(void);
 

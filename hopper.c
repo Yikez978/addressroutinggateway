@@ -258,6 +258,7 @@ void *connect_thread(void *data)
 			gate = gate->next;
 		}
 
+		print_associated_networks();
 		sleep(CONNECT_WAIT_TIME);
 	}
 	
@@ -331,6 +332,41 @@ void remove_all_associated_arg_networks(void)
 	// Note that we don't remove ourselves
 	while(gateInfo->next != NULL)
 		remove_arg_network(gateInfo->next);
+}
+
+void print_associated_networks(void)
+{
+	struct arg_network_info *curr = gateInfo;
+	
+	// Skip ourselves
+	if(curr)
+	{
+		curr = curr->next;
+		arglog(LOG_INFO, "Associated gateways:\n");
+	}
+	else
+	{
+		arglog(LOG_INFO, "No associated gateways\n");
+		return;
+	}
+
+	while(curr)
+	{
+		print_network(curr);
+		curr = curr->next;
+	}
+}
+
+void print_network(const struct arg_network_info *network)
+{
+	char ip[INET_ADDRSTRLEN];
+	char mask[INET_ADDRSTRLEN];
+
+	inet_ntop(AF_INET, network->baseIP, ip, sizeof(ip));
+	inet_ntop(AF_INET, network->mask, mask, sizeof(mask));
+
+	arglog(LOG_INFO, "  %s (%s, %s): %s\n", network->name, ip, mask, 
+		network->connected ? "connected" : "disconnected");
 }
 
 uint8_t *current_ip(void)

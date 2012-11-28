@@ -266,6 +266,9 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 
 		remote->connected = 1;
 		current_time(&remote->lastDataUpdate);
+
+		// Print a status update
+		print_associated_networks();
 		
 		pthread_mutex_unlock(&remote->lock);
 	}
