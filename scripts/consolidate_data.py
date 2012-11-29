@@ -15,33 +15,25 @@ from glob import glob
 
 from process_run import *
 
-def get_databases(result_dir):
-	# Grab and open all the databases 
-	print('Opening databases...', end='')
-
-	dbs = list()
-	for db_path in glob(os.path.join(result_dir, '*', '*.db')):
-		db = sqlite3.connect(db_path)
-		if check_schema(db):
-			print('.', end='')
-			sys.stdout.flush()
-			dbs.append(db)
-		else:
-			print('\n\tFound database at {}, but contents are invalid'.format(db_path))
-			print('Continuing to open', end='')
-
-	print('done')
-	return dbs
-
-def close_databases(dbs):
-	for db in dbs:
-		db.close()
-
-def get_stats(dbs, begin_time_buffer=None, end_time_buffer=None):
+def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None):
 	print('Getting stats...', end='')
 
 	all_stats = list()
-	for db in dbs:
+	for db_path in glob(os.path.join(result_dir, '*', '*.db')):
+		# Open database
+		db = None
+		try:
+			db = sqlite3.connect(db_path)
+			if check_schema(db):
+				sys.stdout.flush()
+			else:
+				print('\n\tFound database at {}, but contents are invalid'.format(db_path))
+				continue
+		except sqlite3.OperationalError as e:
+			print('\n\tFound database at {}, but unable to open'.format(db_path))
+			continue
+		
+		# Get stats
 		stats = generate_stats(db, begin_time_buffer, end_time_buffer)
 
 		# We also need to know what test was being run
@@ -52,6 +44,8 @@ def get_stats(dbs, begin_time_buffer=None, end_time_buffer=None):
 		loss_counts = {k.replace(' ', '.').lower(): len(packets) for k, packets in stats[1].iteritems()}
 
 		all_stats.append((stats[0], loss_counts))
+
+		db.close()
 
 		print('.', end='')
 		sys.stdout.flush()
@@ -126,11 +120,9 @@ def main(argv):
 	if args.end_offset is None:
 		args.end_offset = args.offset
 
-	dbs = get_databases(args.results_dir)
-	all_stats = get_stats(dbs)
+	all_stats = get_stats(args.results_dir)
 	headers = get_headers(all_stats)
 	create_csv(args.csv, headers, all_stats)
-	close_databases(dbs)
 
 if __name__ == '__main__':
 	sys.exit(main(sys.argv))
