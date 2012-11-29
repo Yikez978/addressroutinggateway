@@ -141,13 +141,12 @@ typedef struct proto_data {
 	uint32_t inSeqNum; // Last sequence number we received from them
 	uint32_t outSeqNum; // Next sequence number for us to send
 	long latency; // One-way latency in ms
+
+	int goodIPCount; // Number of packets we've seen that have good, valid IPs
+	int badIPCount; // Number of packets we've seen (from this gate) that have been rejected by IP
 	
 	struct timespec pingSentTime;
 	uint32_t pingID;
-
-	uint32_t myID;
-	uint32_t theirID;
-	uint32_t theirPendingID;
 } proto_data;
 
 void init_protocol_locks(void);

@@ -16,6 +16,13 @@
 // Maximum number of seconds to wait for new data before declaring a gate disconnected
 #define MAX_UPDATE_TIME 120
 
+// Minimum number of seconds between ping attempts
+#define MIN_PING_TIME 5
+
+// Minimum proportion of good (IP-wise) packet to bad per gate
+// Listed an good packets/bad packets
+#define MIN_VALID_IP_PROP 3
+
 // Number of seconds to wait before trying initial connection (gives all the other threads time to
 // be ready to receive. Easier than an overkill barrier.)
 #define INITIAL_CONNECT_WAIT 3

@@ -96,6 +96,9 @@ uint8_t *current_ip(void);
 bool is_valid_local_ip(const uint8_t *ip);
 bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
 
+void note_bad_ip(struct arg_network_info *gate);
+void note_good_ip(struct arg_network_info *gate);
+
 // Returns configuration information
 const uint8_t *gate_base_ip(void);
 const uint8_t *gate_mask(void);
