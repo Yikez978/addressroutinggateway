@@ -147,7 +147,6 @@ function start-generators {
 			then	
 				start-generator udp 2000
 			else
-				start-generator udp 3000
 				start-generator udp 2000 172.100.0.1 5
 			fi
 		elif [[ "$1" == "1" ]]
@@ -456,7 +455,7 @@ function process-runs {
 			then
 				echo Farming "$results" off to protC1
 				process-run-remote protC1 "$results" >/dev/null &
-				protB1=$!
+				protC1=$!
 				break
 			elif [ -z "`ps ax | grep -E \"^\s*$gateA\"`" ]
 			then

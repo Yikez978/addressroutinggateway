@@ -45,7 +45,7 @@ int do_next_action(struct arg_network_info *local, struct arg_network_info *remo
 	else if(state & ARG_DO_TRUST)
 		return send_all_trust(local, remote);
 	else
-		return 0;
+		return 0; 
 }
 
 int send_arg_ping(struct arg_network_info *local,
@@ -71,6 +71,8 @@ int send_arg_ping(struct arg_network_info *local,
 	// Create and send
 	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "ping sent", NULL)) < 0)
 		arglog(LOG_DEBUG, "Failed to send ping\n");
+
+	current_time(&remote->proto.pingSentTime);
 
 	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
@@ -141,7 +143,12 @@ int process_arg_pong(struct arg_network_info *local,
 		if(remote->proto.pingID == *id)
 		{
 			// TBD skip/try again with huge latency changes?
-			remote->proto.latency = current_time_offset(&remote->proto.pingSentTime) / 2;
+			long latency = current_time_offset(&remote->proto.pingSentTime) / 2;
+			if(!remote->proto.latency)
+				remote->proto.latency = (remote->proto.latency + latency) / 2;
+			else
+				remote->proto.latency = latency;
+
 			status = 0;
 			arglog(LOG_DEBUG, "Latency to %s: %li ms\n", remote->name, remote->proto.latency);
 			arglog_result(packet, NULL, 1, 1, "Admin", "pong accepted");

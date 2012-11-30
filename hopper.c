@@ -515,7 +515,8 @@ void update_ips(struct arg_network_info *gate)
 	//arglog(LOG_DEBUG, "UPDATE IPS for %s: Hop interval %lu, offset %li, key ", gate->name, gate->hopInterval, time_offset(&gate->timeBase, &currTime));
 	//printRaw(sizeof(gate->hopKey), gate->hopKey);
 
-	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval, time_offset(&gate->timeBase, &currTime)); 
+	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval,
+		time_offset(&gate->timeBase, &currTime) + gate->proto.latency); 
 
 	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
 	for(i = 0; i < minLen; i++)

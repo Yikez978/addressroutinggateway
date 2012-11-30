@@ -15,7 +15,7 @@ from glob import glob
 
 from process_run import *
 
-def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None):
+def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_bad=False):
 	print('Getting stats...', end='')
 
 	all_stats = list()
@@ -27,11 +27,14 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None):
 			if check_schema(db):
 				sys.stdout.flush()
 			else:
-				print('\n\tFound database at {}, but contents are invalid'.format(db_path))
+				raise Exception('contents are invalid'.format(db_path))
+		except Exception as e:
+			print('Found database at {}, but unable to use ({})'.format(db_path, str(e)))
+
+			if remove_bad:
+				print('Removing bad database')
+				os.unlink(db_path)
 				continue
-		except sqlite3.OperationalError as e:
-			print('\n\tFound database at {}, but unable to open'.format(db_path))
-			continue
 		
 		# Get stats
 		stats = generate_stats(db, begin_time_buffer, end_time_buffer)
@@ -113,6 +116,7 @@ def main(argv):
 	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('-r', '--results-dir', default='.', help='Directory with results. Only already-filled DB files will be processed.')
 	parser.add_argument('-o', '--csv', required=True, help='CSV file to save consolidated results to')
+	parser.add_argument('--remove-bad', action='store_true', help='If given, removes invalid run.db files')
 	args = parser.parse_args(argv[1:])
 
 	# Offsets
@@ -121,7 +125,7 @@ def main(argv):
 	if args.end_offset is None:
 		args.end_offset = args.offset
 
-	all_stats = get_stats(args.results_dir)
+	all_stats = get_stats(args.results_dir, args.start_offset, args.end_offset, remove_bad=args.remove_bad)
 	headers = get_headers(all_stats)
 	create_csv(args.csv, headers, all_stats)
 
