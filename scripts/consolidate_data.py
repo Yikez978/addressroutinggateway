@@ -45,8 +45,9 @@ def get_stats(dbs, begin_time_buffer=None, end_time_buffer=None):
 		stats = generate_stats(db, begin_time_buffer, end_time_buffer)
 
 		# We also need to know what test was being run
-		stats[0]['test-num'] = get_test_number(db)
-		stats[0]['hop-rate'] = get_hop_rate(db)
+		stats[0]['results.dir'] = os.path.dirname(db_path)
+		stats[0]['test.num'] = get_test_number(db)
+		stats[0]['hop.rate'] = get_hop_rate(db)
 
 		# We only care about the number of times each loss method was used
 		loss_counts = {k.replace(' ', '.').lower(): len(packets) for k, packets in stats[1].iteritems()}
