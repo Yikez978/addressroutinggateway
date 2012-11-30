@@ -12,8 +12,6 @@ IS_LOCAL=1
 GATES="gateA gateB gateC"
 EXT="ext1"
 PROT="protA1 protB1 protC1"
-#LATENCY="delay1"
-LATENCY=
 
 ALL="$GATES $EXT $PROT"
 
@@ -800,53 +798,23 @@ function stop-arg {
 	fi
 }
 
-# Network setup changes
 # Changes the latency on the delay box to the given value. 
-# Latency values are given with their units, e.g., 30ms, 1s, etc
-# Usage: set-latency <delay to all>
-#        set-latency <delay to gates> <delay to external>
-#        set-latency <delay to gate A> <delay to B> <delay to ext>
+# Latency values are given in milliseconds, without units
+# Usage: set-latency <delay>
 function set-latency {
-	if [ -z $LATENCY ]
+	if [[ "$#" != "1" ]]
 	then
-		echo No latency servers available, unable to set
+		echo Delay must be given
 		return
 	fi
 
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $LATENCY - 
-		run-on $LATENCY - set-latency "$1"
+		push-to $GATES - 
+		run-on $GATES - set-latency "$1"
 	else
-		[[ "$TYPE" == "delay" ]] || return
-
-		if [ "$#" == "1" ]
-		then
-			toExt=$1
-			toA=$1
-			toB=$1
-		elif [ "$#" == "2" ]
-		then
-			toExt=$2
-			toA=$1
-			toB=$1
-		elif [ "$#" == "3" ]
-		then
-			toExt=$3
-			toA=$1
-			toB=$2
-		else
-			echo 'Usage: set-latency <gate a> <gate b> <ext>'
-			return 1
-		fi
-
-		# Main bridge ("internet")
-		toExt=`expr $toExt '*' 1000`
-		toA=`expr $toA '*' 1000`
-		toB=`expr $toB '*' 1000`
-		sudo tc qdisc replace dev eth1 root netem delay "$toExt"
-		sudo tc qdisc replace dev eth2 root netem delay "$toA"
-		sudo tc qdisc replace dev eth3 root netem delay "$toB"
+		echo Setting latency on $HOST to $1ms
+		sudo tc qdisc replace dev eth1 root netem delay "$(($1 / 2))ms"
 	fi
 }
 
