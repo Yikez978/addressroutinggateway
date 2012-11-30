@@ -319,6 +319,9 @@ void direct_inbound(const struct packet_data *packet)
 				return;
 			}
 
+			// IP must be good by this point
+			note_good_ip(gate);
+
 			// Unwrap and drop into network, assuming everything checks out
 			if((ret = do_arg_unwrap(packet, gate)) < 0)
 			{

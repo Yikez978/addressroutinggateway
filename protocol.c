@@ -25,7 +25,7 @@ int start_auth(struct arg_network_info *local, struct arg_network_info *remote)
 
 int start_time_sync(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME;
+	remote->proto.state |= ARG_DO_TIME;
 	return do_next_action(local, remote);
 }
 

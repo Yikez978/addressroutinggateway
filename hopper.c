@@ -268,16 +268,17 @@ void *hopper_admin_thread(void *data)
 				// about it if we're seeing a lot of bad IP packets coming in, relative
 				// to the number of good ones
 				int prop = gate->proto.goodIPCount / gate->proto.badIPCount;
+				arglog(LOG_DEBUG, "IP rejection proportion currently at %i (%i / %i) with %s\n",
+					prop, gate->proto.goodIPCount, gate->proto.badIPCount, gate->name);
 				if(MIN_VALID_IP_PROP > prop)
 				{
-					arglog(LOG_DEBUG, "High proportion (%i) of packets being rejected by IP, starting time sync\n", prop);
+					arglog(LOG_DEBUG, "High proportion (%i) of packets being rejected by IP with %s, starting time sync\n",
+						prop, gate->name);
 					start_time_sync(gateInfo, gate);
 
 					gate->proto.goodIPCount = 0;
 					gate->proto.badIPCount = 0;
 				}
-				else
-					arglog(LOG_DEBUG, "IP rejection proportion currently at %i\n", prop);
 			}
 			
 			// Next
