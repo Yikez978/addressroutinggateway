@@ -174,8 +174,8 @@ int process_arg_pong(struct arg_network_info *local,
 
 // Connect
 int send_arg_conn_data(struct arg_network_info *local,
-							struct arg_network_info *remote,
-							char isResponse)
+						struct arg_network_info *remote,
+						char isResponse)
 {
 	int ret = 0;
 	struct argmsg *msg = NULL;

@@ -65,6 +65,7 @@ struct arg_network_info;
 #define ARG_ADMIN_PORT 7654
 #define ARG_PROTO 253
 
+// Message types
 enum {
 	ARG_WRAPPED_MSG,
 	
@@ -183,11 +184,11 @@ int process_arg_conn_data_req(struct arg_network_info *local,
 int send_all_trust(struct arg_network_info *local,
 					struct arg_network_info *remote);
 int send_arg_trust(struct arg_network_info *local,
-							struct arg_network_info *remote,
-							struct arg_network_info *gate);
+						struct arg_network_info *remote,
+						struct arg_network_info *gate);
 int process_arg_trust(struct arg_network_info *local,
-							struct arg_network_info *remote,
-							const struct packet_data *packet);
+						struct arg_network_info *remote,
+						const struct packet_data *packet);
 
 // Encapsulation
 int send_arg_wrapped(struct arg_network_info *local,
