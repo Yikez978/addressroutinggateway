@@ -392,8 +392,9 @@ void print_network(const struct arg_network_info *network)
 	inet_ntop(AF_INET, network->baseIP, ip, sizeof(ip));
 	inet_ntop(AF_INET, network->mask, mask, sizeof(mask));
 
-	arglog(LOG_INFO, "  %s (%s, %s): %s\n", network->name, ip, mask, 
-		network->connected ? "connected" : "disconnected");
+	arglog(LOG_INFO, "  %s (%s, %s): %s, latency %i\n", network->name, ip, mask, 
+		network->connected ? "connected" : "disconnected",
+		network->proto.latency);
 }
 
 uint8_t *current_ip(void)

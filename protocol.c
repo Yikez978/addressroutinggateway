@@ -144,13 +144,15 @@ int process_arg_pong(struct arg_network_info *local,
 		{
 			// TBD skip/try again with huge latency changes?
 			long latency = current_time_offset(&remote->proto.pingSentTime) / 2;
-			if(!remote->proto.latency)
+			if(remote->proto.latency > 0)
 				remote->proto.latency = (remote->proto.latency + latency) / 2;
 			else
 				remote->proto.latency = latency;
 
+			arglog(LOG_DEBUG, "Latency of this packet was %li, %s latency set to %li ms\n",
+				latency, remote->name, remote->proto.latency);
+
 			status = 0;
-			arglog(LOG_DEBUG, "Latency to %s: %li ms\n", remote->name, remote->proto.latency);
 			arglog_result(packet, NULL, 1, 1, "Admin", "pong accepted");
 		}
 		else

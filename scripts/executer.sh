@@ -810,8 +810,8 @@ function set-latency {
 
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES - 
-		run-on $GATES - set-latency "$1"
+		push-to $GATES $EXT - 
+		run-on $GATES $EXT - set-latency "$1"
 	else
 		echo Setting latency on $HOST to $1ms
 		sudo tc qdisc replace dev eth1 root netem delay "$(($1 / 2))ms"
