@@ -308,14 +308,19 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Dest IP Incorrect");
+				note_bad_ip(gate);
 				return;
 			}
 			
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Source IP Incorrect");
+				note_bad_ip(gate);
 				return;
 			}
+
+			// IP must be good by this point
+			note_good_ip(gate);
 
 			// Unwrap and drop into network, assuming everything checks out
 			if((ret = do_arg_unwrap(packet, gate)) < 0)

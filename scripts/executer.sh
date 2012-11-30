@@ -440,7 +440,25 @@ function process-runs {
 
 		while (( 1 ))
 		do
-			if [ -z "`ps ax | grep -E \"^\s*$gateA\"`" ]
+			if [ -z "`ps ax | grep -E \"^\s*$protA1\"`" ]
+			then
+				echo Farming "$results" off to protA1
+				process-run-remote protA1 "$results" >/dev/null &
+				protA1=$!
+				break
+			elif [ -z "`ps ax | grep -E \"^\s*$protB1\"`" ]
+			then
+				echo Farming "$results" off to protB1
+				process-run-remote protB1 "$results" >/dev/null &
+				protB1=$!
+				break
+			elif [ -z "`ps ax | grep -E \"^\s*$protC1\"`" ]
+			then
+				echo Farming "$results" off to protC1
+				process-run-remote protC1 "$results" >/dev/null &
+				protB1=$!
+				break
+			elif [ -z "`ps ax | grep -E \"^\s*$gateA\"`" ]
 			then
 				echo Farming "$results" off to gateA
 				process-run-remote gateA "$results" >/dev/null &
@@ -457,24 +475,6 @@ function process-runs {
 				echo Farming "$results" off to gateC
 				process-run-remote gateC "$results" >/dev/null &
 				gateC=$!
-				break
-			elif [ -z "`ps ax | grep -E \"^\s*$protA1\"`" ]
-			then
-				echo Farming "$results" off to protA1
-				process-run-remote protA1 "$results" >/dev/null &
-				protA1=$!
-				break
-			elif [ -z "`ps ax | grep -E \"^\s*$protB1\"`" ]
-			then
-				echo Farming "$results" off to protB1
-				process-run-remote protB1 "$results" >/dev/null &
-				protB1=$!
-				break
-			elif [ -z "`ps ax | grep -E \"^\s*$protC1\"`" ]
-			then
-				echo Farming "$results" off to protC1
-				process-run-remote protC1 "$results" >/dev/null &
-				protC1=$!
 				break
 			elif [ -z "`ps ax | grep -E \"^\s*$ext1\"`" ]
 			then

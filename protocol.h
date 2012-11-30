@@ -65,6 +65,7 @@ struct arg_network_info;
 #define ARG_ADMIN_PORT 7654
 #define ARG_PROTO 253
 
+// Message types
 enum {
 	ARG_WRAPPED_MSG,
 	
@@ -141,13 +142,12 @@ typedef struct proto_data {
 	uint32_t inSeqNum; // Last sequence number we received from them
 	uint32_t outSeqNum; // Next sequence number for us to send
 	long latency; // One-way latency in ms
+
+	int goodIPCount; // Number of packets we've seen that have good, valid IPs
+	int badIPCount; // Number of packets we've seen (from this gate) that have been rejected by IP
 	
 	struct timespec pingSentTime;
 	uint32_t pingID;
-
-	uint32_t myID;
-	uint32_t theirID;
-	uint32_t theirPendingID;
 } proto_data;
 
 void init_protocol_locks(void);
@@ -184,11 +184,11 @@ int process_arg_conn_data_req(struct arg_network_info *local,
 int send_all_trust(struct arg_network_info *local,
 					struct arg_network_info *remote);
 int send_arg_trust(struct arg_network_info *local,
-							struct arg_network_info *remote,
-							struct arg_network_info *gate);
+						struct arg_network_info *remote,
+						struct arg_network_info *gate);
 int process_arg_trust(struct arg_network_info *local,
-							struct arg_network_info *remote,
-							const struct packet_data *packet);
+						struct arg_network_info *remote,
+						const struct packet_data *packet);
 
 // Encapsulation
 int send_arg_wrapped(struct arg_network_info *local,

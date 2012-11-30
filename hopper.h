@@ -74,7 +74,7 @@ void uninit_hopper(void);
 int get_hopper_conf(const struct config_data *config);
 
 // Does the initial connect to all of the gateways we know of
-void *connect_thread(void *data);
+void *hopper_admin_thread(void *data);
 
 // Manage the list of ARG networks. NOT synchronzied, caller should claim lock!
 struct arg_network_info *create_arg_network_info(void);
@@ -95,6 +95,9 @@ uint8_t *current_ip(void);
 // Returns true if the given IP is valid, false otherwise
 bool is_valid_local_ip(const uint8_t *ip);
 bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
+
+void note_bad_ip(struct arg_network_info *gate);
+void note_good_ip(struct arg_network_info *gate);
 
 // Returns configuration information
 const uint8_t *gate_base_ip(void);
