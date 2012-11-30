@@ -222,7 +222,11 @@ int process_arg_conn_data_req(struct arg_network_info *local,
 	if((ret = process_arg_conn_data_resp(local, remote, packet)) < 0)
 		return ret;
 
-	return send_arg_conn_data(local, remote, 1);
+	if((ret = send_arg_conn_data(local, remote, 1)) < 0)
+		return ret;
+
+	remote->proto.state |= ARG_DO_TRUST;
+	return do_next_action(local, remote);
 }
 
 int process_arg_conn_data_resp(struct arg_network_info *local,
@@ -284,6 +288,7 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 		arglog_result(packet, NULL, 1, 1, "Admin", "connection data received");
 
 	// All done with a connection
+	// TBD should we actually be doing the next step if we failed doing this one?
 	remote->proto.state &= ~ARG_DO_CONN;
 	do_next_action(local, remote);
 	

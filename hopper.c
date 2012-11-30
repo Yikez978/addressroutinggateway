@@ -76,7 +76,7 @@ int init_hopper(const struct config_data *config)
 void init_hopper_finish(void)
 {
 	arglog(LOG_DEBUG, "Starting connection/gateway auth thread\n");
-	pthread_create(&connectThread, NULL, connect_thread, NULL); // TBD check return
+	pthread_create(&connectThread, NULL, hopper_admin_thread, NULL); // TBD check return
 }
 
 void uninit_hopper(void)
@@ -229,7 +229,7 @@ int get_hopper_conf(const struct config_data *config)
 	return 0;
 }
 
-void *connect_thread(void *data)
+void *hopper_admin_thread(void *data)
 {
 	struct arg_network_info *gate = NULL;
 
@@ -276,6 +276,8 @@ void *connect_thread(void *data)
 					gate->proto.goodIPCount = 0;
 					gate->proto.badIPCount = 0;
 				}
+				else
+					arglog(LOG_DEBUG, "IP rejection proportion currently at %i\n", prop);
 			}
 			
 			// Next

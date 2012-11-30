@@ -74,7 +74,7 @@ void uninit_hopper(void);
 int get_hopper_conf(const struct config_data *config);
 
 // Does the initial connect to all of the gateways we know of
-void *connect_thread(void *data);
+void *hopper_admin_thread(void *data);
 
 // Manage the list of ARG networks. NOT synchronzied, caller should claim lock!
 struct arg_network_info *create_arg_network_info(void);
