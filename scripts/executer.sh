@@ -4,7 +4,7 @@ PULLDIR="pulled"
 RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
-TEMPFILE=".executer.$$.tmp"
+TESTLOG="$RESULTSDIR/tests.log"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -14,6 +14,8 @@ EXT="ext1"
 PROT="protA1 protB1 protC1"
 
 ALL="$GATES $EXT $PROT"
+
+eraseline="\r                                \r"
 
 # Starts the given test number 
 # Usage: start-tests [<time>]
@@ -39,19 +41,42 @@ function start-tests {
 
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
+	echo '' >"$TESTLOG"
 	for repetition in {1..5}
 	do
-		for hr in $(($runtime * 1000)) 1000 100 50 10 3
+		for hr in $(($runtime * 1000)) 1000 100 50 15 5
 		do
-			for latency in 0
+			for latency in 0 30 100 500 1000 
 			do
-				for testnum in {0..4}
+				for rate in 5 3 1 .5 .2 .1 .05
 				do
-					echo On repetition $repetition, hop rate $hr, test num $testnum with latency $latency
-					start-test $testnum $runtime $latency $hr 
+					for testnum in {0..4}
+					do
+						echo Ready to begin next test:
+						echo "  Repetition: $repetition"
+						echo "  Hop rate: $hr ms"
+						echo "  Packet rate: $rate ms"
+						echo "  Test: $testnum"
+						echo "  Latency: $latency ms"
+						echo "  Run time: $runtime s"
 
-					#echo Waiting to begin next test
-					#sleep 10
+						start-test $testnum $runtime $latency $hr >>"$TESTLOG" & 
+						testpid=$!
+						
+						# Wait for it to finish, but give ourselves a bit of extra time
+						# The actual test has a lot of setup and tear-down time
+						i=$(($runtime + 35))
+
+						while is-running $testpid
+						do
+							echo -ne "${eraseline}Around $i seconds remaining"
+							sleep 1
+							i=$(($i - 1))
+						done
+					
+						# Finish the status line
+						echo -e "${eraseline}Test completed"
+					done
 				done
 			done
 		done
@@ -60,7 +85,8 @@ function start-tests {
 
 # Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
 # with <delay> latency (see set-latency), with ARG hopping every <hop rate> milliseconds.
-# Usage: start-test <test num> <time> <latency> <hop rate>
+# Usage: start-test <test num> <time> <latency> <hop rate> [<extra params>...]
+#	extra params - some tests may take additional data. That is given here
 function start-test {
 	if [[ ! $IS_LOCAL ]]
 	then
@@ -68,12 +94,21 @@ function start-test {
 		return
 	fi
 
-	if [[ "$#" != 4 ]]
+	if [[ "$#" -lt 4 ]]
 	then
 		echo Incorrect number of arguments given
 		help start-test
 		return
 	fi
+
+	testnum=$1
+	runtime=$2
+	latency=$3
+	hoprate=$4
+	shift
+	shift
+	shift
+	shift
 
 	stop-test
 
@@ -81,21 +116,20 @@ function start-test {
 	# TBD remove once NTP works
 	#set-time
 
-	echo Setting latency to $3
-	set-latency $3
+	echo Setting latency to $latency
+	set-latency $latency
 
 	clean-pushed
 
 	echo Starting collection
 	start-collection
 
-	echo Beginning experiment $1 with hop rate $4
-	start-arg $4
-	start-generators $1
+	echo Beginning experiment $testnum with hop rate $hoprate
+	start-arg $hoprate
+	start-generators $testnum "$@"
 
-	echo Running experiment $1 with hop rate $4 for $2 seconds
-	eraseline="\r                                \r"
-	i=$2
+	echo Running experiment $testnum with hop rate $hoprate for $runtime seconds
+	i=$runtime
 	while (( $i ))
 	do
 		echo -ne "$eraseline$i seconds remaining"
@@ -104,10 +138,10 @@ function start-test {
 	done
 	echo -e "${eraseline}Done running tests"
 
-	echo Ending experiment $1
+	echo Ending experiment $testnum
 	stop-test
 
-	d="`date +%Y-%m-%d-%H:%M:%S`-t$1-l$3-hr$4ms"
+	d="`date +%Y-%m-%d-%H:%M:%S`-t$testnum-l$latency-hr${hoprate}ms"
 	echo Pulling logs into $RESULTSDIR/$d
 	clean-pulled
 	retrieve-logs "$d"
@@ -128,15 +162,24 @@ function stop-test {
 #	2 - TCP NAT test
 #	3 - TCP Hopper connectivity
 #	4 - Composite connectivity test (all the above)
+#
 #	5 - Flood legitimate
 #	6 - Flood illegitimate
-# Usage: start-generators <test num>
+# Usage: start-generators <test num> [<packet rate>]
 function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $EXT $PROT - scripts/gen_traffic.py
-		run-on $EXT $PROT - start-generators $1
+		run-on $EXT $PROT - start-generators "$@"
 	else
+		# The basic tests (0-3) all send packets at a fixed rate. What should that rate be?
+		if [[ "$#" == "1" ]]
+		then
+			packetRate=5
+		else
+			packetRate="$2"
+		fi
+
 		# What test are we running?
 		if [[ "$1" == "0" ]]
 		then
@@ -145,7 +188,7 @@ function start-generators {
 			then	
 				start-generator udp 2000
 			else
-				start-generator udp 2000 172.100.0.1 5
+				start-generator udp 2000 172.100.0.1 "$packetRate"
 			fi
 		elif [[ "$1" == "1" ]]
 		then
@@ -156,19 +199,19 @@ function start-generators {
 				
 				if [[ "$HOST" == "protA1" ]]
 				then
-					start-generator udp 3000 172.2.0.11 5
+					start-generator udp 3000 172.2.0.11 "$packetRate"
 					sleep 1
-					start-generator udp 3000 172.3.0.11 5
+					start-generator udp 3000 172.3.0.11 "$packetRate"
 				elif [[ "$HOST" == "protB1" ]]
 				then
-					start-generator udp 3000 172.1.0.11 5
+					start-generator udp 3000 172.1.0.11 "$packetRate"
 					sleep 1
-					start-generator udp 3000 172.3.0.11 5
+					start-generator udp 3000 172.3.0.11 "$packetRate"
 				elif [[ "$HOST" == "protC1" ]]
 				then
-					start-generator udp 3000 172.1.0.11 5
+					start-generator udp 3000 172.1.0.11 "$packetRate"
 					sleep 1
-					start-generator udp 3000 172.2.0.11 5
+					start-generator udp 3000 172.2.0.11 "$packetRate"
 				fi
 			fi
 		elif [[ "$1" == "2" ]]
@@ -178,7 +221,7 @@ function start-generators {
 			then	
 				start-generator tcp 4000
 			else
-				start-generator tcp 4000 172.100.0.1 5
+				start-generator tcp 4000 172.100.0.1 "$packetRate"
 			fi
 		elif [[ "$1" == "3" ]]
 		then
@@ -189,70 +232,31 @@ function start-generators {
 				
 				if [[ "$HOST" == "protA1" ]]
 				then
-					start-generator tcp 5000 172.2.0.11 5
+					start-generator tcp 5000 172.2.0.11 "$packetRate"
 					sleep 1
-					start-generator tcp 5000 172.3.0.11 5
+					start-generator tcp 5000 172.3.0.11 "$packetRate"
 				elif [[ "$HOST" == "protB1" ]]
 				then
-					start-generator tcp 5000 172.1.0.11 5
+					start-generator tcp 5000 172.1.0.11 "$packetRate"
 					sleep 1
-					start-generator tcp 5000 172.3.0.11 5
+					start-generator tcp 5000 172.3.0.11 "$packetRate"
 				elif [[ "$HOST" == "protC1" ]]
 				then
-					start-generator tcp 5000 172.1.0.11 5
+					start-generator tcp 5000 172.1.0.11 "$packetRate"
 					sleep 1
-					start-generator tcp 5000 172.2.0.11 5
+					start-generator tcp 5000 172.2.0.11 "$packetRate"
 				fi
 			fi
 		elif [[ "$1" == "4" ]]
 		then
 			# Composite other connectivity tests
-			start-generators 0
+			start-generators 0 "$packetRate"
 			sleep 1
-			start-generators 1
+			start-generators 1 "$packetRate"
 			sleep 1
-			start-generators 2
+			start-generators 2 "$packetRate"
 			sleep 1
-			start-generators 3
-		elif [[ "$1" == "5" ]]
-		then
-			# What host are we?
-			if [[ "$TYPE" == "ext" ]]
-			then
-				# One UDP and one TCP listener
-				start-generator tcp 2001 
-				start-generator udp 3001 
-			else
-				# Listen for traffic
-				start-generator udp 5001
-				start-generator tcp 6001
-
-				# Talk to the UDP and TCP external hosts
-				start-generator tcp 2001 172.100.0.1 .2
-				sleep .8
-				start-generator udp 3001 172.100.0.1 .3
-
-				# Talk to each of the other protected clients
-				if [[ "$HOST" == "protA1" ]]
-				then
-					start-generator udp 5001 172.2.0.11 .4
-					start-generator tcp 6001 172.2.0.11 .1
-					start-generator udp 5001 172.3.0.11 .2
-					start-generator tcp 6001 172.3.0.11 .3
-				elif [[ "$HOST" == "protB1" ]]
-				then
-					start-generator udp 5001 172.1.0.11 .4
-					start-generator tcp 6001 172.1.0.11 .3
-					start-generator udp 5001 172.3.0.11 .5
-					start-generator tcp 6001 172.3.0.11 .1
-				elif [[ "$HOST" == "protC1" ]]
-				then
-					start-generator udp 5001 172.1.0.11 .2
-					start-generator tcp 6001 172.1.0.11 .4
-					start-generator udp 5001 172.2.0.11 .1
-					start-generator tcp 6001 172.2.0.11 .6
-				fi
-			fi
+			start-generators 3 "$packetRate"
 		elif [[ "$1" == "6" ]]
 		then
 			if [[ "$TYPE" == "ext" ]]
@@ -437,52 +441,52 @@ function process-runs {
 
 		while (( 1 ))
 		do
-			if [ -z "`ps ax | grep -E \"^\s*$protA1\"`" ]
+			if ! is-running $protA1
 			then
 				echo Farming "$results" off to protA1
-				process-run-remote protA1 "$results" >/dev/null &
+				process-run-remote protA1 "$results" | grep 'Completed processing' &
 				protA1=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$protB1\"`" ]
+			elif ! is-running $protB1
 			then
 				echo Farming "$results" off to protB1
-				process-run-remote protB1 "$results" >/dev/null &
+				process-run-remote protB1 "$results" | grep 'Completed processing' &
 				protB1=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$protC1\"`" ]
+			elif ! is-running $protC1
 			then
 				echo Farming "$results" off to protC1
-				process-run-remote protC1 "$results" >/dev/null &
+				process-run-remote protC1 "$results" | grep 'Completed processing' &
 				protC1=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$gateA\"`" ]
+			elif ! is-running $gateA
 			then
 				echo Farming "$results" off to gateA
-				process-run-remote gateA "$results" >/dev/null &
+				process-run-remote gateA "$results" | grep 'Completed processing' &
 				gateA=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$gateB\"`" ]
+			elif ! is-running $gateB
 			then
 				echo Farming "$results" off to gateB
-				process-run-remote gateB "$results" >/dev/null &
+				process-run-remote gateB "$results" | grep 'Completed processing' &
 				gateB=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$gateC\"`" ]
+			elif ! is-running $gateC
 			then
 				echo Farming "$results" off to gateC
-				process-run-remote gateC "$results" >/dev/null &
+				process-run-remote gateC "$results" | grep 'Completed processing' &
 				gateC=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$ext1\"`" ]
+			elif ! is-running $ext1
 			then
 				echo Farming "$results" off to ext1
-				process-run-remote ext1 "$results" >/dev/null &
+				process-run-remote ext1 "$results" | grep 'Completed processing' &
 				ext1=$!
 				break
-			elif [ -z "`ps ax | grep -E \"^\s*$local\"`" ]
+			elif ! is-running $local
 			then
 				echo Farming "$results" off to local system
-				process-run "$results" >/dev/null &
+				process-run "$results" | grep 'Completed processing' &
 				local=$!
 				break
 			fi
@@ -1125,6 +1129,7 @@ function clean-pulled {
 }
 
 # Ensures Dropbox has finished syncing
+# Usage: await-dropbox
 function await-dropbox {
 	# Give dropbox a second to realize it might need to start syncing
 	sleep 1
@@ -1145,6 +1150,24 @@ function await-dropbox {
 	done
 
 	echo Dropbox is idle!
+}
+
+# Check if the given PID is still running
+# Usage: is-running <pid>
+function is-running {
+	if [[ "$#" != "1" ]]
+	then
+		echo Not enough parameters given
+		help is-running
+		return 
+	fi
+
+	if [[ -z "`ps ax | grep -E \"^\s*$1\"`" ]]
+	then
+		return 1
+	else
+		return 0
+	fi
 }
 
 # Adds the helper script and cronjob that allows runcmd-*.sh files
