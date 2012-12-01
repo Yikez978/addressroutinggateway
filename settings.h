@@ -31,7 +31,7 @@
 
 // Minimum proportion of good (IP-wise) packet to bad per gate
 // Listed an good packets/bad packets
-#define MIN_VALID_IP_PROP 5 
+#define MIN_VALID_IP_PROP 20 
 
 // Number of seconds to wait before trying initial connection (gives all the other threads time to
 // be ready to receive. Easier than an overkill barrier.)

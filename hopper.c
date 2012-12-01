@@ -267,12 +267,15 @@ void *hopper_admin_thread(void *data)
 			// Do we need to check the latency of this gate?
 			// Are we missing a lot of IPs?
 			offset = time_offset(&gate->proto.pingSentTime, &curr);
-			if(gate->connected && gate->proto.badIPCount != 0)
+			if(gate->connected)
 			{
 				// It's been at least a bit since we sent a ping, but we only need to worry
 				// about it if we're seeing a lot of bad IP packets coming in, relative
 				// to the number of good ones
-				int prop = gate->proto.goodIPCount / gate->proto.badIPCount;
+				int prop = 0;
+				if(gate->proto.badIPCount != 0)	
+					prop = gate->proto.goodIPCount / gate->proto.badIPCount;
+
 				arglog(LOG_DEBUG, "IP rejection proportion currently at %i (%i / %i) with %s\n",
 					prop, gate->proto.goodIPCount, gate->proto.badIPCount, gate->name);
 					
@@ -281,6 +284,9 @@ void *hopper_admin_thread(void *data)
 					arglog(LOG_DEBUG, "High proportion (%i) of packets being rejected by IP with %s, starting time sync\n",
 						prop, gate->name);
 					start_time_sync(gateInfo, gate);
+
+					gate->proto.goodIPCount = 0;
+					gate->proto.badIPCount = 0;
 				}
 			}
 
