@@ -2,6 +2,13 @@
 #define SETTINGS_H
 
 /***********************************************
+* Thesis-specific flags
+***********************************************/
+// Compute latency based on running with simulated latency, i.e., tc qdisc
+// This means that traffic is only truly slowed outbound
+#define LATENCY_TC_SIMULATED
+
+/***********************************************
 * Timeouts
 ***********************************************/
 // Disable the packet accepted/rejected messages

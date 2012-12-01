@@ -68,11 +68,12 @@ int send_arg_ping(struct arg_network_info *local,
 	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
+	current_time(&remote->proto.pingSentTime);
+	arglog(LOG_DEBUG, "Ping sent to %s at %lu s %lu ms\n", remote->name, remote->proto.pingSentTime.tv_sec, remote->proto.pingSentTime.tv_nsec);
+
 	// Create and send
 	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "ping sent", NULL)) < 0)
 		arglog(LOG_DEBUG, "Failed to send ping\n");
-
-	current_time(&remote->proto.pingSentTime);
 
 	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
@@ -143,7 +144,18 @@ int process_arg_pong(struct arg_network_info *local,
 		if(remote->proto.pingID == *id)
 		{
 			// TBD skip/try again with huge latency changes?
-			long latency = current_time_offset(&remote->proto.pingSentTime) / 2;
+			long latency = current_time_offset(&remote->proto.pingSentTime);
+
+			#ifdef LATENCY_TC_SIMULATED
+			latency = latency / 6;
+			#else
+			// Real world? Needs to be tested TBD
+			latency = latency / 2;
+			#endif
+			
+			arglog(LOG_DEBUG, "Pong received from %s, send time was %lus %lums, latency is %li\n",
+				remote->name, remote->proto.pingSentTime.tv_sec, remote->proto.pingSentTime.tv_nsec, latency);
+
 			if(remote->proto.latency > 0)
 				remote->proto.latency = (remote->proto.latency + latency) / 2;
 			else
@@ -160,7 +172,8 @@ int process_arg_pong(struct arg_network_info *local,
 			// We sent one, but the ID was incorrect. The remote gateway
 			// had the wrong ID or it did not have the correct global key
 			// Either way, we don't trust them now
-			arglog(LOG_DEBUG, "The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n", remote->proto.pingID, *id);
+			arglog(LOG_DEBUG, "The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n",
+				remote->proto.pingID, *id);
 			status = -ARG_MSG_ID_BAD;
 		}
 	}
@@ -280,9 +293,6 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 		remote->connected = 1;
 		current_time(&remote->lastDataUpdate);
 
-		// Print a status update
-		print_associated_networks();
-		
 		pthread_mutex_unlock(&remote->lock);
 	}
 	else
@@ -409,7 +419,9 @@ int process_arg_trust(struct arg_network_info *local,
 		curr = local;
 		while(curr != NULL)
 		{
-			arglog(LOG_DEBUG, "Checking if %s matches %s (curr ip %x, mask %x. Trust ip %x, mask %x)\n", curr->name, trust->name, curr->baseIP, curr->mask, trust->baseIP, trust->mask);
+			arglog(LOG_DEBUG, "Checking if %s matches %s (curr ip %x, mask %x. Trust ip %x, mask %x)\n",
+				curr->name, trust->name, curr->baseIP, curr->mask, trust->baseIP, trust->mask);
+
 			if(mask_array_cmp(sizeof(trust->baseIP), curr->mask, curr->baseIP, trust->baseIP) == 0)
 			{
 				arglog(LOG_ALERT, "Already know about %s\n", trust->name);
@@ -746,7 +758,7 @@ int process_arg_packet(struct arg_network_info *local,
 	{
 		remote->proto.inSeqNum = ntohl(packet->arg->seq);
 	}
-	else if(packet->arg->type == ARG_CONN_DATA_REQ_MSG)
+	else if(packet->arg->type == ARG_CONN_DATA_REQ_MSG || packet->arg->type == ARG_CONN_DATA_RESP_MSG)
 	{
 		// IF this is an initial data send, then they must be using a new IV (compared to
 		// what we have currently). We will check once everything is decrypted
@@ -879,7 +891,8 @@ int process_arg_packet(struct arg_network_info *local,
 			return -ARG_SEQ_BAD;
 		}
 		
-		remote->proto.inSeqNum = ntohl(packet->arg->seq);
+		arglog(LOG_DEBUG, "Resetting sequence number for %s\n", remote->name);
+		remote->proto.inSeqNum = 0;
 	}
 	
 	free_packet(newPacket);

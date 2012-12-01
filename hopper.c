@@ -261,6 +261,7 @@ void *hopper_admin_thread(void *data)
 				start_connection(gateInfo, gate);
 			}
 
+			// Are we missing a lot of IPs?
 			offset = time_offset(&gate->proto.pingSentTime, &curr);
 			if(gate->connected && offset > MIN_PING_TIME * 1000 && gate->proto.badIPCount != 0)
 			{
@@ -270,16 +271,18 @@ void *hopper_admin_thread(void *data)
 				int prop = gate->proto.goodIPCount / gate->proto.badIPCount;
 				arglog(LOG_DEBUG, "IP rejection proportion currently at %i (%i / %i) with %s\n",
 					prop, gate->proto.goodIPCount, gate->proto.badIPCount, gate->name);
+					
 				if(MIN_VALID_IP_PROP > prop)
 				{
 					arglog(LOG_DEBUG, "High proportion (%i) of packets being rejected by IP with %s, starting time sync\n",
 						prop, gate->name);
 					start_time_sync(gateInfo, gate);
-
-					gate->proto.goodIPCount = 0;
-					gate->proto.badIPCount = 0;
 				}
 			}
+
+			// Reset miss count
+			gate->proto.goodIPCount = 0;
+			gate->proto.badIPCount = 0;
 			
 			// Next
 			gate = gate->next;
@@ -429,9 +432,15 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 	update_ips(gate);
 
 	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
+	{
+		arglog(LOG_DEBUG, "Current IP of %s matched\n", gate->name);
 		ret = 1;
+	}
 	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
+	{
+		arglog(LOG_DEBUG, "Previous IP of %s matched\n", gate->name);
 		ret = 1;
+	}
 	else
 		ret = 0;
 	
@@ -517,7 +526,7 @@ void update_ips(struct arg_network_info *gate)
 	//printRaw(sizeof(gate->hopKey), gate->hopKey);
 
 	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval,
-		time_offset(&gate->timeBase, &currTime) + gate->proto.latency); 
+		time_offset(&gate->timeBase, &currTime)); 
 
 	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
 	for(i = 0; i < minLen; i++)
