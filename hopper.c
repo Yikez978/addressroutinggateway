@@ -231,7 +231,7 @@ int get_hopper_conf(const struct config_data *config)
 
 void *hopper_admin_thread(void *data)
 {
-	struct arg_network_info *gate = NULL;
+	int checkCount = 0;
 
 	arglog(LOG_DEBUG, "Connect thread running\n");
 
@@ -242,28 +242,32 @@ void *hopper_admin_thread(void *data)
 		struct timespec curr;
 		current_time(&curr);
 
-		gate = gateInfo->next;
+		struct arg_network_info *gate = gateInfo->next;
 		while(gate != NULL)
 		{
 			long int offset = 0;
 			offset = time_offset(&gate->lastDataUpdate, &curr);
 
+			// Disconnect gateways we haven't heard from in a long time
 			if(gate->connected && offset > MAX_UPDATE_TIME * 1000)
 			{
 				// We haven't heard from this gate in a while
-				arglog(LOG_DEBUG, "No update from %s in %li seconds, disconnecting\n", gate->name, offset / 1000);
-				gate->connected = 0;
+				arglog(LOG_DEBUG, "No update from %s in %li seconds, disconnecting\n",
+					gate->name, offset / 1000);
+				gate->connected = false;
 			}
 			
+			// Need to connect to this gate?
 			if(offset > CONNECT_WAIT_TIME * 1000)
 			{
 				// Start new connection/send current data to the other gate so we know we're current
 				start_connection(gateInfo, gate);
 			}
 
+			// Do we need to check the latency of this gate?
 			// Are we missing a lot of IPs?
 			offset = time_offset(&gate->proto.pingSentTime, &curr);
-			if(gate->connected && offset > MIN_PING_TIME * 1000 && gate->proto.badIPCount != 0)
+			if(gate->connected && gate->proto.badIPCount != 0)
 			{
 				// It's been at least a bit since we sent a ping, but we only need to worry
 				// about it if we're seeing a lot of bad IP packets coming in, relative
@@ -280,16 +284,29 @@ void *hopper_admin_thread(void *data)
 				}
 			}
 
-			// Reset miss count
-			gate->proto.goodIPCount = 0;
-			gate->proto.badIPCount = 0;
+			// Allow protocol to do whatever it needs
+			char error[MAX_ERROR_STR_LEN];
+			int ret = 0;
+			if((ret = do_next_protocol_action(gateInfo, gate)) < 0)
+			{
+				arg_strerror_r(ret, error, sizeof(error));
+				arglog(LOG_ALERT, "Admin protocol action failed: %s", error);
+			}
+				
 			
-			// Next
+			// Next gate
 			gate = gate->next;
 		}
 
-		print_associated_networks();
-		sleep(MIN_PING_TIME);
+		// Print gate info periodically
+		checkCount++;
+		if(checkCount > GATE_PRINT_TIME)
+		{
+			print_associated_networks();
+			checkCount = 0;
+		}
+
+		sleep(1);
 	}
 	
 	arglog(LOG_DEBUG, "Connect thread dying\n");

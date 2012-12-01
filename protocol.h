@@ -137,14 +137,18 @@ typedef struct argmsg {
 #define ARG_DO_TRUST 0x08
 
 typedef struct proto_data {
-	char state; // Records actions that need to occur
+	bool sendConnData;
+	bool sendPing;
+	bool sendTrust;
+
+	struct timespec lastConnAttemptTime;
 
 	uint32_t inSeqNum; // Last sequence number we received from them
 	uint32_t outSeqNum; // Next sequence number for us to send
 	long latency; // One-way latency in ms
 
-	int goodIPCount; // Number of packets we've seen that have good, valid IPs
-	int badIPCount; // Number of packets we've seen (from this gate) that have been rejected by IP
+	unsigned int goodIPCount; // Number of packets we've seen that have good, valid IPs
+	unsigned int badIPCount; // Number of packets we've seen (from this gate) that have been rejected by IP
 	
 	struct timespec pingSentTime;
 	uint32_t pingID;
@@ -153,11 +157,11 @@ typedef struct proto_data {
 void init_protocol_locks(void);
 
 // Protocol flow control
-int start_auth(struct arg_network_info *local, struct arg_network_info *remote);
-int start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
-int start_connection(struct arg_network_info *local, struct arg_network_info *remote);
+void start_auth(struct arg_network_info *local, struct arg_network_info *remote);
+void start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
+void start_connection(struct arg_network_info *local, struct arg_network_info *remote);
 
-int do_next_action(struct arg_network_info *local, struct arg_network_info *remote);
+int do_next_protocol_action(struct arg_network_info *local, struct arg_network_info *remote);
 
 // Lag detection
 int send_arg_ping(struct arg_network_info *local,
@@ -172,7 +176,7 @@ int process_arg_pong(struct arg_network_info *local,
 // Connect
 int send_arg_conn_data(struct arg_network_info *local,
 					   struct arg_network_info *remote,
-					   char isResponse);
+					   bool isResponse);
 int process_arg_conn_data_resp(struct arg_network_info *local,
 								struct arg_network_info *remote,
 								const struct packet_data *packet);

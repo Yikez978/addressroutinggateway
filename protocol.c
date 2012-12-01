@@ -17,35 +17,42 @@ void init_protocol_locks(void)
 
 }
 
-int start_auth(struct arg_network_info *local, struct arg_network_info *remote)
+void start_time_sync(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	remote->proto.state |= ARG_DO_AUTH;
-	return do_next_action(local, remote);
+	remote->proto.sendPing = true;
 }
 
-int start_time_sync(struct arg_network_info *local, struct arg_network_info *remote)
+void start_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	remote->proto.state |= ARG_DO_AUTH;
-	return do_next_action(local, remote);
+	remote->proto.sendConnData = true;
 }
 
-int start_connection(struct arg_network_info *local, struct arg_network_info *remote)
+int do_next_protocol_action(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	remote->proto.state |= ARG_DO_AUTH | ARG_DO_TIME | ARG_DO_CONN | ARG_DO_TRUST;
-	return do_next_action(local, remote);
-}
+	int ret = 0;
 
-int do_next_action(struct arg_network_info *local, struct arg_network_info *remote)
-{
-	char state = remote->proto.state;
-	if(state & ARG_DO_CONN)
-		return send_arg_conn_data(local, remote, 0);
-	else if(state & ARG_DO_AUTH)
-		return send_arg_ping(local, remote);
-	else if(state & ARG_DO_TRUST)
-		return send_all_trust(local, remote);
-	else
-		return 0; 
+	// Do whatever is requested, although don't exceed the maximum rates
+
+	if(remote->proto.sendConnData
+		&& current_time_offset(&remote->proto.lastConnAttemptTime) > CONNECT_WAIT_TIME * 1000)
+	{
+		if(!(ret = send_arg_conn_data(local, remote, false)))
+			remote->proto.sendConnData = false;
+	}
+
+	if(remote->proto.sendPing && current_time_offset(&remote->proto.pingSentTime) > MIN_PING_TIME * 1000)
+	{
+		if(!(ret = send_arg_ping(local, remote)))
+			remote->proto.sendPing = false;
+	}
+
+	if(remote->proto.sendTrust)
+	{
+		if(!(ret = send_all_trust(local, remote)))
+			remote->proto.sendTrust = false;
+	}
+
+	return ret;
 }
 
 int send_arg_ping(struct arg_network_info *local,
@@ -183,13 +190,9 @@ int process_arg_pong(struct arg_network_info *local,
 		status = -ARG_MSG_UNEXPECTED;
 	}
 	
-	// All done with a ping/auth
-	remote->proto.state &= ~ARG_DO_AUTH;
-	
 	pthread_mutex_unlock(&remote->lock);
 	
 	free_arg_msg(msg);
-	do_next_action(local, remote);
 	
 	return status;
 }
@@ -197,7 +200,7 @@ int process_arg_pong(struct arg_network_info *local,
 // Connect
 int send_arg_conn_data(struct arg_network_info *local,
 						struct arg_network_info *remote,
-						char isResponse)
+						bool isResponse)
 {
 	int ret = 0;
 	struct argmsg *msg = NULL;
@@ -229,6 +232,9 @@ int send_arg_conn_data(struct arg_network_info *local,
 			(isResponse ? ARG_CONN_DATA_RESP_MSG : ARG_CONN_DATA_REQ_MSG), msg,
 			"connection data sent", NULL)) < 0)
 		arglog(LOG_DEBUG, "Failed to send connection data: error %i\n", ret);
+	
+	if(!ret)
+		current_time(&remote->proto.lastConnAttemptTime);
 
 	pthread_mutex_unlock(&remote->lock);
 	free_arg_msg(msg);
@@ -244,11 +250,13 @@ int process_arg_conn_data_req(struct arg_network_info *local,
 	if((ret = process_arg_conn_data_resp(local, remote, packet)) < 0)
 		return ret;
 
-	if((ret = send_arg_conn_data(local, remote, 1)) < 0)
+	if((ret = send_arg_conn_data(local, remote, true)) < 0)
 		return ret;
 
-	remote->proto.state |= ARG_DO_TRUST;
-	return do_next_action(local, remote);
+	remote->proto.sendPing = true;
+	remote->proto.sendTrust = true;
+
+	return ret;
 }
 
 int process_arg_conn_data_resp(struct arg_network_info *local,
@@ -306,11 +314,12 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 	if(!status)
 		arglog_result(packet, NULL, 1, 1, "Admin", "connection data received");
 
-	// All done with a connection
-	// TBD should we actually be doing the next step if we failed doing this one?
-	remote->proto.state &= ~ARG_DO_CONN;
-	do_next_action(local, remote);
-	
+	if(!status)
+	{
+		remote->proto.sendPing = true;
+		remote->proto.sendTrust = true;
+	}
+
 	return status;
 }
 
@@ -465,7 +474,7 @@ int process_arg_trust(struct arg_network_info *local,
 		pthread_mutex_unlock(&local->lock);
 
 		arglog(LOG_INFO, "Added %s as a new gate\n", newGate->name);
-		send_arg_conn_data(local, newGate, 0);
+		start_connection(local, newGate);
 	}
 	else
 	{
@@ -477,10 +486,6 @@ int process_arg_trust(struct arg_network_info *local,
 		arglog_result(packet, NULL, 1, 1, "Admin", "trust data received");
 	
 	free_arg_msg(msg);
-
-	// All done with a connection
-	remote->proto.state &= ~ARG_DO_TRUST;
-	do_next_action(local, remote);
 	
 	return status;
 }

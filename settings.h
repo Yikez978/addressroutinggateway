@@ -2,11 +2,14 @@
 #define SETTINGS_H
 
 /***********************************************
-* Thesis-specific flags
+* Display and thesis-specific flags
 ***********************************************/
 // Compute latency based on running with simulated latency, i.e., tc qdisc
 // This means that traffic is only truly slowed outbound
 #define LATENCY_TC_SIMULATED
+
+// How often, in seconds, to display information on associated gates
+#define GATE_PRINT_TIME 30
 
 /***********************************************
 * Timeouts
@@ -18,7 +21,7 @@
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 45
+#define CONNECT_WAIT_TIME 10
 
 // Maximum number of seconds to wait for new data before declaring a gate disconnected
 #define MAX_UPDATE_TIME 120
@@ -40,6 +43,9 @@
 // Number of seconds before an inactive connection is removed
 #define NAT_OLD_CONN_TIME 120
 
+/************************************************
+* Packet settings
+************************************************/
 // Sequence numbers may have to wrap if they reach 2^32. How far from the boundary will we
 // accept a sudden reversion to the beginnig?
 #define SEQ_NUM_WRAP_ALLOWANCE 10
