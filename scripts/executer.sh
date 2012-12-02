@@ -44,11 +44,11 @@ function start-tests {
 	echo '' >"$TESTLOG"
 	for repetition in {1..5}
 	do
-		for hr in $(($runtime * 1000)) 1000 100 50 15 5
+		for latency in 0 30 100 500 1000 
 		do
-			for latency in 0 30 100 500 1000 
+			for hr in $(($runtime * 1000)) 1000 100 50 15 5
 			do
-				for rate in 5 3 1 .5 .2 .1 .05
+				for rate in 3 1 .5 .2 .1 .05
 				do
 					for testnum in {0..4}
 					do
@@ -60,7 +60,11 @@ function start-tests {
 						echo "  Latency: $latency ms"
 						echo "  Run time: $runtime s"
 
-						start-test $testnum $runtime $latency $hr >>"$TESTLOG" & 
+						start-test $testnum $runtime $latency $hr 
+						
+						continue
+
+						# Something is horribly broken if we do it in the background
 						testpid=$!
 						
 						# Wait for it to finish, but give ourselves a bit of extra time

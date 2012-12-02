@@ -277,6 +277,17 @@ def get_hop_rate(db):
 	else:
 		return rates
 
+def get_network_latency(db):
+	# Returns the latency (artificially) on the test network
+	c = db.cursor()
+
+	c.execute('SELECT value FROM settings WHERE name="Latency"')
+	lat = c.fetchone()[0]
+
+	c.close()
+
+	return lat
+
 ##############################################
 # Manange system table
 def add_all_systems(db, logdir):

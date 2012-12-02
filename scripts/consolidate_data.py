@@ -43,6 +43,7 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 		stats[0]['results.dir'] = os.path.dirname(db_path)
 		stats[0]['test.num'] = get_test_number(db)
 		stats[0]['hop.rate'] = get_hop_rate(db)
+		stats[0]['net.latency'] = get_network_latency(db)
 
 		# We only care about the number of times each loss method was used
 		loss_counts = {k.replace(' ', '.').lower(): len(packets) for k, packets in stats[1].iteritems()}
