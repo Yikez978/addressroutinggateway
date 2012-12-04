@@ -29,6 +29,9 @@
 // Minimum number of seconds between ping attempts
 #define MIN_PING_TIME 5
 
+// Maximum number of seconds between ping attempts
+#define MAX_PING_TIME 30
+
 // Minimum proportion of good (IP-wise) packet to bad per gate
 // Listed an good packets/bad packets
 #define MIN_VALID_IP_PROP 20 

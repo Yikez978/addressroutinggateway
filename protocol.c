@@ -24,6 +24,8 @@ void start_time_sync(struct arg_network_info *local, struct arg_network_info *re
 
 void start_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
+	// TBD. This is largely needed to compensate for the need for the ARP on the test network
+	remote->proto.sendPing = true; 
 	remote->proto.sendConnData = true;
 }
 
@@ -33,17 +35,17 @@ int do_next_protocol_action(struct arg_network_info *local, struct arg_network_i
 
 	// Do whatever is requested, although don't exceed the maximum rates
 
+	if(remote->proto.sendPing && current_time_offset(&remote->proto.pingSentTime) > MIN_PING_TIME * 1000)
+	{
+		if(!(ret = send_arg_ping(local, remote)))
+			remote->proto.sendPing = false;
+	}
+
 	if(remote->proto.sendConnData
 		&& current_time_offset(&remote->proto.lastConnAttemptTime) > CONNECT_WAIT_TIME * 1000)
 	{
 		if(!(ret = send_arg_conn_data(local, remote, false)))
 			remote->proto.sendConnData = false;
-	}
-
-	if(remote->proto.sendPing && current_time_offset(&remote->proto.pingSentTime) > MIN_PING_TIME * 1000)
-	{
-		if(!(ret = send_arg_ping(local, remote)))
-			remote->proto.sendPing = false;
 	}
 
 	if(remote->proto.sendTrust)
@@ -76,7 +78,6 @@ int send_arg_ping(struct arg_network_info *local,
 	memcpy(msg->data, &remote->proto.pingID, msg->len);
 
 	current_time(&remote->proto.pingSentTime);
-	arglog(LOG_DEBUG, "Ping sent to %s at %lu s %lu ms\n", remote->name, remote->proto.pingSentTime.tv_sec, remote->proto.pingSentTime.tv_nsec);
 
 	// Create and send
 	if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "ping sent", NULL)) < 0)
@@ -150,26 +151,27 @@ int process_arg_pong(struct arg_network_info *local,
 
 		if(remote->proto.pingID == *id)
 		{
-			// TBD skip/try again with huge latency changes?
 			long latency = current_time_offset(&remote->proto.pingSentTime);
-
-			#ifdef LATENCY_TC_SIMULATED
-			latency = latency / 6;
-			#else
-			// Real world? Needs to be tested TBD
-			latency = latency / 2;
-			#endif
+			latency /= 2;
 			
-			arglog(LOG_DEBUG, "Pong received from %s, send time was %lus %lums, latency is %li\n",
-				remote->name, remote->proto.pingSentTime.tv_sec, remote->proto.pingSentTime.tv_nsec, latency);
-
 			if(remote->proto.latency > 0)
-				remote->proto.latency = (remote->proto.latency + latency) / 2;
+			{
+				// We heavily prefer our previous latency here because new hops will result in a doubled
+				// latency, due to the new ARP being sent. It's unlikely the latency changes much over time
+				remote->proto.latency = remote->proto.latency * .75 + latency * .25;
+			}
 			else
 				remote->proto.latency = latency;
 
 			arglog(LOG_DEBUG, "Latency of this packet was %li, %s latency set to %li ms\n",
 				latency, remote->name, remote->proto.latency);
+
+			// If the change was large (greater than... 25%, let's say), then ping again soon
+			int diff = remote->proto.latency - latency;
+			if(diff < 0)
+				diff = -diff;
+			if(diff > remote->proto.latency / 4)
+				remote->proto.sendPing = true;
 
 			status = 0;
 			arglog_result(packet, NULL, 1, 1, "Admin", "pong accepted");

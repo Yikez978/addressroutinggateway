@@ -226,14 +226,16 @@ int get_hopper_conf(const struct config_data *config)
 
 	// Set IP based on configuration
 	arglog(LOG_DEBUG, "Setting initial IP\n");
+	pthread_mutex_lock(&gateInfo->lock);
 	update_ips(gateInfo);
+	pthread_mutex_unlock(&gateInfo->lock);
 
 	return 0;
 }
 
 void *hopper_admin_thread(void *data)
 {
-	int checkCount = 0;
+	unsigned int checkCount = 0;
 
 	arglog(LOG_DEBUG, "Connect thread running\n");
 
@@ -260,7 +262,7 @@ void *hopper_admin_thread(void *data)
 			}
 			
 			// Need to connect to this gate?
-			if(offset > CONNECT_WAIT_TIME * 1000)
+			if(checkCount % CONNECT_WAIT_TIME == 0)
 			{
 				// Start new connection/send current data to the other gate so we know we're current
 				start_connection(gateInfo, gate);
@@ -271,9 +273,6 @@ void *hopper_admin_thread(void *data)
 			offset = time_offset(&gate->proto.pingSentTime, &curr);
 			if(gate->connected)
 			{
-				// It's been at least a bit since we sent a ping, but we only need to worry
-				// about it if we're seeing a lot of bad IP packets coming in, relative
-				// to the number of good ones
 				int prop = 0;
 				if(gate->proto.badIPCount != 0)	
 					prop = gate->proto.goodIPCount / gate->proto.badIPCount;
@@ -281,10 +280,8 @@ void *hopper_admin_thread(void *data)
 				arglog(LOG_DEBUG, "IP rejection proportion currently at %i (%i / %i) with %s\n",
 					prop, gate->proto.goodIPCount, gate->proto.badIPCount, gate->name);
 					
-				if(MIN_VALID_IP_PROP > prop)
+				if(MIN_VALID_IP_PROP > prop || offset > MAX_PING_TIME * 1000)
 				{
-					arglog(LOG_DEBUG, "High proportion (%i) of packets being rejected by IP with %s, starting time sync\n",
-						prop, gate->name);
 					start_time_sync(gateInfo, gate);
 
 					gate->proto.goodIPCount = 0;
@@ -308,10 +305,9 @@ void *hopper_admin_thread(void *data)
 
 		// Print gate info periodically
 		checkCount++;
-		if(checkCount > GATE_PRINT_TIME)
+		if(checkCount % GATE_PRINT_TIME == 0)
 		{
 			print_associated_networks();
-			checkCount = 0;
 		}
 
 		sleep(1);
@@ -436,9 +432,8 @@ uint8_t *current_ip(void)
 		return NULL;
 	}
 
-	update_ips(gateInfo);
-
 	pthread_mutex_lock(&ipLock);
+	update_ips(gateInfo);
 	memcpy(ipCopy, gateInfo->currIP, ADDR_SIZE);
 	pthread_mutex_unlock(&ipLock);
 
@@ -492,7 +487,7 @@ int invalid_ip_direction(const uint8_t *ip)
 		if(memcmp(ip, genIP, ADDR_SIZE) == 0)
 		{
 			inet_ntop(AF_INET, ip, ipStr, sizeof(ipStr));
-			arglog(LOG_DEBUG, "ip dir check, previp %x, check ip %s, %x\n", ipStr, ip[0]);
+			arglog(LOG_DEBUG, "ip dir check check ip %s, %x\n", ipStr, ip[0]);
 			//return dir;
 		}
 	}

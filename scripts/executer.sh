@@ -806,7 +806,8 @@ function stop-arg {
 	fi
 }
 
-# Changes the latency on the delay box to the given value. 
+# Changes the RTT between gates and the external host to <delay>, when ARPs are
+# accounted for (ping to a steady IP would show half of this RTT).
 # Latency values are given in milliseconds, without units
 # Usage: set-latency <delay>
 function set-latency {
@@ -821,8 +822,12 @@ function set-latency {
 		push-to $GATES $EXT - 
 		run-on $GATES $EXT - set-latency "$1"
 	else
-		echo Setting latency on $HOST to $1ms
-		sudo tc qdisc replace dev eth1 root netem delay "$(($1 / 2))ms"
+		# Because we need to send so many ARPs, we actually give time for those
+		# to occur in the latency we set. It ain't perfect, but it's what we got. Sorry.
+		# For a real network this would be irrelevant.
+		lat=$(($1 / 4))
+		echo Setting latency on $HOST to ${lat}ms
+		sudo tc qdisc replace dev eth1 root netem limit 5000 delay "${lat}ms"
 	fi
 }
 
