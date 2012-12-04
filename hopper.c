@@ -8,6 +8,8 @@
 #include <linux/sockios.h>
 #include <errno.h>
 
+#include <limits.h>
+
 #include <pthread.h>
 
 #include "settings.h"
@@ -434,6 +436,8 @@ uint8_t *current_ip(void)
 		return NULL;
 	}
 
+	update_ips(gateInfo);
+
 	pthread_mutex_lock(&ipLock);
 	memcpy(ipCopy, gateInfo->currIP, ADDR_SIZE);
 	pthread_mutex_unlock(&ipLock);
@@ -470,6 +474,30 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 	pthread_mutex_unlock(&gate->lock);
 
 	return ret;
+}
+
+int invalid_ip_direction(const uint8_t *ip)
+{
+	int dir = 0;
+	char ipStr[INET_ADDRSTRLEN];
+
+	for(dir = -5; dir <= 5; dir++)
+	{
+		uint8_t genIP[ADDR_SIZE];
+		generate_ip_corrected(gateInfo, gateInfo->hopInterval * dir, genIP);
+
+		inet_ntop(AF_INET, genIP, ipStr, sizeof(ipStr));
+		arglog(LOG_DEBUG, "ip direction %i gives %s\n", dir, ipStr);
+
+		if(memcmp(ip, genIP, ADDR_SIZE) == 0)
+		{
+			inet_ntop(AF_INET, ip, ipStr, sizeof(ipStr));
+			arglog(LOG_DEBUG, "ip dir check, previp %x, check ip %s, %x\n", ipStr, ip[0]);
+			//return dir;
+		}
+	}
+
+	return INT_MAX;
 }
 
 void note_bad_ip(struct arg_network_info *gate)
@@ -525,12 +553,6 @@ int process_admin_msg(const struct packet_data *packet, struct arg_network_info 
 
 void update_ips(struct arg_network_info *gate)
 {
-	int i = 0;
-	uint32_t bits = 0;
-	uint8_t *bitIndex = (uint8_t*)&bits;
-	int minLen = 0;
-	uint8_t ip[sizeof(gate->currIP)];
-
 	struct timespec currTime;
 	current_time(&currTime);
 
@@ -538,26 +560,8 @@ void update_ips(struct arg_network_info *gate)
 	if(time_offset(&gate->ipCacheExpiration, &currTime) < 0)
 		return;
 
-	// Copy in top part of address. baseIP has already been masked to
-	// ensure it is zeros for the portion that changes, so we only have
-	// to copy it in
-	memcpy(ip, gate->baseIP, sizeof(gate->baseIP));
-
-	// Apply random bits to remainder of IP. If we have fewer bits than
-	// needed for the mask, the extra remain 0. Sorry
-	//arglog(LOG_DEBUG, "UPDATE IPS for %s: Hop interval %lu, offset %li, key ", gate->name, gate->hopInterval, time_offset(&gate->timeBase, &currTime));
-	//printRaw(sizeof(gate->hopKey), gate->hopKey);
-
-	bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval,
-		time_offset(&gate->timeBase, &currTime)); 
-
-	minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
-	for(i = 0; i < minLen; i++)
-	{
-		ip[sizeof(gate->baseIP) - i - 1] |=
-							~gate->mask[sizeof(gate->mask) - i - 1] &
-							bitIndex[sizeof(bits) - i - 1];
-	}
+	uint8_t ip[sizeof(gate->currIP)];
+	generate_ip_corrected(gate, 0, ip);
 
 	// Is this an actual change? If so, copy the old address back and the new one in
 	// If we always blindly rotated, spurious updates would cause us to lose our prevIP
@@ -570,6 +574,34 @@ void update_ips(struct arg_network_info *gate)
 		current_time(&gate->ipCacheExpiration);
 		time_plus(&gate->ipCacheExpiration,
 			gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
+	}
+}
+
+void generate_ip_corrected(struct arg_network_info *gate, int correction, uint8_t *ip)
+{
+	struct timespec currTime;
+	current_time(&currTime);
+
+	// Copy in top part of address. baseIP has already been masked to
+	// ensure it is zeros for the portion that changes, so we only have
+	// to copy it in
+	memcpy(ip, gate->baseIP, sizeof(gate->baseIP));
+
+	// Apply random bits to remainder of IP. If we have fewer bits than
+	// needed for the mask, the extra remain 0. Sorry
+	arglog(LOG_DEBUG, "Computing IP for %s, correction %i\n", gate->name, correction);
+
+	uint32_t bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval,
+		time_offset(&gate->timeBase, &currTime) + correction); 
+
+	int minLen = sizeof(gate->mask) < sizeof(bits) ? sizeof(gate->mask) : sizeof(bits);
+
+	uint8_t *bitIndex = (uint8_t*)&bits;
+	for(int i = 0; i < minLen; i++)
+	{
+		ip[sizeof(gate->baseIP) - i - 1] |=
+							~gate->mask[sizeof(gate->mask) - i - 1] &
+							bitIndex[sizeof(bits) - i - 1];
 	}
 }
 

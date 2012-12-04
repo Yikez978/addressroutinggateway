@@ -118,7 +118,7 @@ function start-test {
 
 	# Make sure times are similar (only used for processing)
 	# TBD remove once NTP works
-	#set-time
+	set-time
 
 	echo Setting latency to $latency
 	set-latency $latency

@@ -304,10 +304,13 @@ void direct_inbound(const struct packet_data *packet)
 		}
 		else
 		{
+			invalid_ip_direction((uint8_t*)&packet->ipv4->daddr);
+
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Dest IP Incorrect");
+				arglog(LOG_DEBUG, "Incorrect direction: %i\n", invalid_ip_direction((uint8_t*)&packet->ipv4->daddr));
 				note_bad_ip(gate);
 				return;
 			}

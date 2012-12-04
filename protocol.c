@@ -624,18 +624,17 @@ int create_arg_packet(struct arg_network_info *local,
 		return -ENOMEM;
 	}
 	
-	// Ensure IPs are up-to-date
-	update_ips(local);
-	update_ips(remote);
-
 	// IP header
 	packet->ipv4->version = 4;
 	packet->ipv4->ihl = 5;
 	packet->ipv4->ttl = 32;
 	packet->ipv4->tos = 0;
 	packet->ipv4->protocol = ARG_PROTO;
-	memcpy(&packet->ipv4->saddr, local->currIP, sizeof(packet->ipv4->saddr));
-	memcpy(&packet->ipv4->daddr, remote->currIP, sizeof(packet->ipv4->daddr));
+
+	generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
+	generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
+	//generate_ip_corrected(remote, remote->proto.latency, (uint8_t*)&packet->ipv4->daddr);
+
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;
 	packet->ipv4->tot_len = htons(packet->ipv4->ihl * 4);

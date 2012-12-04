@@ -89,12 +89,17 @@ void add_network(void);
 
 // Returns the current IP address for the gateway
 // NOTE: the previous IP is also valid for receiving,
-// so checks from that perspective should use is_current_ip(uint8_t *ip);
+// so checks from that perspective should use is_valid_local_ip()
 uint8_t *current_ip(void);
 
 // Returns true if the given IP is valid, false otherwise
 bool is_valid_local_ip(const uint8_t *ip);
 bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
+
+// Determines how "wrong" an IP was. Returns 0 if the ip is current,
+// -1 if it was one hop in the past, -2 for two hops, etc. Limited to
+// +/-5 hops. MAX_INT returned if beyond that
+int invalid_ip_direction(const uint8_t *ip);
 
 void note_bad_ip(struct arg_network_info *gate);
 void note_good_ip(struct arg_network_info *gate);
@@ -108,6 +113,10 @@ int process_admin_msg(const struct packet_data *packet, struct arg_network_info 
 
 // Generates the IP address for a given gate, based on the mask, hop key, and time
 void update_ips(struct arg_network_info *gate);
+
+// Generates the current IP for the given gate, based on the current time plus
+// a given correction factor. Correction may be positive (in the future) or negative.
+void generate_ip_corrected(struct arg_network_info *gate, int correction, uint8_t *ip);
 
 // Wraps the given packet for the appropriate ARG network
 // and signs it.
