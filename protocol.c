@@ -634,6 +634,7 @@ int create_arg_packet(struct arg_network_info *local,
 	packet->ipv4->protocol = ARG_PROTO;
 
 	generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
+	//generate_ip_corrected(local, remote->proto.latency, (uint8_t*)&packet->ipv4->saddr);
 	generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
 	//generate_ip_corrected(remote, remote->proto.latency, (uint8_t*)&packet->ipv4->daddr);
 

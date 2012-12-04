@@ -471,15 +471,22 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 	return ret;
 }
 
-int invalid_ip_direction(const uint8_t *ip)
+int invalid_local_ip_direction(const uint8_t *ip)
+{
+	return invalid_ip_direction(gateInfo, ip);
+}
+
+int invalid_ip_direction(const arg_network_info *gate, const uint8_t *ip)
 {
 	int dir = 0;
 	char ipStr[INET_ADDRSTRLEN];
 
+	arglog(LOG_DEBUG, "Invalid IP direction for %s\n", gate->name);
+
 	for(dir = -5; dir <= 5; dir++)
 	{
 		uint8_t genIP[ADDR_SIZE];
-		generate_ip_corrected(gateInfo, gateInfo->hopInterval * dir, genIP);
+		generate_ip_corrected(gate, gate->hopInterval * dir, genIP);
 
 		inet_ntop(AF_INET, genIP, ipStr, sizeof(ipStr));
 		arglog(LOG_DEBUG, "ip direction %i gives %s\n", dir, ipStr);
@@ -487,7 +494,7 @@ int invalid_ip_direction(const uint8_t *ip)
 		if(memcmp(ip, genIP, ADDR_SIZE) == 0)
 		{
 			inet_ntop(AF_INET, ip, ipStr, sizeof(ipStr));
-			arglog(LOG_DEBUG, "ip dir check check ip %s, %x\n", ipStr, ip[0]);
+			arglog(LOG_DEBUG, "ip dir check check ip %s, %x <--------------- matched here\n", ipStr, ip[0]);
 			//return dir;
 		}
 	}
@@ -555,24 +562,16 @@ void update_ips(struct arg_network_info *gate)
 	if(time_offset(&gate->ipCacheExpiration, &currTime) < 0)
 		return;
 
-	uint8_t ip[sizeof(gate->currIP)];
-	generate_ip_corrected(gate, 0, ip);
+	generate_ip_corrected(gate, -gate->hopInterval, gate->prevIP);
+	generate_ip_corrected(gate, 0, gate->currIP);
 
-	// Is this an actual change? If so, copy the old address back and the new one in
-	// If we always blindly rotated, spurious updates would cause us to lose our prevIP
-	if(memcmp(ip, gate->currIP, sizeof(gate->currIP)) != 0)
-	{
-		memcpy(gate->prevIP, gate->currIP, sizeof(gate->currIP));
-		memcpy(gate->currIP, ip, sizeof(gate->currIP));
-
-		// Update on exactly when the next hop should occur
-		current_time(&gate->ipCacheExpiration);
-		time_plus(&gate->ipCacheExpiration,
-			gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
-	}
+	// Update on exactly when the next hop should occur
+	current_time(&gate->ipCacheExpiration);
+	time_plus(&gate->ipCacheExpiration,
+		gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
 }
 
-void generate_ip_corrected(struct arg_network_info *gate, int correction, uint8_t *ip)
+void generate_ip_corrected(const struct arg_network_info *gate, int correction, uint8_t *ip)
 {
 	struct timespec currTime;
 	current_time(&currTime);

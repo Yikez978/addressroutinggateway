@@ -304,19 +304,28 @@ void direct_inbound(const struct packet_data *packet)
 		}
 		else
 		{
-			invalid_ip_direction((uint8_t*)&packet->ipv4->daddr);
+			arglog(LOG_DEBUG, "IP direction destination\n");
+			invalid_local_ip_direction((uint8_t*)&packet->ipv4->daddr);
+
+			char ipStr[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, gate->currIP, ipStr, sizeof(ipStr));
+			arglog(LOG_DEBUG, "Remote curr IP is now 1 %s\n", ipStr);
+
+			arglog(LOG_DEBUG, "IP direction source\n");
+			invalid_ip_direction(gate, (uint8_t*)&packet->ipv4->saddr);
 
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Dest IP Incorrect");
-				arglog(LOG_DEBUG, "Incorrect direction: %i\n", invalid_ip_direction((uint8_t*)&packet->ipv4->daddr));
 				note_bad_ip(gate);
 				return;
 			}
 			
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
+				inet_ntop(AF_INET, gate->currIP, ipStr, sizeof(ipStr));
+				arglog(LOG_DEBUG, "Remote curr IP is now 2 %s\n", ipStr);
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Source IP Incorrect");
 				note_bad_ip(gate);
 				return;
