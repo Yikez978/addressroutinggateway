@@ -65,7 +65,7 @@ int send_arg_ping(struct arg_network_info *local,
 
 	arglog(LOG_DEBUG, "Sending ping to %s\n", remote->name);
 
-	msg = create_arg_msg(sizeof(remote->proto.pingID));
+	msg = create_arg_msg(sizeof(struct arg_ping_data));
 	if(msg == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to allocate space to send ping\n");
@@ -74,8 +74,16 @@ int send_arg_ping(struct arg_network_info *local,
 
 	pthread_mutex_lock(&remote->lock);
 
-	get_random_bytes(&remote->proto.pingID, sizeof(remote->proto.pingID));
-	memcpy(msg->data, &remote->proto.pingID, msg->len);
+	struct arg_ping_data *data = (struct arg_ping_data*)msg->data;
+	get_random_bytes(&remote->proto.sentPingID, sizeof(remote->proto.sentPingID));
+
+	data->requestID = htonl(remote->proto.sentPingID);
+	data->responseID = 0; // This is the original send, we don't know their ID yet
+
+	// Allow them to update their timeBase for us. This really won't be used until
+	// a ping RESPONSE, because that allows the latency for that particular packet
+	// to be applied, but just to keep everything consistent we'll place it here as well
+	data->timeOffset = htonl(current_time_offset(&local->timeBase));
 
 	current_time(&remote->proto.pingSentTime);
 
@@ -104,99 +112,87 @@ int process_arg_ping(struct arg_network_info *local,
 		return ret;
 	}
 
-	if(msg->len == sizeof(remote->proto.pingID))
+	if(msg->len == sizeof(struct arg_ping_data))
 	{
-		// Echo back their data. We log the two steps separately, preventing the processor from
-		// tracing the packet back from the receiver to the original ping sender
-		arglog_result(packet, NULL, 1, 1, "Admin", "ping accepted");
-		if((ret = send_arg_packet(local, remote, ARG_PONG_MSG, msg, "pong sent", NULL)) < 0)
-			arglog(LOG_DEBUG, "Failed to send pong\n");
+		struct arg_ping_data *data = (struct arg_ping_data*)msg->data;
+
+		bool accepted = false;
+
+		// Is this a response to a ping? We can tell because responseID will be set,
+		// hopefully giving the same data as what we recorded when we original sent
+		if(data->responseID)
+		{
+			if(remote->proto.sentPingID == ntohl(data->responseID))
+			{
+				// Latency of this particular exchange
+				long latency = current_time_offset(&remote->proto.pingSentTime);
+				latency /= 2;
+
+				// Save the new time offset they gave us, adjusted backwards for the latency
+				current_time_plus(&remote->timeBase, -ntohl(data->timeOffset) - latency);
+				
+				if(remote->proto.latency > 0)
+				{
+					// We heavily prefer our previous latency here because new hops will result in a doubled
+					// latency, due to the new ARP being sent. If the hop rate is fast, then this will occur
+					// often and we can anticipate the generally high delay. Otherwise, the low latency will
+					// be the typical value. Either way, we want to go towards the more common value and ignore
+					// the outliers either way.
+					remote->proto.latency = remote->proto.latency * .75 + latency * .25;
+				}
+				else
+					remote->proto.latency = latency;
+
+				arglog(LOG_DEBUG, "Latency of this packet was %li, %s latency set to %li ms\n",
+					latency, remote->name, remote->proto.latency);
+
+				// If the change was large (greater than... 25%, let's say), then ping again soon
+				int diff = remote->proto.latency - latency;
+				if(diff < 0)
+					diff = -diff;
+				if(diff > remote->proto.latency / 4)
+					remote->proto.sendPing = true;
+
+				ret = 0;
+				accepted = true;
+			}
+			else
+				arglog(LOG_DEBUG, "Ping response ID incorrect. Got %i, should be %i\n", ntohl(data->responseID), remote->proto.sentPingID);
+		}
+
+		// Do they want a response ping?
+		if(data->requestID)
+		{
+			// Echo back their ID and OUR timeOffset, allowing them to adjust it based on the latency
+			// of this particular exchange.
+			data->responseID = data->requestID;
+			data->timeOffset = htonl(current_time_offset(&local->timeBase));
+
+			// Only request a response if this packet didn't include one
+			if(!data->responseID)
+			{
+				get_random_bytes(&remote->proto.sentPingID, sizeof(remote->proto.sentPingID));
+				data->requestID = htonl(remote->proto.sentPingID);
+			}
+			else
+				data->requestID = 0;
+
+			// Echo back their data. We log the two steps separately, preventing the processor from
+			// tracing the packet back from the receiver to the original ping sender
+			accepted = true;
+			if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "pong sent", NULL)) < 0)
+				arglog(LOG_DEBUG, "Failed to send pong\n");
+		}
+	
+		// Record packet reception
+		if(accepted)
+			arglog_result(packet, NULL, 1, 1, "Admin", "ping accepted");
 	}
 	else
 		ret = -ARG_MSG_SIZE_BAD;
 	
 	free_arg_msg(msg);
 	return ret;
-}
-
-int process_arg_pong(struct arg_network_info *local,
-					  struct arg_network_info *remote,
-					  const struct packet_data *packet)
-{
-	int ret;
-	int status = 0;
-	struct argmsg *msg = NULL;
-	uint32_t *id = 0;
-	
-	arglog(LOG_DEBUG, "Received pong from %s\n", remote->name);
-	
-	if((ret = process_arg_packet(local, remote, packet, &msg)) < 0)
-	{
-		arglog(LOG_DEBUG, "Stopping pong processing\n");
-		return ret;
-	}
-
-	if(msg->data == NULL || msg->len != sizeof(remote->proto.pingID))
-	{
-		arglog(LOG_DEBUG, "Not accepting pong, data not a proper ping ID\n");
-		free_arg_msg(msg);
-		return -ARG_MSG_SIZE_BAD;
-	}
-
-	pthread_mutex_lock(&remote->lock);
-
-	if(remote->proto.pingID != 0)
-	{
-		id = (uint32_t*)(msg->data);
-
-		if(remote->proto.pingID == *id)
-		{
-			long latency = current_time_offset(&remote->proto.pingSentTime);
-			latency /= 2;
-			
-			if(remote->proto.latency > 0)
-			{
-				// We heavily prefer our previous latency here because new hops will result in a doubled
-				// latency, due to the new ARP being sent. It's unlikely the latency changes much over time
-				remote->proto.latency = remote->proto.latency * .75 + latency * .25;
-			}
-			else
-				remote->proto.latency = latency;
-
-			arglog(LOG_DEBUG, "Latency of this packet was %li, %s latency set to %li ms\n",
-				latency, remote->name, remote->proto.latency);
-
-			// If the change was large (greater than... 25%, let's say), then ping again soon
-			int diff = remote->proto.latency - latency;
-			if(diff < 0)
-				diff = -diff;
-			if(diff > remote->proto.latency / 4)
-				remote->proto.sendPing = true;
-
-			status = 0;
-			arglog_result(packet, NULL, 1, 1, "Admin", "pong accepted");
-		}
-		else
-		{
-			// We sent one, but the ID was incorrect. The remote gateway
-			// had the wrong ID or it did not have the correct global key
-			// Either way, we don't trust them now
-			arglog(LOG_DEBUG, "The ping ID was incorrect, rejecting other gateway (expected %i, got %i)\n",
-				remote->proto.pingID, *id);
-			status = -ARG_MSG_ID_BAD;
-		}
-	}
-	else
-	{
-		arglog(LOG_DEBUG, "Not accepting pong, no ping sent\n");
-		status = -ARG_MSG_UNEXPECTED;
-	}
-	
-	pthread_mutex_unlock(&remote->lock);
-	
-	free_arg_msg(msg);
-	
-	return status;
 }
 
 // Connect
@@ -633,10 +629,10 @@ int create_arg_packet(struct arg_network_info *local,
 	packet->ipv4->tos = 0;
 	packet->ipv4->protocol = ARG_PROTO;
 
-	generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
-	//generate_ip_corrected(local, remote->proto.latency, (uint8_t*)&packet->ipv4->saddr);
-	generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
-	//generate_ip_corrected(remote, remote->proto.latency, (uint8_t*)&packet->ipv4->daddr);
+	//generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
+	generate_ip_corrected(local, remote->proto.latency / 2, (uint8_t*)&packet->ipv4->saddr);
+	//generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
+	generate_ip_corrected(remote, remote->proto.latency / 2, (uint8_t*)&packet->ipv4->daddr);
 
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;

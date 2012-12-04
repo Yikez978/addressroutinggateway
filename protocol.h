@@ -76,7 +76,6 @@ enum {
 
 	// Lag
 	ARG_PING_MSG,
-	ARG_PONG_MSG,
 
 	// Connection data
 	ARG_CONN_DATA_RESP_MSG,
@@ -115,10 +114,11 @@ typedef struct arg_trust_data {
 	uint8_t e[10];
 } arg_trust_data;
 
-typedef struct arg_welcome {
-	uint32_t id1;
-	uint32_t id2;
-} arg_welcome;
+typedef struct arg_ping_data {
+	uint32_t requestID;
+	uint32_t responseID;
+	uint32_t timeOffset;
+} arg_ping_data;
 
 typedef struct argmsg {
 	uint16_t len;
@@ -151,7 +151,7 @@ typedef struct proto_data {
 	unsigned int badIPCount; // Number of packets we've seen (from this gate) that have been rejected by IP
 	
 	struct timespec pingSentTime;
-	uint32_t pingID;
+	uint32_t sentPingID;
 } proto_data;
 
 void init_protocol_locks(void);
@@ -167,9 +167,6 @@ int do_next_protocol_action(struct arg_network_info *local, struct arg_network_i
 int send_arg_ping(struct arg_network_info *local,
 				   struct arg_network_info *remote);
 int process_arg_ping(struct arg_network_info *local,
-					  struct arg_network_info *remote,
-					  const struct packet_data *packet);
-int process_arg_pong(struct arg_network_info *local,
 					  struct arg_network_info *remote,
 					  const struct packet_data *packet);
 

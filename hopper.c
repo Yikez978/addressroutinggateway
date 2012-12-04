@@ -273,7 +273,7 @@ void *hopper_admin_thread(void *data)
 			offset = time_offset(&gate->proto.pingSentTime, &curr);
 			if(gate->connected)
 			{
-				int prop = 0;
+				int prop = gate->proto.goodIPCount;
 				if(gate->proto.badIPCount != 0)	
 					prop = gate->proto.goodIPCount / gate->proto.badIPCount;
 
@@ -528,10 +528,6 @@ int process_admin_msg(const struct packet_data *packet, struct arg_network_info 
 	{
 	case ARG_PING_MSG:
 		return process_arg_ping(gateInfo, srcGate, packet);
-		break;
-
-	case ARG_PONG_MSG:
-		return process_arg_pong(gateInfo, srcGate, packet);
 		break;
 
 	case ARG_CONN_DATA_REQ_MSG:
