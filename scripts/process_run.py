@@ -983,7 +983,8 @@ def trace_packets(db):
 							AND p1.full_hash=?
 							AND NOT p1.id=?						-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
 							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
-						ORDER BY p1.id ASC						-- Match earlier packets first''',
+						ORDER BY p1.time ASC					-- Match earlier packets first
+						LIMIT 1''',
 						(system_id,
 							src_id, dest_id, proto, full_hash,
 							packet_id,
@@ -991,24 +992,10 @@ def trace_packets(db):
 		receives = c.fetchall()
 
 		if src_id is None or dest_id is None:
-			raise Exception('dammit')
+			raise Exception('Problem! The pcap processor did not determine the source and destination of a packet it saw (specifically, packet {})'.format(packet_id))
 		
 		if len(receives) == 1:
 			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
-
-		elif len(receives) > 1:
-			# Ensure all systems are the same. If they, are this, is almost certainly a retransmission
-			# If they aren't, we have a problem
-			print('Multiple receives matched sent packet {}, this is likely a retransmission.'.format(packet_id))
-			sys = receives[0][2]
-			for recv in receives:
-				if recv[2] != sys:
-					print('Found multiple systems with the same receive... this is a problem (not a retransmission?)')
-					break
-
-			next_hop = receives[0][0]
-			print('Picked {} as the matching receive'.format(next_hop))
-			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (next_hop, packet_id))
 
 		else:
 			# No matches found. We'll figure this one out later

@@ -4,12 +4,12 @@
 /***********************************************
 * Display and thesis-specific flags
 ***********************************************/
-// Compute latency based on running with simulated latency, i.e., tc qdisc
-// This means that traffic is only truly slowed outbound
-#define LATENCY_TC_SIMULATED
-
 // How often, in seconds, to display information on associated gates
 #define GATE_PRINT_TIME 30
+
+// When new time bases are received, how big does the change have to be before 
+// a warning in displayed?
+#define LARGE_TIMEBASE_CHANGE 5
 
 /***********************************************
 * Timeouts
@@ -21,10 +21,10 @@
 #define AUTH_TIMEOUT 5
 
 // Number of seconds between attempts to connect to any gateways we aren't connected to yet
-#define CONNECT_WAIT_TIME 10
+#define CONNECT_WAIT_TIME 60
 
 // Maximum number of seconds to wait for new data before declaring a gate disconnected
-#define MAX_UPDATE_TIME 120
+#define MAX_UPDATE_TIME 180
 
 // Minimum number of seconds between ping attempts
 #define MIN_PING_TIME 5

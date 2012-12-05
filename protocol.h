@@ -141,6 +141,9 @@ typedef struct proto_data {
 	bool sendPing;
 	bool sendTrust;
 
+	bool connDataAvailable;
+	bool timeBaseAvailable;
+
 	struct timespec lastConnAttemptTime;
 
 	uint32_t inSeqNum; // Last sequence number we received from them
@@ -160,6 +163,7 @@ void init_protocol_locks(void);
 void start_auth(struct arg_network_info *local, struct arg_network_info *remote);
 void start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
 void start_connection(struct arg_network_info *local, struct arg_network_info *remote);
+void end_connection(struct arg_network_info *local, struct arg_network_info *remote);
 
 int do_next_protocol_action(struct arg_network_info *local, struct arg_network_info *remote);
 

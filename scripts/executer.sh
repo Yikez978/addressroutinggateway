@@ -26,7 +26,7 @@ function start-tests {
 		return
 	fi
 
-	runtime=900
+	runtime=300
 	if [[ "$#" == 1 ]]
 	then
 		runtime=$1
@@ -42,15 +42,16 @@ function start-tests {
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length
 	echo '' >"$TESTLOG"
-	for repetition in {1..5}
+	for repetition in 1
 	do
-		for latency in 0 30 100 500 1000 
+		for latency in 0 100
 		do
-			for hr in $(($runtime * 1000)) 1000 100 50 15 5
+			#for hr in $(($runtime * 1000)) 1000 100 
+			for hr in 1000 100 
 			do
-				for rate in 3 1 .5 .2 .1 .05
+				for packetrate in 1 .5 .2 .1 .05
 				do
-					for testnum in {0..4}
+					for testnum in 4
 					do
 						echo Ready to begin next test:
 						echo "  Repetition: $repetition"
@@ -60,7 +61,7 @@ function start-tests {
 						echo "  Latency: $latency ms"
 						echo "  Run time: $runtime s"
 
-						start-test $testnum $runtime $latency $hr 
+						start-test $testnum $runtime $latency $hr $packetrate 
 						
 						continue
 
@@ -261,6 +262,9 @@ function start-generators {
 			start-generators 2 "$packetRate"
 			sleep 1
 			start-generators 3 "$packetRate"
+		elif [[ "$1" == "5" ]]
+		then
+			echo hi
 		elif [[ "$1" == "6" ]]
 		then
 			if [[ "$TYPE" == "ext" ]]
@@ -654,9 +658,13 @@ function monitor-runs {
 		# Wait a bit. This prevents us jumping on a results directory too quickly, before
 		# all of the data has downloaded
 		echo Found new results to process, waiting for it to settle
+		touch "$to_handle/run.db"
 		sleep 10
 
-		process-run "$to_handle"
+		if [ ! -f "$results/$RUNDB" ]
+		then
+			process-run "$to_handle"
+		fi
 		to_handle=
 	done
 }
@@ -823,10 +831,7 @@ function set-latency {
 		push-to $GATES $EXT - 
 		run-on $GATES $EXT - set-latency "$1"
 	else
-		# Because we need to send so many ARPs, we actually give time for those
-		# to occur in the latency we set. It ain't perfect, but it's what we got. Sorry.
-		# For a real network this would be irrelevant.
-		lat=$(($1 / 4))
+		lat=$(($1 / 2))
 		echo Setting latency on $HOST to ${lat}ms
 		sudo tc qdisc replace dev eth1 root netem limit 5000 delay "${lat}ms"
 	fi

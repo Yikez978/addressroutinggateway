@@ -258,7 +258,7 @@ void *hopper_admin_thread(void *data)
 				// We haven't heard from this gate in a while
 				arglog(LOG_DEBUG, "No update from %s in %li seconds, disconnecting\n",
 					gate->name, offset / 1000);
-				gate->connected = false;
+				end_connection(gateInfo, gate);
 			}
 			
 			// Need to connect to this gate?
@@ -277,9 +277,6 @@ void *hopper_admin_thread(void *data)
 				if(gate->proto.badIPCount != 0)	
 					prop = gate->proto.goodIPCount / gate->proto.badIPCount;
 
-				arglog(LOG_DEBUG, "IP rejection proportion currently at %i (%i / %i) with %s\n",
-					prop, gate->proto.goodIPCount, gate->proto.badIPCount, gate->name);
-					
 				if(MIN_VALID_IP_PROP > prop || offset > MAX_PING_TIME * 1000)
 				{
 					start_time_sync(gateInfo, gate);
@@ -454,15 +451,9 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 	update_ips(gate);
 
 	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
-	{
-		arglog(LOG_DEBUG, "Current IP of %s matched\n", gate->name);
 		ret = 1;
-	}
 	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
-	{
-		arglog(LOG_DEBUG, "Previous IP of %s matched\n", gate->name);
 		ret = 1;
-	}
 	else
 		ret = 0;
 	

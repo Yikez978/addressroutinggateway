@@ -24,9 +24,14 @@ void start_time_sync(struct arg_network_info *local, struct arg_network_info *re
 
 void start_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	// TBD. This is largely needed to compensate for the need for the ARP on the test network
-	remote->proto.sendPing = true; 
 	remote->proto.sendConnData = true;
+}
+
+void end_connection(struct arg_network_info *local, struct arg_network_info *remote)
+{
+	gate->proto.timeBaseAvailable = false;
+	gate->proto.connDataAvailable = false;
+	gate->connected = false;
 }
 
 int do_next_protocol_action(struct arg_network_info *local, struct arg_network_info *remote)
@@ -48,7 +53,7 @@ int do_next_protocol_action(struct arg_network_info *local, struct arg_network_i
 			remote->proto.sendConnData = false;
 	}
 
-	if(remote->proto.sendTrust)
+	if(remote->proto.sendTrust && remote->connected)
 	{
 		if(!(ret = send_all_trust(local, remote)))
 			remote->proto.sendTrust = false;
@@ -115,8 +120,9 @@ int process_arg_ping(struct arg_network_info *local,
 	if(msg->len == sizeof(struct arg_ping_data))
 	{
 		struct arg_ping_data *data = (struct arg_ping_data*)msg->data;
-
 		bool accepted = false;
+
+		pthread_mutex_lock(&remote->lock);
 
 		// Is this a response to a ping? We can tell because responseID will be set,
 		// hopefully giving the same data as what we recorded when we original sent
@@ -129,8 +135,25 @@ int process_arg_ping(struct arg_network_info *local,
 				latency /= 2;
 
 				// Save the new time offset they gave us, adjusted backwards for the latency
-				current_time_plus(&remote->timeBase, -ntohl(data->timeOffset) - latency);
+				struct timespec newBase;
+				current_time_plus(&newBase, -ntohl(data->timeOffset) - latency);
+				int diff = time_offset(&remote->timeBase, &newBase);
+				if(diff < -LARGE_TIMEBASE_CHANGE || diff > LARGE_TIMEBASE_CHANGE)
+					arglog(LOG_ALERT, "Time base changed by %i milliseconds. Connection may be unstable\n", diff);
+
+				if(remote->timeBase.tv_sec > 0)
+				{
+					arglog(LOG_DEBUG, "Setting average time base for %s (was %li %li, new %li %li)\n", remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec, newBase.tv_sec, newBase.tv_nsec);
+					time_plus(&remote->timeBase, diff/2);
+				}
+				else
+				{
+					arglog(LOG_DEBUG, "Setting initial time base for %s\n", remote->name);
+					remote->timeBase.tv_sec = newBase.tv_sec;
+					remote->timeBase.tv_nsec = newBase.tv_nsec;
+				}
 				
+				// Average in latency
 				if(remote->proto.latency > 0)
 				{
 					// We heavily prefer our previous latency here because new hops will result in a doubled
@@ -147,11 +170,16 @@ int process_arg_ping(struct arg_network_info *local,
 					latency, remote->name, remote->proto.latency);
 
 				// If the change was large (greater than... 25%, let's say), then ping again soon
-				int diff = remote->proto.latency - latency;
+				diff = remote->proto.latency - latency;
 				if(diff < 0)
 					diff = -diff;
 				if(diff > remote->proto.latency / 4)
 					remote->proto.sendPing = true;
+
+				// Fully connected now?
+				remote->proto.timeBaseAvailable = true;
+				if(remote->proto.connDataAvailable)
+					remote->connected = true;
 
 				ret = 0;
 				accepted = true;
@@ -177,8 +205,6 @@ int process_arg_ping(struct arg_network_info *local,
 			else
 				data->requestID = 0;
 
-			// Echo back their data. We log the two steps separately, preventing the processor from
-			// tracing the packet back from the receiver to the original ping sender
 			accepted = true;
 			if((ret = send_arg_packet(local, remote, ARG_PING_MSG, msg, "pong sent", NULL)) < 0)
 				arglog(LOG_DEBUG, "Failed to send pong\n");
@@ -187,6 +213,8 @@ int process_arg_ping(struct arg_network_info *local,
 		// Record packet reception
 		if(accepted)
 			arglog_result(packet, NULL, 1, 1, "Admin", "ping accepted");
+
+		pthread_mutex_unlock(&remote->lock);
 	}
 	else
 		ret = -ARG_MSG_SIZE_BAD;
@@ -283,10 +311,8 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 		memcpy(remote->symKey, connData->symKey, sizeof(remote->symKey));
 		memcpy(remote->iv, connData->iv, sizeof(remote->iv));
 		
-		// TBD do this completely separately in time message?
 		memcpy(remote->hopKey, connData->hopKey, sizeof(remote->hopKey));
 		remote->hopInterval = ntohl(connData->hopInterval);
-		current_time_plus(&remote->timeBase, -ntohl(connData->timeOffset));
 
 		/*arglog(LOG_DEBUG, "Time base for remote %s is now %lus %luns, at hop %li\n",
 			remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec,
@@ -296,8 +322,12 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 		cipher_setkey(&remote->cipher, remote->symKey, sizeof(remote->symKey) * 8, POLARSSL_ENCRYPT);
 		md_hmac_starts(&remote->md, remote->symKey, sizeof(remote->symKey));
 
-		remote->connected = 1;
 		current_time(&remote->lastDataUpdate);
+
+		// We no longer use the time base from connection data. Instead, we wait to get it in ping packets
+		remote->proto.connDataAvailable = true;
+		if(remote->proto.timeBaseAvailable)
+			remote->connected = true;
 
 		pthread_mutex_unlock(&remote->lock);
 	}
@@ -629,10 +659,14 @@ int create_arg_packet(struct arg_network_info *local,
 	packet->ipv4->tos = 0;
 	packet->ipv4->protocol = ARG_PROTO;
 
-	//generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
-	generate_ip_corrected(local, remote->proto.latency / 2, (uint8_t*)&packet->ipv4->saddr);
-	//generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
-	generate_ip_corrected(remote, remote->proto.latency / 2, (uint8_t*)&packet->ipv4->daddr);
+	// We only jump forward by a quarter of the latency here for a few reasons.
+	// First, without any adjustment at all we should work even with a latency of half
+	// our hop rate. Second, on the test network latency frequently triples (seemingly),
+	// due to the frequent ARPs that take just as long as actual packets (in the real world,
+	// they would take negligible time). As a result, latency is often much higher than
+	// it needs to be, but /4 always puts us into a safe realm.
+	generate_ip_corrected(local, remote->proto.latency / 4, (uint8_t*)&packet->ipv4->saddr);
+	generate_ip_corrected(remote, remote->proto.latency / 4, (uint8_t*)&packet->ipv4->daddr);
 
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;
