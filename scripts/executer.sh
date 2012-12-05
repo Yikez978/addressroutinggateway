@@ -739,6 +739,7 @@ function run-make {
 	else
 		stop-arg 
 		rm -f install.sh
+		touch *.c *.h
 		./autogen.sh && make clean && make 2>&1 | tee build.log 
 	fi
 }
