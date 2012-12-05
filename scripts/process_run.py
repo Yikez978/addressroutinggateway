@@ -467,6 +467,14 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 	else:
 		raise Exception('Name, ID, or IP must be given for retrieval')
 
+def get_gates(db):
+	# Returns the IDs of all the gates in the database
+	c = db.cursor()
+	c.execute('SELECT id FROM systems WHERE name LIKE "gate%"')
+	ids = c.fetchall()
+	c.close()
+	return [x[0] for x in ids]
+
 ###############################################
 # Parse sends
 def record_traffic_pcap(db, logdir):
@@ -1280,13 +1288,17 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats = {}
 
 	# Get the absolute (rather than relative) times to generate stats on
-	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
-	abs_begin_time = c.fetchone()[0]
+	c.execute('SELECT min(time), max(time) FROM packets')
+	times = c.fetchone()
+	if times is None:
+		print('No packets in database, unable to produce stats')
+		return
+
+	abs_begin_time = times[0]
 	if begin_time_buffer is not None:
 		abs_begin_time += begin_time_buffer
 	
-	c.execute('SELECT time FROM packets ORDER BY time DESC LIMIT 1')
-	abs_end_time = c.fetchone()[0]
+	abs_end_time = times[1]
 	if end_time_buffer is not None:
 		abs_end_time -= end_time_buffer
 	
@@ -1297,6 +1309,11 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	# Total packets
 	c.execute('''SELECT count(*) FROM packets WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
 	stats['total.packets'] = c.fetchone()[0]
+
+	# Packet rate gates were handling
+	rates = gate_packets_per_second(db, abs_begin_time, abs_end_time)
+	for name, rate in rates.iteritems():
+		stats['{}.pps'.format(name).lower()] = rate
 
 	# Trace problems
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
@@ -1339,6 +1356,10 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
 		stats['time.begin'], stats['time.end'], stats['time.total']))
 	print('Total packets: {} packets'.format(stats['total.packets']))
+	for k, v in stats.iteritems():
+		if k.endswith('.pps'):
+			print('{}: {} packets per seconds'.format(k, v))
+
 	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
 	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
 
@@ -1360,9 +1381,9 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 		print('  None!')
 
 	print('\nAverage packet latency: (take with a grain of salt)')
-	print('Overall average: {:.1f} ms'.format(stats['latency.overall']))
-	print('NATed average: {:.1f} ms'.format(stats['latency.nat']))
-	print('Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
+	print('  Overall average: {:.1f} ms'.format(stats['latency.overall']))
+	print('  NATed average: {:.1f} ms'.format(stats['latency.nat']))
+	print('  Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
 
 def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
@@ -1518,6 +1539,24 @@ def avg_latency(db, begin, end):
 	c.close()
 
 	return [x*1000 for x in (overall, nat, hopper)]
+
+def gate_packets_per_second(db, begin, end):
+	# Determines how many packets per second each gateway handled on average
+	c = db.cursor()
+	rates = {}
+	for gate in get_gates(db):
+		c.execute('''SELECT count(*)/(max(time)-min(time)), name
+						FROM packets
+						JOIN systems ON systems.id=system_id
+						WHERE system_id=? 
+							AND time BETWEEN ? AND ?''', (gate, begin, end))
+
+		rate, name = c.fetchone()
+		rates[name] = rate
+
+	c.close()
+
+	return rates
 	
 ########################################
 # Helpers
