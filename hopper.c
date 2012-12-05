@@ -478,12 +478,12 @@ int invalid_local_ip_direction(const uint8_t *ip)
 
 int invalid_ip_direction(const arg_network_info *gate, const uint8_t *ip)
 {
-	int dir = 0;
+	int dir = INT_MAX;
 	char ipStr[INET_ADDRSTRLEN];
 
-	arglog(LOG_DEBUG, "Invalid IP direction for %s\n", gate->name);
+	arglog(LOG_DEBUG, "Finding IP direction match for %s\n", gate->name);
 
-	for(dir = -5; dir <= 5; dir++)
+	for(int i = -5; i <= 5; i++)
 	{
 		uint8_t genIP[ADDR_SIZE];
 		generate_ip_corrected(gate, gate->hopInterval * dir, genIP);
@@ -494,12 +494,12 @@ int invalid_ip_direction(const arg_network_info *gate, const uint8_t *ip)
 		if(memcmp(ip, genIP, ADDR_SIZE) == 0)
 		{
 			inet_ntop(AF_INET, ip, ipStr, sizeof(ipStr));
-			arglog(LOG_DEBUG, "ip dir check check ip %s, %x <--------------- matched here\n", ipStr, ip[0]);
-			//return dir;
+			arglog(LOG_DEBUG, "ip dir check ip %s, %x <--------------- matched here\n", ipStr, ip[0]);
+			dir = i;
 		}
 	}
 
-	return INT_MAX;
+	return dir;
 }
 
 void note_bad_ip(struct arg_network_info *gate)
@@ -579,7 +579,7 @@ void generate_ip_corrected(const struct arg_network_info *gate, int correction, 
 
 	// Apply random bits to remainder of IP. If we have fewer bits than
 	// needed for the mask, the extra remain 0. Sorry
-	arglog(LOG_DEBUG, "Computing IP for %s, correction %i\n", gate->name, correction);
+	//arglog(LOG_DEBUG, "Computing IP for %s, correction %i\n", gate->name, correction);
 
 	uint32_t bits = totp(gate->hopKey, sizeof(gate->hopKey), gate->hopInterval,
 		time_offset(&gate->timeBase, &currTime) + correction); 
