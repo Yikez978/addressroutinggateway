@@ -1,5 +1,5 @@
-AC_PREREQ([2.61])
-AC_INIT([prober], [0.9])
+AC_PREREQ([2.69])
+AC_INIT([arg], [1.0])
 AC_CONFIG_SRCDIR([init.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([-Wall foreign])

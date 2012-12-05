@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS}
 
-AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -ggdb
+AM_CPPFLAGS = $(DEPS_CFLAGS) -Wall -O3
 
 # Everything will get built into here
 bin_PROGRAMS = arg gen_gate_config
