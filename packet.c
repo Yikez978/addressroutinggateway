@@ -325,7 +325,6 @@ int send_packet_on(int dev_index, const struct packet_data *packet)
 	}
 
 	return 0;
-
 }
 
 int send_packet(const struct packet_data *packet)

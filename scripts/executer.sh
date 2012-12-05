@@ -832,8 +832,14 @@ function set-latency {
 		run-on $GATES $EXT - set-latency "$1"
 	else
 		lat=$(($1 / 2))
-		echo Setting latency on $HOST to ${lat}ms
-		sudo tc qdisc replace dev eth1 root netem limit 5000 delay "${lat}ms"
+		if [[ "$lat" != "0" ]]
+		then
+			echo Setting latency on $HOST to ${lat}ms
+			sudo tc qdisc replace dev eth1 root netem limit 5000 delay "${lat}ms"
+		else
+			echo Disabling artificial latency on $HOST
+			sudo tc qdisc del dev eth1 root
+		fi
 	fi
 }
 
