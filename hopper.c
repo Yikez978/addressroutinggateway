@@ -292,10 +292,9 @@ void *hopper_admin_thread(void *data)
 			if((ret = do_next_protocol_action(gateInfo, gate)) < 0)
 			{
 				arg_strerror_r(ret, error, sizeof(error));
-				arglog(LOG_ALERT, "Admin protocol action failed: %s", error);
+				arglog(LOG_ALERT, "Admin protocol action failed: %s\n", error);
 			}
 				
-			
 			// Next gate
 			gate = gate->next;
 		}

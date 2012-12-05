@@ -29,9 +29,9 @@ void start_connection(struct arg_network_info *local, struct arg_network_info *r
 
 void end_connection(struct arg_network_info *local, struct arg_network_info *remote)
 {
-	gate->proto.timeBaseAvailable = false;
-	gate->proto.connDataAvailable = false;
-	gate->connected = false;
+	remote->proto.timeBaseAvailable = false;
+	remote->proto.connDataAvailable = false;
+	remote->connected = false;
 }
 
 int do_next_protocol_action(struct arg_network_info *local, struct arg_network_info *remote)
@@ -242,16 +242,15 @@ int send_arg_conn_data(struct arg_network_info *local,
 		return -ENOMEM;
 	}
 
+	pthread_mutex_lock(&local->lock);
+
 	connData = (struct arg_conn_data*)msg->data;
 	memcpy(connData->symKey, local->symKey, sizeof(connData->symKey));
 	memcpy(connData->iv, local->iv, sizeof(connData->iv));
 	memcpy(connData->hopKey, local->hopKey, sizeof(connData->hopKey));
 	connData->hopInterval = htonl(local->hopInterval);
-	connData->timeOffset = htonl(current_time_offset(&local->timeBase));
 
-	pthread_mutex_lock(&remote->lock);
-
-	//arglog(LOG_DEBUG, "We are presently at hop %lu / %lu = %lu\n", ntohl(connData->timeOffset), local->hopInterval, (ntohl(connData->timeOffset) / local->hopInterval));
+	pthread_mutex_unlock(&local->lock);
 
 	// Send
 	if((ret = send_arg_packet(local, remote,
@@ -259,10 +258,11 @@ int send_arg_conn_data(struct arg_network_info *local,
 			"connection data sent", NULL)) < 0)
 		arglog(LOG_DEBUG, "Failed to send connection data: error %i\n", ret);
 	
+	pthread_mutex_lock(&remote->lock);
 	if(!ret)
 		current_time(&remote->proto.lastConnAttemptTime);
-
 	pthread_mutex_unlock(&remote->lock);
+
 	free_arg_msg(msg);
 
 	return ret;
@@ -313,10 +313,6 @@ int process_arg_conn_data_resp(struct arg_network_info *local,
 		
 		memcpy(remote->hopKey, connData->hopKey, sizeof(remote->hopKey));
 		remote->hopInterval = ntohl(connData->hopInterval);
-
-		/*arglog(LOG_DEBUG, "Time base for remote %s is now %lus %luns, at hop %li\n",
-			remote->name, remote->timeBase.tv_sec, remote->timeBase.tv_nsec,
-			(current_time_offset(&remote->timeBase) / remote->hopInterval));*/
 
 		// Initialize AES/SHA for this new data
 		cipher_setkey(&remote->cipher, remote->symKey, sizeof(remote->symKey) * 8, POLARSSL_ENCRYPT);

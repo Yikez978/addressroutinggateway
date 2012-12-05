@@ -99,11 +99,8 @@ typedef struct arghdr {
 typedef struct arg_conn_data {
 	uint8_t symKey[AES_KEY_SIZE];
 	uint8_t iv[AES_BLOCK_SIZE];
-	
 	uint8_t hopKey[HOP_KEY_SIZE];
-	
 	uint32_t hopInterval;
-	uint32_t timeOffset;
 } arg_conn_data;
 
 typedef struct arg_trust_data {
