@@ -40,48 +40,43 @@ function start-tests {
 	fi
 
 	# Do every combination of hop rate (hr), latency, and test
-	# First one is no hopping as a consequence of the hop taking the full test length
+	# First one is no hopping as a consequence of the hop taking the full test length + some
 	echo '' >"$TESTLOG"
-	for repetition in 1
+	for latency in 0 30 100
 	do
-		for latency in 0 100
+		for hr in $(($runtime * 1000 + 60000)) 1000 100 
 		do
-			#for hr in $(($runtime * 1000)) 1000 100 
-			for hr in 1000 100 
+			for packetrate in 1 .5 .2 .1 .05
 			do
-				for packetrate in 1 .5 .2 .1 .05
+				for testnum in {0..4}
 				do
-					for testnum in 4
-					do
-						echo Ready to begin next test:
-						echo "  Repetition: $repetition"
-						echo "  Hop rate: $hr ms"
-						echo "  Packet rate: $rate ms"
-						echo "  Test: $testnum"
-						echo "  Latency: $latency ms"
-						echo "  Run time: $runtime s"
+					echo Ready to begin next test:
+					echo "  Test: $testnum"
+					echo "  Hop rate: $hr ms"
+					echo "  Packet rate: $rate ms"
+					echo "  Latency: $latency ms"
+					echo "  Run time: $runtime s"
 
-						start-test $testnum $runtime $latency $hr $packetrate 
-						
-						continue
-
-						# Something is horribly broken if we do it in the background
-						testpid=$!
-						
-						# Wait for it to finish, but give ourselves a bit of extra time
-						# The actual test has a lot of setup and tear-down time
-						i=$(($runtime + 35))
-
-						while is-running $testpid
-						do
-							echo -ne "${eraseline}Around $i seconds remaining"
-							sleep 1
-							i=$(($i - 1))
-						done
+					start-test $testnum $runtime $latency $hr $packetrate 
 					
-						# Finish the status line
-						echo -e "${eraseline}Test completed"
+					continue
+
+					# Something is horribly broken if we do it in the background
+					testpid=$!
+					
+					# Wait for it to finish, but give ourselves a bit of extra time
+					# The actual test has a lot of setup and tear-down time
+					i=$(($runtime + 35))
+
+					while is-running $testpid
+					do
+						echo -ne "${eraseline}Around $i seconds remaining"
+						sleep 1
+						i=$(($i - 1))
 					done
+				
+					# Finish the status line
+					echo -e "${eraseline}Test completed"
 				done
 			done
 		done
@@ -188,7 +183,7 @@ function start-generators {
 		# What test are we running?
 		if [[ "$1" == "0" ]]
 		then
-			# Simple test to check connectivity
+			# Simple test to check connectivity from protected clients to external with udp
 			if [[ "$TYPE" == "ext" ]]
 			then	
 				start-generator udp 2000
@@ -197,7 +192,7 @@ function start-generators {
 			fi
 		elif [[ "$1" == "1" ]]
 		then
-			# Simple test to check connectivity
+			# Simple test to check connectivity between protected clients with udp
 			if [[ "$TYPE" != "ext" ]]
 			then	
 				start-generator udp 3000
@@ -221,7 +216,7 @@ function start-generators {
 			fi
 		elif [[ "$1" == "2" ]]
 		then
-			# Simple test to check connectivity
+			# Simple test to check connectivity from protected clients to external with tcp
 			if [[ "$TYPE" == "ext" ]]
 			then	
 				start-generator tcp 4000
@@ -230,7 +225,7 @@ function start-generators {
 			fi
 		elif [[ "$1" == "3" ]]
 		then
-			# Simple test to check connectivity
+			# Simple test to check connectivity between protected clients with tcp
 			if [[ "$TYPE" != "ext" ]]
 			then
 				start-generator tcp 5000
@@ -264,7 +259,18 @@ function start-generators {
 			start-generators 3 "$packetRate"
 		elif [[ "$1" == "5" ]]
 		then
-			echo hi
+			# Simple test where external host attempts to send traffic to protected clients with udp
+			# This should _not_ be allowed
+			if [[ "$TYPE" == "ext" ]]
+			then	
+				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+				sleep 1
+				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+				sleep 1
+				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+			else
+				start-generator udp 6000 
+			fi
 		elif [[ "$1" == "6" ]]
 		then
 			if [[ "$TYPE" == "ext" ]]
@@ -292,41 +298,69 @@ function start-generators {
 }
 
 # Starts a single generator on the current or--if local--given host
-# Usage: start-generator [<host>] <type> <port> [<host> <delay> [<valid>]]
+# Usage: start-generator [<run-on host>] <type> <port> [<host> <delay>] [<valid>]
 #	type - tcp or udp
 #	host - If given, generator connects to the given host. If not, generator enters listening mode
+#	port - Port to send to or listen on, depending on if this is a sender or listener
 #	delay - Listeners always send instantly. Senders send one packet every <delay> seconds (may be decimal)
 #	is_valid - default to true, 0 if not valid traffic
 function start-generator {
 	if [[ $IS_LOCAL ]]
 	then
 		tohost=$1
-		push-to $tohost - scripts/gen_traffic.py
 		shift
+
+		push-to $tohost - scripts/gen_traffic.py
 		run-on $tohost - start-generator $@
 	else
-		if [[ "$#" == 2 ]]
-		then
-			# Listen
-			echo $1 listener created on port $2
-			filename="`hostname`-listen-$1:$2.log"
-			./gen_traffic.py -l -t "$1" -p "$2" >"$filename" 2>&1 &
-			disown $!
-		elif (( $# >= 4 ))
-		then
-			# Send
-			invalid=
-			if [[ "$#" == 5 && "$5" == "0" ]]
-			then
-				invalid="--is-invalid"
-			fi
+		listen=1
+		valid=1
+		type=$1
+		port=$2
 
-			echo $1 sender created to $3:$2 with $4 second delay
-			filename="`hostname`-send-$1-$3:$2-delay:$4.log"
-			./gen_traffic.py -t "$1" -p "$2" -h "$3" -d "$4" $invalid >"$filename" 2>&1 &
-			disown $!
+		if [[ "$#" == "2" ]]
+		then
+			# nothing to be done
+			valid=1
+		elif [[ "$#" == "3" ]]
+		then
+			valid=$3
+		elif [[ "$#" == "4" ]]
+		then
+			listen=
+			host=$3
+			delay=$4
+		elif [[ "$#" == "5" ]] 
+		then
+			listen=
+			host=$3
+			delay=$4
+			valid=$5
 		else
 			help start-generator
+			return
+		fi
+
+		if [[ "$valid" == "1" ]]
+		then
+			valid=
+		else
+			valid="--is-invalid"
+		fi
+
+		if [[ "$listen" ]]
+		then
+			# Listen
+			echo $type listener created on port $port
+			filename="`hostname`-listen-$type:$port.log"
+			./gen_traffic.py -l -t "$type" -p "$port" $valid >"$filename" 2>&1 &
+			disown $!
+		else
+			# Send
+			echo $1 sender created to $3:$2 with $4 second delay
+			filename="`hostname`-send-$type-$host:$port-delay:$delay.log"
+			./gen_traffic.py -t "$type" -p "$port" -h "$host" -d "$delay" $valid >"$filename" 2>&1 &
+			disown $!
 		fi
 	fi
 }
