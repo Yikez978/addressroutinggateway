@@ -19,6 +19,8 @@ from glob import glob
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
 PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
 
+EMPTY_HASH=hashlib.md5().hexdigest()
+
 # Times on each host may not match up perfectly. How many second on either side do we allow?
 TIME_SLACK=15
 ROW_CACHE_SIZE=50000
@@ -45,6 +47,8 @@ def create_schema(db):
 	#	- is_valid (bool) - true if the sender believes this packet SHOULD reach its destination
 	#			(ie, a spoofed packet may not be expected to work)
 	#	- proto (int) - protocol of this packet
+	#	- syn (bool) - If SYN flag was set on this packet (TCP only obviously)
+	#	- ack (bool) - If ACK flag was set on this packet
 	#	- src_ip 
 	#	- dest_ip
 	#	- src_id (foreign: packet.id) - What host this packet is coming from (the sender of the packet)
@@ -93,6 +97,8 @@ def create_schema(db):
 						is_send TINYINT DEFAULT NULL,
 						is_valid TINYINT DEFAULT 1,
 						proto SHORTINT,
+						syn TINYINT,
+						ack TINYINT,
 						src_ip INT,
 						dest_ip INT,
 						src_id INT,
@@ -542,13 +548,25 @@ def record_traffic_pcap(db, logdir):
 			# Hashes
 			full_hash, partial_hash = md5_packet(packet)
 
+			# For TCP, the loggers won't show things like empty ACKs, initial SYNs, etc
+			syn = False
+			ack = False
+			if packet.haslayer(scapy.layers.inet.TCP):
+				tcp = packet.getlayer(scapy.layers.inet.TCP)
+				syn = (tcp.flags & 2 != 0)
+				ack = (tcp.flags & 16 != 0)
+
 			# Who is this packet to and from?
 			ip_layer = packet.getlayer(scapy.layers.inet.IP)
 			src_ip = inet_aton_integer(ip_layer.src)
 			dest_ip = inet_aton_integer(ip_layer.dst)
 
-			src_id = get_system(db, ip=src_ip)
-			dest_id = get_system(db, ip=dest_ip)
+			if is_gate and not is_inner_log:
+				src_id = get_system(db, ip=src_ip, prefer_gate=True)
+				dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
+			else:
+				src_id = get_system(db, ip=src_ip)
+				dest_id = get_system(db, ip=dest_ip)
 
 			# Direction? NOTE: is_send may be None, indicating we don't know
 			# We use this to help determine the src_id and dest_id, which are
@@ -571,7 +589,8 @@ def record_traffic_pcap(db, logdir):
 				print('Unable to tell direction of packet with full hash {}, pcap line {}. Discarding'.format(full_hash, pcap_count))
 				continue
 
-			# Determine who the next system to see this packet should be
+			# Determine who the next system to see this packet ACTUALLY should be
+			# Based on network setup, not just what the packet IPs say
 			if is_prot:
 				# Protected clients actually have to jump through the gate,
 				# that's the first destination for their packets
@@ -586,7 +605,7 @@ def record_traffic_pcap(db, logdir):
 					dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
 				elif is_send == False:
 					src_id = get_system(db, ip=src_ip, prefer_gate=True)
-			else:
+			elif is_gate:
 				if is_inner_log:
 					if is_send == True:
 						# Gate sending to the inside must be shooting for it's client and the packet
@@ -605,14 +624,18 @@ def record_traffic_pcap(db, logdir):
 						src_id = system_id
 					elif is_send == False:
 						dest_id = system_id
+			else:
+				raise Exception('Not a gate, ext, or prot system. Bad pcap file present')
 
 			# Insert it
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
-								is_send, proto, src_ip, dest_ip, src_id, dest_id,
+								is_send, proto, syn, ack,
+								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 							(system_id, time, pcap_count,
-								is_send, ip_layer.proto, src_ip, dest_ip, src_id, dest_id,
+								is_send, ip_layer.proto, syn, ack,
+								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash,))
 
 			count += 1
@@ -704,12 +727,9 @@ def record_client_traffic_log(db, name, log):
 				src_id = gate_id
 				true_src_id = their_id
 			else:
-				# For an external client, a received packet must be coming from the gateway
-				# However, we don't actually know the gateway, but their_id is more than likely correct
-				# The gateway IP would have to match the internal client for that to not be true,
-				# which is a 1 in 65536 chance. TBD, could create a get_system_gate(db, ip)
-				# We don't know the true sender yet
-				src_id = their_id
+				# For an external client, a received packet must be coming from the gateway and the
+				# true sender must be the client behind that gate
+				src_id = get_system(db, ip=their_ip, prefer_gate=True)
 
 				gate_name = get_system(db, id=src_id)[2]
 				true_src_id = get_system(db, name='prot{}1'.format(gate_name[4]))
@@ -730,11 +750,15 @@ def record_client_traffic_log(db, name, log):
 			else:
 				# An external client doesn't actually know the interal client's ID, but
 				# we require (for the test) that there's only one of them and we know the 
-				# network they're on, so...
-				dest_id = their_id
+				# network they're on, so we can figure it out. The dest of this packet
+				# must be the gate first though.
+				dest_id = get_system(db, ip=their_ip, prefer_gate=True)
 
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
+
+		if is_valid:
+			print('The crap is going on here {}'.format(line))
 
 		c.execute('''SELECT id FROM packets 
 						WHERE system_id=?
