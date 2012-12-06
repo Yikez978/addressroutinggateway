@@ -48,7 +48,7 @@ function start-tests {
 		do
 			for packetrate in 1 .5 .2 .1 .05
 			do
-				for testnum in {0..4}
+				for testnum in {0..8}
 				do
 					echo Ready to begin next test:
 					echo "  Test: $testnum"
@@ -58,10 +58,6 @@ function start-tests {
 					echo "  Run time: $runtime s"
 
 					start-test $testnum $runtime $latency $hr $packetrate 
-					
-					continue
-
-					# Something is horribly broken if we do it in the background
 					testpid=$!
 					
 					# Wait for it to finish, but give ourselves a bit of extra time
@@ -263,36 +259,44 @@ function start-generators {
 			# This should _not_ be allowed
 			if [[ "$TYPE" == "ext" ]]
 			then	
-				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+				start-generator udp 2500 172.1.0.11 "$packetRate" 0
 				sleep 1
-				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+				start-generator udp 2500 172.2.0.11 "$packetRate" 0
 				sleep 1
-				start-generator udp 6000 172.1.0.11 "$packetRate" 0
+				start-generator udp 2500 172.3.0.11 "$packetRate" 0
 			else
-				start-generator udp 6000 
+				start-generator udp 2500 0
 			fi
 		elif [[ "$1" == "6" ]]
 		then
+			# Simple test where external host attempts to send traffic to protected clients with tcp
+			# This should _not_ be allowed
 			if [[ "$TYPE" == "ext" ]]
-			then
-				# Listen for traffic, although for this test we don't expect any to come in
-				start-generator tcp 2002
-				start-generator udp 3002
-
-				# Attempt to send traffic IN to the protected clients
-				start-generator tcp 5002 172.1.0.11 .3 0 
-				start-generator udp 6002 172.1.0.11 .4 0
-				start-generator tcp 5002 172.2.0.11 .1 0
-				start-generator udp 6002 172.2.0.11 .2 0
-				start-generator tcp 5002 172.3.0.11 .5 0
-				start-generator udp 6002 172.3.0.11 .2 0
+			then	
+				start-generator tcp 4500 172.1.0.11 "$packetRate" 0
+				sleep 1
+				start-generator tcp 4500 172.2.0.11 "$packetRate" 0
+				sleep 1
+				start-generator tcp 4500 172.3.0.11 "$packetRate" 0
 			else
-				start-generator tcp 5002
-				start-generator udp 6002
+				start-generator tcp 4500 0
 			fi
+		elif [[ "$1" == "7" ]]
+		then
+			# Composite invalid tests
+			start-generators 5 "$packetRate"
+			sleep 1
+			start-generators 6 "$packetRate"
+		elif [[ "$1" == "8" ]]
+		then
+			# Grand composite! Composite the composites!
+			start-generators 4 "$packetRate"
+			sleep 1
+			start-generators 7 "$packetRate"
 		else
 			echo Test number invalid
 			help start-generators
+			return
 		fi
 	fi
 }
