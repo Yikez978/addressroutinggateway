@@ -35,10 +35,11 @@ def log_send(proto, ip, port, buf, is_valid=True):
 	log('Sent {} {}:{} to {}:{}'.format('valid' if is_valid else 'invalid',
 		proto, m.hexdigest(), ip, port))
 
-def log_recv(proto, ip, port, buf):
+def log_recv(proto, ip, port, buf, is_valid=True):
 	m = hashlib.md5()
 	m.update(buf)
-	log('Received valid {}:{} from {}:{}'.format(proto, m.hexdigest(), ip, port))
+	log('Received {} {}:{} from {}:{}'.format('valid' if is_valid else 'invalid',
+		proto, m.hexdigest(), ip, port))
 	pass
 
 def randbytes(size):
@@ -81,7 +82,7 @@ def tcp_sender(ip, port, delay=1, size=None, is_valid=True):
 				buf = s.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(6, ip, port, buf)
+				log_recv(6, ip, port, buf, is_valid)
 			except socket.timeout:
 				continue
 	except socket.error:
@@ -92,7 +93,7 @@ def tcp_sender(ip, port, delay=1, size=None, is_valid=True):
 	log('Connection to {}:{} lost'.format(ip, port))
 	s.close()
 
-def tcp_receiver(port, echo=False, size=None):
+def tcp_receiver(port, echo=False, size=None, is_valid=True):
 	log('Starting a TCP receiver on port {}'.format(port))
 	log_local_addr(port)
 
@@ -108,7 +109,7 @@ def tcp_receiver(port, echo=False, size=None):
 			c_sock, addr = s.accept()
 			r_ip, r_port = addr
 			handler = threading.Thread(target=tcp_receiver_handler,
-				args=(c_sock, r_ip, r_port, stopper, echo, size))
+				args=(c_sock, r_ip, r_port, stopper, echo, size, is_valid))
 			handler.start()
 	except KeyboardInterrupt:
 		log('Telling handlers to die')
@@ -117,7 +118,7 @@ def tcp_receiver(port, echo=False, size=None):
 	log('TCP listener on port {} dying'.format(port))
 	s.close()
 
-def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
+def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None, is_valid=True):
 	log('Accepting TCP connection from {}:{}'.format(ip, port))
 
 	conn.settimeout(1)
@@ -128,7 +129,7 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 				buf = conn.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(6, ip, port, buf)
+				log_recv(6, ip, port, buf, is_valid)
 			except socket.timeout:
 				# Check if we're supposed to be done
 				continue
@@ -140,7 +141,7 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None):
 					buf = randbytes(random.randrange(0, MAX_PACKET_SIZE))
 
 			conn.sendall(buf)
-			log_send(6, ip, port, buf)
+			log_send(6, ip, port, buf, is_valid)
 	except socket.error:
 		pass
 	except KeyboardInterrupt:
@@ -176,7 +177,7 @@ def udp_sender(ip, port, delay=1, size=None, is_valid=True):
 				buf = s.recv(MAX_PACKET_SIZE)
 				if not buf:
 					break
-				log_recv(17, ip, port, buf)
+				log_recv(17, ip, port, buf, is_valid)
 			except socket.timeout:
 				continue
 	except KeyboardInterrupt:
@@ -185,7 +186,7 @@ def udp_sender(ip, port, delay=1, size=None, is_valid=True):
 	log('UDP sender to {}:{} dying'.format(ip, port))
 	s.close()
 
-def udp_receiver(port, echo=False, size=None):
+def udp_receiver(port, echo=False, size=None, is_valid=True):
 	log('Starting a UDP receiver on port {}'.format(port))
 	log_local_addr(port)
 	
@@ -196,7 +197,7 @@ def udp_receiver(port, echo=False, size=None):
 	try:
 		while True:
 			buf, addr = s.recvfrom(MAX_PACKET_SIZE)
-			log_recv(17, addr[0], addr[1], buf)
+			log_recv(17, addr[0], addr[1], buf, is_valid)
 
 			# Send back either their data or some gibberish
 			if not echo:
@@ -206,7 +207,7 @@ def udp_receiver(port, echo=False, size=None):
 					buf = randbytes(random.randrange(0, MAX_PACKET_SIZE))
 			
 			s.sendto(buf, addr)
-			log_send(17, addr[0], addr[1], buf)
+			log_send(17, addr[0], addr[1], buf, is_valid)
 	except KeyboardInterrupt:
 		log('User requested we stop')
 
@@ -252,19 +253,19 @@ def main(argv):
 		log_timestamp()
 		if args.type.lower() == 'tcp':
 			if args.listen:
-				tcp_receiver(args.port, echo=args.echo, size=args.size)
+				tcp_receiver(args.port, echo=args.echo, size=args.size, is_valid=not args.is_invalid)
 			else:
 				tcp_sender(args.host, args.port, delay=args.delay, size=args.size, is_valid=not args.is_invalid)
 		elif args.type.lower() == 'udp':
 			if args.listen:
-				udp_receiver(args.port, echo=args.echo, size=args.size)
+				udp_receiver(args.port, echo=args.echo, size=args.size, is_valid=not args.is_invalid)
 			else:
 				udp_sender(args.host, args.port, delay=args.delay, size=args.size, is_valid=not args.is_invalid)
 		else:
 			log('Type {} not yet handled'.format(args.type))
 	except Exception as e:
 		log('ERROR: Dying expectedly from exception {}'.format(e))
-		raise e
+		raise 
 	finally:
 		# Close log file
 		if output_file is not None:
