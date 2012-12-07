@@ -304,8 +304,15 @@ void direct_inbound(const struct packet_data *packet)
 		}
 		else
 		{
+			// Ensure we're connected
+			if(!gate->connected)
+			{
+				arglog_result(packet, NULL, 1, 0, "Hopper", "Gateway not connected");
+				return;
+			}
+
 			//invalid_local_ip_direction((uint8_t*)&packet->ipv4->daddr);
-			//invalid_ip_direction(gate, (uint8_t*)&packet->ipv4->saddr);
+			invalid_ip_direction(gate, (uint8_t*)&packet->ipv4->saddr);
 
 			// Ensure the IPs were correct
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
