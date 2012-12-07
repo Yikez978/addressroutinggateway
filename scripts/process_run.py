@@ -19,7 +19,7 @@ from glob import glob
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
 PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
 
-EMPTY_HASH=hashlib.md5().hexdigest()
+EMPTY_HASH=hashlib.md5()
 
 # Times on each host may not match up perfectly. How many second on either side do we allow?
 TIME_SLACK=15
@@ -1338,13 +1338,13 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['valid.sent'] = sent_count
 	stats['valid.recv'] = receive_count
 	stats['valid.loss.rate'] = loss_rate
-	stats['valid.loss.examples'] = lost_packets
+	stats['valid.loss.examples'] = [x[0] for x in lost_packets]
 
 	loss_rate, sent_count, receive_count, not_lost_packets = invalid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['invalid.sent'] = sent_count
 	stats['invalid.recv'] = receive_count
 	stats['invalid.loss.rate'] = loss_rate
-	stats['invalid.recvd.examples'] = not_lost_packets
+	stats['invalid.recvd.examples'] = [x[0] for x in not_lost_packets] 
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
@@ -1396,91 +1396,67 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('  NATed average: {:.1f} ms'.format(stats['latency.nat']))
 	print('  Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
 
-def valid_loss_rate(db, begin, end):
-	# Compare the number of sent valid packets to the number of sent valid packets
-	# that actually reached their intended destination (ideally 0)
+def get_packet_losses(db, begin, end, valid=True):
 	c = db.cursor()
-	c.execute('''SELECT p1.id FROM packets AS p1 
-					JOIN systems ON system_id=systems.id
-					WHERE is_send=1
-						AND is_valid=1
-						AND time BETWEEN ? AND ?''', (begin, end))	
-	sent = c.fetchall()
-	send_count = len(sent)
 
-	c.execute('''SELECT p1.id FROM packets AS p1
-					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
-					WHERE p1.true_dest_id=p2.system_id
-						AND p1.is_send=1
-						AND p1.is_valid=1
-						AND p1.time BETWEEN ? AND ?''', (begin, end))	
-	recvd = c.fetchall()
-	recv_count = len(recvd)
+	# Get every packet that was sent and didn't make it to its destination
+	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name, p2.is_send
+					FROM packets AS p1
+						JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
+						LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
+						JOIN systems ON p2.system_id=systems.id
+					WHERE p1.is_send=1
+						AND p1.log_line IS NOT NULL
+						AND p1.is_valid=?
+						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
+						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))
+	losses = c.fetchall()
+
+	# How many packets were sent total?
+	c.execute('''SELECT count(*) FROM packets AS p1 
+					WHERE p1.is_send=1
+						AND p1.log_line IS NOT NULL
+						AND p1.is_valid=?
+						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))	
+	send_count = c.fetchone()[0]
+	recv_count = send_count - len(losses)
 
 	c.close()
 
-	# Get the IDs of the packets we lost
-	lost = [x[0] for x in set(sent) - set(recvd)]
-	
 	if send_count > 0:
-		return ((send_count - recv_count)/send_count, send_count, recv_count, lost)
+		return (len(losses)/send_count, send_count, recv_count, losses)
 	else:
-		return (0, 0, 0, [])
+		return (0.0 if valid else 1.0, 0, 0, [])
+	
+
+def valid_loss_rate(db, begin, end):
+	# Compare the number of sent valid packets to the number of sent valid packets
+	# that actually reached their intended destination (ideally 0)
+	return get_packet_losses(db, begin, end, True)
 
 def invalid_loss_rate(db, begin, end):
 	# Compare the number of sent _invalid_ packets to the number of sent invalid packets
 	# that actually reached their intended destination (ideally 100%)
-	c = db.cursor()
-	c.execute('''SELECT p1.id FROM packets AS p1
-					JOIN systems ON system_id=systems.id
-					WHERE name NOT LIKE 'gate%'
-						AND is_send=1
-						AND is_valid=0
-						AND time BETWEEN ? AND ?''', (begin, end))	
-	sent = c.fetchall()
-	send_count = len(sent)
-	
-	c.execute('''SELECT p1.id FROM packets AS p1
-					JOIN systems ON p1.system_id=systems.id
-					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
-					WHERE name NOT LIKE 'gate%'
-						AND p1.true_dest_id=p2.system_id
-						AND p1.is_send=1
-						AND p1.is_valid=0
-						AND p1.time BETWEEN ? AND ?''', (begin, end))	
-	recvd = c.fetchall()
-	recv_count = len(recvd)
-	c.close()
+	return get_packet_losses(db, begin, end, False)
 
-	# Get the IDs of the packets we DIDN'T lose
-	not_lost = [x[0] for x in recvd]
-
-	if send_count > 0:
-		return ((send_count - recv_count)/send_count, send_count, recv_count, not_lost)
-	else:
-		return (1, 0, 0, [])
-
-def loss_methods(db, begin, end):
+def loss_methods(db, begin, end, valid=None):
 	# Get sent packets that didn't make it to their destination
-	c = db.cursor()
-	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name, p2.is_send
-					FROM packets AS p1
-					JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
-					LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
-					JOIN systems ON p2.system_id=systems.id
-					WHERE p1.is_send=1
-						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
-						AND p1.time BETWEEN ? AND ?''', (begin, end))
-	
+	# If valid is None, get loss methods for both valid and invalid packets
+	if valid is None:
+		losses = get_packet_losses(db, begin, end, True)[3]
+		losses.extend(get_packet_losses(db, begin, end, False)[3])
+	else:
+		losses = get_packet_losses(db, begin, end, valid)[3]
+
 	packet_cats = {'Unknown': list(), 'Lost on wire': list()}
-	for row in c:
-		packet_id, reason_msg, next_hop_id, name, terminated_in_send = row
+	for loss in losses:
+		packet_id, reason_msg, next_hop_id, name, terminated_in_send = loss
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
 
 		# If the final packet we traced to is a send (ie, the gateway forwarded it on but
-		# the rececipient never saw it), then file it under "unknown"
+		# the recipient never saw it), then pcap never even saw it, ethernet must have lost it
 		if terminated_in_send:
 			packet_cats['Lost on wire'].append(packet_id)
 		else:
@@ -1498,7 +1474,6 @@ def loss_methods(db, begin, end):
 	if not packet_cats['Lost on wire']:
 		del packet_cats['Lost on wire']
 
-	c.close()
 	return packet_cats
 
 def avg_latency(db, begin, end):
