@@ -19,7 +19,7 @@ from glob import glob
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
 PACKET_ID_REGEX='''p:([0-9]+) s:({0}):([0-9]+) d:({0}):([0-9]+) hash:([a-z0-9]+)'''.format(IP_REGEX)
 
-EMPTY_HASH=hashlib.md5()
+EMPTY_HASH=hashlib.md5().hexdigest()
 
 # Times on each host may not match up perfectly. How many second on either side do we allow?
 TIME_SLACK=15
@@ -756,9 +756,6 @@ def record_client_traffic_log(db, name, log):
 
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
-
-		if is_valid:
-			print('The crap is going on here {}'.format(line))
 
 		c.execute('''SELECT id FROM packets 
 						WHERE system_id=?
