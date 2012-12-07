@@ -43,8 +43,8 @@ def log_recv(proto, ip, port, buf, is_valid=True):
 	pass
 
 def randbytes(size):
-	#return b''.join([chr(random.randrange(0, 255)) for x in range(size)])
-	return b''.join([random.choice(string.ascii_lowercase) for x in range(size)])
+	return b''.join([chr(random.randrange(0, 255)) for x in range(size)])
+	#return b''.join([random.choice(string.ascii_lowercase) for x in range(size)])
 
 # Basic senders and receivers
 def tcp_sender(ip, port, delay=1, size=None, is_valid=True):
@@ -221,7 +221,7 @@ def end_traffic(sig, stack):
 # Run the correct host generator
 def main(argv):
 	# Parse command line
-	parser = argparse.ArgumentParser(add_help=False, description='Process an ARG test network run')
+	parser = argparse.ArgumentParser(add_help=False, description='Generate TCP or UDP traffic')
 	parser.add_argument('-t', '--type', required=True, help='TCP of traffic to work with (TCP, UDP, or ARG)')
 	parser.add_argument('--is-invalid', action='store_true', help='Set if this traffic generator should NOT get its traffic through. Only affects logging, does not change operation of traffic.')
 	parser.add_argument('-h', '--host', help='Host to send to')

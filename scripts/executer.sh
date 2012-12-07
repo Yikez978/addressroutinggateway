@@ -42,22 +42,22 @@ function start-tests {
 	# Do every combination of hop rate (hr), latency, and test
 	# First one is no hopping as a consequence of the hop taking the full test length + some
 	echo '' >"$TESTLOG"
-	for latency in 0 30 100
+	for latency in 0 30 100 500
 	do
-		for hr in $(($runtime * 1000 + 60000)) 1000 100 
+		for hr in $(($runtime * 1000 + 60000)) 1000 100 50 15 5 
 		do
 			for packetrate in 1 .5 .2 .1 .05
 			do
 				for testnum in {0..8}
 				do
-					echo Ready to begin next test:
+					echo Running test:
 					echo "  Test: $testnum"
 					echo "  Hop rate: $hr ms"
 					echo "  Packet rate: $rate ms"
 					echo "  Latency: $latency ms"
 					echo "  Run time: $runtime s"
 
-					start-test $testnum $runtime $latency $hr $packetrate 
+					start-test $testnum $runtime $latency $hr $packetrate >/dev/null & 
 					testpid=$!
 					
 					# Wait for it to finish, but give ourselves a bit of extra time
