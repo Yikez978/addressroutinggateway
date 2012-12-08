@@ -224,12 +224,6 @@ int get_hopper_conf(const struct config_data *config)
 	gateInfo->hopInterval = config->hopRate;
 	arglog(LOG_DEBUG, "Hop rate set to %lums\n", gateInfo->hopInterval);
 
-	// Set IP based on configuration
-	arglog(LOG_DEBUG, "Setting initial IP\n");
-	pthread_mutex_lock(&gateInfo->lock);
-	update_ips(gateInfo);
-	pthread_mutex_unlock(&gateInfo->lock);
-
 	return 0;
 }
 
@@ -417,23 +411,11 @@ void print_network(const struct arg_network_info *network)
 		network->proto.latency);
 }
 
-uint8_t *current_ip(void)
+void current_ip(uint8_t *ip)
 {
-	uint8_t *ipCopy = NULL;
-
-	ipCopy = (uint8_t*)malloc(ADDR_SIZE);
-	if(ipCopy == NULL)
-	{
-		arglog(LOG_DEBUG, "Unable to allocate space for saving off IP address.\n");
-		return NULL;
-	}
-
 	pthread_mutex_lock(&ipLock);
-	update_ips(gateInfo);
-	memcpy(ipCopy, gateInfo->currIP, ADDR_SIZE);
+	generate_ip_corrected(gateInfo, 0, ip); 
 	pthread_mutex_unlock(&ipLock);
-
-	return ipCopy;
 }
 
 bool is_valid_local_ip(const uint8_t *ip)
@@ -447,14 +429,19 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip)
 
 	pthread_mutex_lock(&gate->lock);
 
-	update_ips(gate);
+	uint8_t genIP[ADDR_SIZE];
 
-	if(memcmp(ip, gate->currIP, ADDR_SIZE) == 0)
-		ret = 1;
-	else if(memcmp(ip, gate->prevIP, ADDR_SIZE) == 0)
+	generate_ip_corrected(gate, 0, genIP);
+	if(memcmp(ip, genIP, sizeof(genIP)) == 0)
 		ret = 1;
 	else
-		ret = 0;
+	{
+		generate_ip_corrected(gate, -gate->hopInterval, genIP);
+		if(memcmp(ip, genIP, sizeof(genIP)) == 0)
+			ret = 1;
+		else
+			ret = 0;
+	}
 	
 	pthread_mutex_unlock(&gate->lock);
 
@@ -537,24 +524,6 @@ int process_admin_msg(const struct packet_data *packet, struct arg_network_info 
 	}
 
 	return 0;
-}
-
-void update_ips(struct arg_network_info *gate)
-{
-	struct timespec currTime;
-	current_time(&currTime);
-
-	// Is the cache out of date? If not, do nothing
-	if(time_offset(&gate->ipCacheExpiration, &currTime) < 0)
-		return;
-
-	generate_ip_corrected(gate, -gate->hopInterval, gate->prevIP);
-	generate_ip_corrected(gate, 0, gate->currIP);
-
-	// Update on exactly when the next hop should occur
-	current_time(&gate->ipCacheExpiration);
-	time_plus(&gate->ipCacheExpiration,
-		gate->hopInterval - time_offset(&gate->timeBase, &gate->ipCacheExpiration) % gate->hopInterval);
 }
 
 void generate_ip_corrected(const struct arg_network_info *gate, int correction, uint8_t *ip)

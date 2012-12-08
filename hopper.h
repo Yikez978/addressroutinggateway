@@ -55,10 +55,6 @@ typedef struct arg_network_info {
 	uint8_t baseIP[ADDR_SIZE];
 	uint8_t mask[ADDR_SIZE];
 
-	uint8_t currIP[ADDR_SIZE];
-	uint8_t prevIP[ADDR_SIZE];
-	struct timespec ipCacheExpiration;
-
 	// Linked-list links
 	struct arg_network_info *next;
 	struct arg_network_info *prev;
@@ -90,7 +86,7 @@ void add_network(void);
 // Returns the current IP address for the gateway
 // NOTE: the previous IP is also valid for receiving,
 // so checks from that perspective should use is_valid_local_ip()
-uint8_t *current_ip(void);
+void current_ip(uint8_t *ip);
 
 // Returns true if the given IP is valid, false otherwise
 bool is_valid_local_ip(const uint8_t *ip);
@@ -111,9 +107,6 @@ const uint8_t *gate_mask(void);
 
 // Processes incoming admin messages by handing them off to the correct protocol handler
 int process_admin_msg(const struct packet_data *packet, struct arg_network_info *srcGate);
-
-// Generates the IP address for a given gate, based on the mask, hop key, and time
-void update_ips(struct arg_network_info *gate);
 
 // Generates the current IP for the given gate, based on the current time plus
 // a given correction factor. Correction may be positive (in the future) or negative.
