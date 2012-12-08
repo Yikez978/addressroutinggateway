@@ -286,12 +286,8 @@ struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, con
 struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_entry_bucket *bucket)
 {
 	const struct iphdr *iph = packet->ipv4;
-	struct nat_entry *e = NULL;
-	struct nat_entry *oldHead = NULL;
 
-	uint8_t *currIP = NULL;
-
-	e = (struct nat_entry*)malloc(sizeof(struct nat_entry));
+	struct nat_entry *e = (struct nat_entry*)malloc(sizeof(struct nat_entry));
 	if(e == NULL)
 	{
 		arglog(LOG_DEBUG, "Unable to allocate space for new NAT entry\n");
@@ -300,23 +296,14 @@ struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_
 
 	// Fill in data
 	memcpy(e->intIP, &iph->saddr, ADDR_SIZE);
-
-	currIP = current_ip();
-	if(currIP == NULL)
-	{
-		arglog(LOG_DEBUG, "Unable to complete creation of new NAT entry, out of memory\n");
-		free(e);
-		return NULL;
-	}
-	memcpy(e->gateIP, currIP, ADDR_SIZE);
-	free(currIP);
+	current_ip(e->gateIP);
 
 	e->intPort = get_source_port(packet);
 	e->gatePort = e->intPort; // TBD random port
 	e->proto = iph->protocol;
 
 	// Insert as head of bucket, pointing to the old head
-	oldHead = bucket->first;
+	struct nat_entry *oldHead  = bucket->first;
 	bucket->first = e;
 	e->next = oldHead;
 

@@ -661,8 +661,8 @@ int create_arg_packet(struct arg_network_info *local,
 	// due to the frequent ARPs that take just as long as actual packets (in the real world,
 	// they would take negligible time). As a result, latency is often much higher than
 	// it needs to be, but /4 always puts us into a safe realm.
-	generate_ip_corrected(local, remote->proto.latency / 4, (uint8_t*)&packet->ipv4->saddr);
-	generate_ip_corrected(remote, remote->proto.latency / 4, (uint8_t*)&packet->ipv4->daddr);
+	generate_ip_corrected(local, 0, (uint8_t*)&packet->ipv4->saddr);
+	generate_ip_corrected(remote, 0, (uint8_t*)&packet->ipv4->daddr);
 
 	packet->ipv4->id = 0;
 	packet->ipv4->frag_off = 0;
