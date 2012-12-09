@@ -391,7 +391,7 @@ void *nat_cleanup_thread(void *data)
 {
 	arglog(LOG_DEBUG, "NAT cleanup thread running\n");
 
-	for(;;)
+	while(true)
 	{
 		clean_nat_table();
 	

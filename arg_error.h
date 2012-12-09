@@ -5,6 +5,7 @@
 
 #define MAX_ERROR_STR_LEN 35
 
+// Possible error returns from ARG processing functions
 enum {
 	ARG_MIN_ERROR = 150,
 
@@ -33,6 +34,8 @@ enum {
 	ARG_INTERNAL_ERROR,
 };
 
+// Functions the same as strerror_r, but works with ARG error codes as well
+// If the errnum is not an ARG error, it is passed off to normal strerror_r
 void arg_strerror_r(int errnum, char *buf, int buflen);
 
 #endif

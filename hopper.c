@@ -235,7 +235,7 @@ void *hopper_admin_thread(void *data)
 
 	sleep(INITIAL_CONNECT_WAIT);
 
-	for(;;)
+	while(true)
 	{
 		struct timespec curr;
 		current_time(&curr);

@@ -98,7 +98,7 @@ int read_config(struct config_data *conf)
 	}
 
 	conf->gate = NULL;
-	for(;;)
+	while(true)
 	{
 		dent = readdir(confDir);
 		if(!dent)
@@ -248,7 +248,7 @@ int read_private_key(const struct config_data *conf, struct arg_network_info *ga
 int get_next_line(FILE *f, char *line, int max)
 {
 	int len = 0;
-	for(;;)
+	while(true)
 	{
 		if(fgets(line, max, f) == NULL)
 			return -1;

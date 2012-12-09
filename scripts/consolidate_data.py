@@ -28,16 +28,17 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 				sys.stdout.flush()
 			else:
 				raise Exception('contents are invalid'.format(db_path))
+		
+			# Get stats
+			stats = generate_stats(db, begin_time_buffer, end_time_buffer)
 		except Exception as e:
 			print('Found database at {}, but unable to use ({})'.format(db_path, str(e)))
 
 			if remove_bad:
 				print('Removing bad database')
 				os.unlink(db_path)
-				continue
-		
-		# Get stats
-		stats = generate_stats(db, begin_time_buffer, end_time_buffer)
+
+			continue
 
 		# We also need to know what test was being run
 		stats[0]['results.dir'] = os.path.dirname(db_path)

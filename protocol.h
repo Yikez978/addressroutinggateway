@@ -14,48 +14,69 @@ struct arg_network_info;
 /*******************************
  * Protocol description:
  *
- * TBD update this comment, it's mostly incorrect
+ * Packets are a IP packets with protocol 253
+ * +----------------------------------+
+ * | 1 byte  |   1 byte    | 2 bytes  |
+ * | version | packet type |  length  |
+ * +---------+-------------+----------+
+ * |             4 bytes              |
+ * |          sequence number         |
+ * +----------------------------------+
+ * |            128 bytes             |
+ * |            Signature             |
+ * +----------------------------------+
+ * |   ...additional packet data...   |
+ * +----------------------------------+
  *
- * All packets are UDP, port is unimportant. Inside of UDP is:
- * +----------------------------------+
- * | 1 byte  |   1 byte    | 40 bytes |
- * | version | packet type |   HMAC   |
- * +----------------------------------+
- * 
- * Version - for thesis, inconsequential. Would be needed in the real world
+ * Version - for thesis, 1 all the time
  * Type - type of this packet, determines how it will be handled
- * HMAC - HMAC using the sender's symmetric key of everything from
- *		the version on. HMAC bytes are set to 0 for this process
+ * Length - Length of packet, from version on. The minimum size is
+ *		136, giving room for everything including the signature
+ * Seq Num - Every packet should have a monotonically increasing sequence
+ *		number, allowing replays to be prevented
+ * Signature - Every packet is either signed with a the private key
+ *		of the sender or the agreed upon symmetric key of between two gates
  * 
  * In the following description, local is the current gateway and
  * remote is the gateway with which we are communicating. We assume
  * that local is the initiator, although obviously it goes both ways.
  *
- * Auth process, to verify that a valid gateway is sitting an a give IP range
- *			Also allows round-trip latency detection
- * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
- *	1. Local sends AUTH_REQ containing random 4-byte unsigned int and
- *		4 bytes of randomness, all encrypted by the global key. (IRL, would
- *		be encrypted by remote public key.) Time of send is recorded
- *	2. Remote sends AUTH_RESP with same int and different random bytes,
- *		encrypted (IRL, would be encrypted by remote private key)
- *  3. Local ensures received int matches sent int. If so, remote is 
- *		marked as authenticated. Time for auth is determined and recorded by
- *		dividing the start and end times, giving the one-way latency in jiffies
- *
  * Connect process
- * 	- HMACs are all done with global symmetric key (IRL, private key of sender)
+ * - Signed with private key
  *	1. Ensure auth
- *	2. Local sends CONN_REQ containing its hop key, hop interval, time offset in ms (curr time - base), and
+ *	2. Local sends CONN_REQ containing its hop key, hop interval, and
  *		symmetric key, all encrypted with global key. (Remote MAY save this data,
  *		or it could simply do its own request next.)
  *	3. Remote sends CONN_RESP acknowledgement back, containing the remote
- *		hop key, hop interval, hop point, and symmetric key. Again, encrypted with global key
- *	4. Local saves data and marks gateway as connected. Offset is converted to a
- *		local base time for that gateway via local curr time - offset
+ *		hop key, hop interval, and symmetric key. Again, encrypted with global key
+ *	4. Local receives data and saves it. Gateway is marked as having connection
+ *		data, but not fully connected unless time sync data is also present. 
+ *
+ *	Time sync
+ * 	- Signed with private key 
+ *	1. Local sends PING_MSG containing random 4-byte unsigned int in the request
+ *		field (see arg_ping_data struct below), 0 in response, and 
+ *		its time offset, which is the different between the current time and 
+ *		its base time. It notes the time it send this packet.
+ *	2. Remote responds with PING_MSG with the request into sent to a new random int
+ *		(if it wants), the received response int as the request int, and its own time
+ *		offset.
+ *  3. Local ensures received response int matches sent request int. If so, remote is 
+ *		marked having time sync data available and, if connection data is available,
+ *		remote is marked as connected. The latency of the packet is determined from the
+ *		send time, then remote's time base is calculated based on half of this
+ *		(received time offset - latency/2 should be close to the time base).
+ *
+ * Trust data
+ * - Signed with private key
+ * 1. For each gateway it knows about, local sends a TRUST_DATA packet to remote, 
+ *		containing all of the information you would find in the configuration file
+ *		for that gate: name, base ip, ip mask, and public key
+ * 2. Remote receives it and adds them (if they don't already have it) to their
+ *		list of gateways. Eventually it attempts to connect to these new networks
  *
  * Route packet
- *	1. Ensure connect
+ * - HMAC with local symmetric key
  *	2. Local takes outbound packet and encrypts with with remote symmetric key
  *	3. Local sends WRAPPED message to remote current IP. HMAC is done using
  *		local symmetric key
@@ -68,11 +89,6 @@ struct arg_network_info;
 // Message types
 enum {
 	ARG_WRAPPED_MSG,
-	
-	// Authenticating
-	ARG_GATE_HELLO_MSG,
-	ARG_GATE_WELCOME_MSG,
-	ARG_GATE_VERIFIED_MSG,
 
 	// Lag
 	ARG_PING_MSG,
@@ -82,11 +98,9 @@ enum {
 	ARG_CONN_DATA_REQ_MSG,
 
 	ARG_TRUST_DATA_MSG,
-
-	ARG_TIME_REQ_MSG,
-	ARG_TIME_RESP_MSG,
 };
 
+// Main data in the ARG protocol
 typedef struct arghdr {
 	uint8_t version;
 	uint8_t type;
@@ -96,6 +110,7 @@ typedef struct arghdr {
 	uint8_t sig[RSA_SIG_SIZE];
 } arghdr;
 
+// Basic data needed to transmit packets between gateways
 typedef struct arg_conn_data {
 	uint8_t symKey[AES_KEY_SIZE];
 	uint8_t iv[AES_BLOCK_SIZE];
@@ -103,6 +118,10 @@ typedef struct arg_conn_data {
 	uint32_t hopInterval;
 } arg_conn_data;
 
+// Structure used for sending/parsing data about other gateways
+// Gateways exchange information with each other about others they 
+// know of, allowing gateways to connect to more people than they
+// have configuration files for
 typedef struct arg_trust_data {
 	char name[MAX_NAME_SIZE];
 	uint8_t baseIP[ADDR_SIZE];
@@ -111,12 +130,14 @@ typedef struct arg_trust_data {
 	uint8_t e[10];
 } arg_trust_data;
 
+// Structure used for sending/parsing time sync data
 typedef struct arg_ping_data {
 	uint32_t requestID;
 	uint32_t responseID;
 	uint32_t timeOffset;
 } arg_ping_data;
 
+// Basic holder of ARG data
 typedef struct argmsg {
 	uint16_t len;
 
@@ -157,7 +178,6 @@ typedef struct proto_data {
 void init_protocol_locks(void);
 
 // Protocol flow control
-void start_auth(struct arg_network_info *local, struct arg_network_info *remote);
 void start_time_sync(struct arg_network_info *local, struct arg_network_info *remote);
 void start_connection(struct arg_network_info *local, struct arg_network_info *remote);
 void end_connection(struct arg_network_info *local, struct arg_network_info *remote);
@@ -219,6 +239,7 @@ int process_arg_packet(struct arg_network_info *local,
 struct argmsg *create_arg_msg(uint16_t len);
 void free_arg_msg(struct argmsg *msg);
 
+// Quick info on message
 int get_msg_type(const struct arghdr *msg);
 bool is_wrapped_msg(const struct arghdr *msg);
 bool is_admin_msg(const struct arghdr *msg);

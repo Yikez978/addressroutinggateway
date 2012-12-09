@@ -72,6 +72,7 @@ void print_nat_entry(const struct nat_entry *entry);
 struct nat_entry_bucket *create_nat_bucket(const struct packet_data *packet, const int key);
 struct nat_entry *create_nat_entry(const struct packet_data *packet, struct nat_entry_bucket *bucket);
 
+// NAT entries are automatically removed after they see no traffic for some time
 void update_nat_entry_time(struct nat_entry *e);
 
 // Build bucket key based on the given IP and port (must be given directly,

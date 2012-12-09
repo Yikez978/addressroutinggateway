@@ -98,6 +98,8 @@ bool is_valid_ip(struct arg_network_info *gate, const uint8_t *ip);
 int invalid_local_ip_direction(const uint8_t *ip);
 int invalid_ip_direction(const arg_network_info *gate, const uint8_t *ip);
 
+// Track the number of packets with "good" (valid) IPs and bad IPs.
+// Used to know when times may be out-of-sync
 void note_bad_ip(struct arg_network_info *gate);
 void note_good_ip(struct arg_network_info *gate);
 
@@ -112,15 +114,13 @@ int process_admin_msg(const struct packet_data *packet, struct arg_network_info 
 // a given correction factor. Correction may be positive (in the future) or negative.
 void generate_ip_corrected(const struct arg_network_info *gate, int correction, uint8_t *ip);
 
-// Wraps the given packet for the appropriate ARG network
-// and signs it.
+// Wraps the given packet for the appropriate ARG network and signs it.
 // Returns false if the packet is not destined for a known
 // ARG network or another error occurs during processing
 int do_arg_wrap(const struct packet_data *packet, struct arg_network_info *destGate);
 
 // Unwraps the given packet.
-// Returns false if the signature fails to match or another error
-// occurs during processing
+// Returns false if the signature fails to match or another error occurs during processing
 int do_arg_unwrap(const struct packet_data *packet, struct arg_network_info *srcGate);
 
 // Returns pointer to the ARG network the give IP belongs to

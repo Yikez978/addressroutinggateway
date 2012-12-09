@@ -41,6 +41,7 @@ uint32_t totp(const uint8_t *key, unsigned int klen, unsigned long step, unsigne
 
 void get_random_bytes(void *buf, int nbytes)
 {
+	// TBD could be replaced with polarssl havege_random
 	static int randomData = 0;
 	int n = 0;
 

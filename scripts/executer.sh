@@ -52,7 +52,7 @@ function start-tests {
 					echo Running test:
 					echo "  Test: $testnum"
 					echo "  Hop rate: $hr ms"
-					echo "  Packet rate: $rate ms"
+					echo "  Packet rate: $packetrate ms"
 					echo "  Latency: $latency ms"
 					echo "  Run time: $runtime s"
 
@@ -695,13 +695,9 @@ function monitor-runs {
 		# Wait a bit. This prevents us jumping on a results directory too quickly, before
 		# all of the data has downloaded
 		echo Found new results to process, waiting for it to settle
-		touch "$to_handle/run.db"
 		sleep 10
+		process-run "$to_handle"
 
-		if [ ! -f "$results/$RUNDB" ]
-		then
-			process-run "$to_handle"
-		fi
 		to_handle=
 	done
 }

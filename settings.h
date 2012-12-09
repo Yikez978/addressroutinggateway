@@ -87,11 +87,14 @@
 ***********************************************/
 struct arg_network_info;
 
+// Names of all the gates we have configuration FILES for (only hard files,
+// not gates we learned of through trust data)
 typedef struct gate_list {
 	char name[MAX_CONF_LINE];
 	struct gate_list *next;
 } gate_list;
 
+// Info from configuration files
 typedef struct config_data {
 	char file[MAX_CONF_LINE];
 	char dir[MAX_CONF_LINE];
@@ -105,9 +108,11 @@ typedef struct config_data {
 	long hopRate;
 } config_data;
 
+// Work with configuration files
 int read_config(struct config_data *conf);
 void release_config(struct config_data *conf);
 
+// Helpers to read in certain data
 int read_public_key(const struct config_data *conf, struct arg_network_info *gate);
 int read_private_key(const struct config_data *conf, struct arg_network_info *gate);
 
