@@ -818,7 +818,10 @@ function start-arg {
 			echo "$1"ms >> "$f"
 		done
 
-		push-to $GATES - arg conf
+		# Ensure ARP is large enough
+		set-arp-cache
+
+		push-to $GATES - arg conf 
 		run-on $GATES - start-arg $@
 	else
 		# GateA and GateC don't get to know about each other
@@ -1010,6 +1013,18 @@ function setup-gate-env {
 		sudo apt-get -y update
 		sudo apt-get -y dist-upgrade
 		sudo apt-get -y install build-essential autoconf automake libtool libpcap-dev libpolarssl-dev bridge-utils
+	fi
+}
+
+# Ensures ARP threshholds are set high enough. This is only need
+# in the test environment
+function set-arp-cache {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $GATES - scripts/set_arp_thresh.sh
+		run-on $GATES - set-arp-cache
+	else
+		./set_arp_thresh.sh
 	fi
 }
 
