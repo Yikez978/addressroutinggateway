@@ -315,7 +315,7 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_local_ip((uint8_t*)&packet->ipv4->daddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Dest IP Incorrect");
-				invalid_local_ip_direction((uint8_t*)&packet->ipv4->daddr);
+				//invalid_local_ip_direction((uint8_t*)&packet->ipv4->daddr);
 
 				note_bad_ip(gate);
 				return;
@@ -324,7 +324,7 @@ void direct_inbound(const struct packet_data *packet)
 			if(!is_valid_ip(gate, (uint8_t*)&packet->ipv4->saddr))
 			{
 				arglog_result(packet, NULL, 1, 0, "Hopper", "Source IP Incorrect");
-				invalid_ip_direction(gate, (uint8_t*)&packet->ipv4->saddr);
+				//invalid_ip_direction(gate, (uint8_t*)&packet->ipv4->saddr);
 				note_bad_ip(gate);
 				return;
 			}

@@ -164,7 +164,7 @@ function stop-test {
 function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $EXT $PROT - scripts/gen_traffic.py
+		push-to $EXT $PROT - scripts/gen_traffic.py scripts/malicious_traffic.py scripts/process_run.py
 		run-on $EXT $PROT - start-generators "$@"
 	else
 		# The basic tests (0-3) all send packets at a fixed rate. What should that rate be?
@@ -818,6 +818,9 @@ function start-arg {
 			echo "$1"ms >> "$f"
 		done
 
+		# Ensure ARP is large enough
+		set-arp-cache
+
 		push-to $GATES - arg conf 
 		run-on $GATES - start-arg $@
 	else
@@ -829,9 +832,6 @@ function start-arg {
 		then
 			rm conf/*gateA*
 		fi
-
-		# Ensure ARP is large enough
-		set-arp-cache
 
 		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" 2>&1 &
 		disown $!
@@ -1024,8 +1024,8 @@ function setup-gate-env {
 function set-arp-cache {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES - 
-		run-on $GATES - set-arp-cache
+		push-to $GATES $EXT - 
+		run-on $GATES $EXT - set-arp-cache
 	else
 		sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=65536
 		sudo sysctl -w net.ipv4.neigh.default.gc_thresh2=32768 

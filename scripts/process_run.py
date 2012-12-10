@@ -49,6 +49,7 @@ def create_schema(db):
 	#	- proto (int) - protocol of this packet
 	#	- syn (bool) - If SYN flag was set on this packet (TCP only obviously)
 	#	- ack (bool) - If ACK flag was set on this packet
+	#	- len (int) - Length of this packet
 	#	- src_ip 
 	#	- dest_ip
 	#	- src_id (foreign: packet.id) - What host this packet is coming from (the sender of the packet)
@@ -99,6 +100,7 @@ def create_schema(db):
 						proto SHORTINT,
 						syn TINYINT,
 						ack TINYINT,
+						len INT,
 						src_ip INT,
 						dest_ip INT,
 						src_id INT,
@@ -629,12 +631,12 @@ def record_traffic_pcap(db, logdir):
 
 			# Insert it
 			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
-								is_send, proto, syn, ack,
+								is_send, proto, syn, ack, len,
 								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
 							(system_id, time, pcap_count,
-								is_send, ip_layer.proto, syn, ack,
+								is_send, ip_layer.proto, syn, ack, len(packet),
 								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash,))
 
@@ -1584,8 +1586,9 @@ def print_raw(string):
 		print()
 
 def md5_packet(pkt):
-	# Returns both md5 of the full packet from the IP layer down,
-	# excluding the checksums at each layer. Understands IPv4, UDP, TCP, ICMP, and ARG
+	# Returns two MD5's of the packet:
+	#   1. From the IP layer down, excluding the checksums at each layer. Understands IPv4, UDP, TCP, ICMP, and ARG
+	#   2. Payload (raw) only. IE, what the UDP, TCP, or ARG layer has inside it
 	full = hashlib.md5()
 	partial = hashlib.md5()
 
@@ -1656,7 +1659,7 @@ def md5_packet(pkt):
 ########################################
 # Teach scapy how to parse ARG packets
 class ARGPacket(scapy.packet.Packet):
-	name = "ARGPacket "
+	name = "ARG"
 	fields_desc = [	scapy.fields.ByteField("version", 1),
 					scapy.fields.ByteField("type", 0),
 					scapy.fields.ShortField("len", 0),

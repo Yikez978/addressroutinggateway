@@ -17,105 +17,107 @@ import scapy.all
 
 from gen_traffic import log, log_timestamp, randbytes, end_traffic
 from process_run import ARGPacket, inet_aton_integer, inet_ntoa_integer, md5_packet
-#scapy.all.bind_layers(scapy.layers.inet.IP, ARGPacket, proto=253)
 
-def spam_malformed(delay):
-	#send(IP(dst="10.1.1.5", ihl=2, version=3)/ICMP())
-	pass
-
-def spam_traffic(delay, proto, from_ip, to_ip, from_port=None, to_port=None, from_ip_mask="255.255.255.255", to_ip_mask="255.255.255.255", payload=None):
-	try:
-		fmask = inet_aton_integer(from_ip_mask)
-		tmask = inet_aton_integer(to_ip_mask)
-		from_ip = inet_aton_integer(from_ip) & fmask
-		to_ip = inet_aton_integer(to_ip) & tmask
-
-		while True:
-			# Generate random parts of packet
-			fip = inet_ntoa_integer(from_ip | (random.getrandbits(32) & ~fmask))
-			tip = inet_ntoa_integer(to_ip | (random.getrandbits(32) & ~tmask))
-
-			if from_port is None:
-				fport = random.randrange(0, 65535)
-			else:
-				fport = from_port
-
-			if to_port is None:
-				tport = random.randrange(0, 65535)
-			else:
-				tport = to_port
-
-			# Stop, packet time
-			ip = scapy.layers.inet.IP(src=fip, dst=tip)
-			if proto == 253:
-				print('tbd')
-			elif proto == 17:
-				lower = scapy.layers.inet.UDP(sport=fport, dport=tport)
-			elif proto == 6:
-				lower = scapy.layers.inet.TCP(sport=fport, dport=tport)
-			else:
-				raise Exception('Unknown protocol rquested')
-			
-			pkt = ip / lower
-			if payload is not None:
-				if hasattr(payload, '__call__'):
-					pkt = pkt / payload()
-				else:
-					pkt = pkt / payload
-
-			pkt.show()
-			log_send(proto, fip, port, buf, is_valid)
-			send(pkt)
-			
-			time.sleep(delay)
-	except KeyboardInterrupt:
-		log('User requested we stop')
-
-def sniff_and_replay():
-	try:
-		log('Sniffing ARG packets')
-		scapy.all.sniff(prn=alter_and_replay_packet, filter='proto 253', store=0)
-	except KeyboardInterrupt:
-		log('User requested we stop')
+def sniff_and_replay(alteration=None, delay=None):
+	log('Sniffing ARG packets')
+	while True:
+		try:
+			scapy.all.sniff(prn=alter_and_replay_packet, store=0,
+				filter='ip and proto 253', iface='eth1')
+		except KeyboardInterrupt:
+			log('User requested we stop')
+			break
+		except Exception as e:
+			log('ERROR: {s}'.format(e))
 
 def alter_and_replay_packet(pkt, alteration=None, delay=None):
 	log_recv(pkt)
 
+	# Hardcode some stuff, I don't care
+	mask = inet_aton_integer("255.255.0.0")
+
 	# How (if) should we alter the packet?
 	if alteration is None:
-		alteration = random.randint(0, 5)
+		alteration = random.randint(0, 6)
 
-	# If none of these are matched, intentionally leave the packet the
-	# same for a straight replay
-	if alteration == 0:
-		pass
+	note = ''
+	if pkt.haslayer(ARGPacket):
+		ip = pkt.getlayer(scapy.layers.inet.IP)
+		arg = pkt.getlayer(ARGPacket)
+
+		# What tests should we do?
+		tests = [random.choice([True, False]) for x in range(10)]
+		if tests[0]:
+			note = 'zeroing signature, '
+			arg.sig = 0
+
+		if tests[1]:
+			newtype = random.randint(0, 10)
+			note = 'changing msg type to {}, '.format(newtype)
+			arg.type = newtype
+
+		if tests[2]:
+			newlen = random.randint(0, 2 * arg.len)
+			note = 'changing msg len to {} from {}, '.format(newlen, arg.len)
+			arg.len = newlen
+
+		if tests[3]:
+			note = 'zeroing the data, '
+			arg.payload = chr(0) * len(arg.payload)
+
+		if tests[4]:
+			note += 'removing the data, '
+			arg.payload = None
+
+		if tests[5]:
+			newseq = arg.seq + random.randint(-2000, 2000)
+			if newseq < 0:
+				newseq = 0
+			note += 'changing sequence num from {} to {}, '.format(arg.seq, newseq)
+			arg.seq = newseq
+
+		if tests[6] or True:
+			#newip = inet_ntoa_integer(inet_aton_integer(ip.src) | (random.getrandbits(32) & ~mask))
+			newip = "172.5.1.1"
+			note += 'changing the source ip from {} to {}, '.format(ip.src, newip)
+			ip.src = newip
+
+		if tests[7] and False:
+			newip = inet_ntoa_integer(inet_aton_integer(ip.dst) | (random.getrandbits(32) & ~mask))
+			note += 'changing the destination ip from {} to {}, '.format(ip.dst, newip)
+			ip.dst = newip
+
+	else:
+		log('Captured a packet that is not alterable (with this script)')
 	
 	if delay is not None:
 		time.sleep(delay)
 
+	if not note:
+		note = 'unaltered replay'
+
 	# Send it back
-	send(pkt)
-	log_send(pkt)
+	print(note)
+	log_send(pkt, note=note)
+	scapy.all.sendp(pkt, verbose=False, iface='eth1')
 
 ########################################
 # Utilities
 def send(pkt):
-	scapy.all.send(pkt, verbose=False)
+	scapy.all.sendp(pkt, verbose=False, iface='eth1')
 
 def randpayload():
 	return randbytes(50)
 
-def log_send(pkt, is_valid=False):
-	m = md5_packet(pkt)
+def log_send(pkt, note=''):
+	m = md5_packet(pkt)[0]
 	ip = pkt.getlayer(scapy.layers.inet.IP)
-	log('Sent {} {}:{} from {} to {}'.format('valid' if is_valid else 'invalid',
-		ip.proto, m.hexdigest(), ip.src, ip.dst))
+	log('Sent {}:{} from {} to {}, note:{}'.format(ip.proto, m, ip.src, ip.dst, note))
 
-def log_recv(pkt, is_valid=False):
-	m = md5_packet(pkt)
+def log_recv(pkt, note=''):
+	m = md5_packet(pkt)[0]
 	ip = pkt.getlayer(scapy.layers.inet.IP)
-	log('Sent {} {}:{} from {} to {}'.format('valid' if is_valid else 'invalid',
-		ip.proto, m.hexdigest(), ip.src, ip.dst))
+	log('Received {}:{} from {} to {}, note:{}'.format(ip.proto, m, ip.src, ip.dst, note))
 
 def main(argv):
 	parser = argparse.ArgumentParser(description='Generate malicious ARG traffic in various ways')
@@ -132,9 +134,7 @@ def main(argv):
 	signal.signal(signal.SIGINT, end_traffic)
 	signal.signal(signal.SIGTERM, end_traffic)
 
-	#spam_traffic(2, 17, "172.100.0.1", "172.100.0.1", 23, 45, from_ip_mask="255.255.0.0", payload=randpayload)
-	#spam_traffic(2, 17, "172.100.0.1", "172.100.0.1", 23, 45)
-	sniff_and_replay()
+	sniff_and_replay(delay=1)
 
 	return 0
 
