@@ -818,9 +818,6 @@ function start-arg {
 			echo "$1"ms >> "$f"
 		done
 
-		# Ensure ARP is large enough
-		set-arp-cache
-
 		push-to $GATES - arg conf 
 		run-on $GATES - start-arg $@
 	else
@@ -832,6 +829,9 @@ function start-arg {
 		then
 			rm conf/*gateA*
 		fi
+
+		# Ensure ARP is large enough
+		set-arp-cache
 
 		sudo ./arg "conf/main-`hostname`.conf" >"`hostname`-gate-hr$1ms.log" 2>&1 &
 		disown $!
@@ -1013,6 +1013,9 @@ function setup-gate-env {
 		sudo apt-get -y update
 		sudo apt-get -y dist-upgrade
 		sudo apt-get -y install build-essential autoconf automake libtool libpcap-dev libpolarssl-dev bridge-utils
+
+		# Ensure ARP is large enough. This only works until reboot, but start-arg always calls it as well
+		set-arp-cache
 	fi
 }
 
@@ -1021,10 +1024,12 @@ function setup-gate-env {
 function set-arp-cache {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $GATES - scripts/set_arp_thresh.sh
+		push-to $GATES - 
 		run-on $GATES - set-arp-cache
 	else
-		./set_arp_thresh.sh
+		sudo sysctl -w net.ipv4.neigh.default.gc_thresh3=65536
+		sudo sysctl -w net.ipv4.neigh.default.gc_thresh2=32768 
+		sudo sysctl -w net.ipv4.neigh.default.gc_thresh1=16384
 	fi
 }
 
