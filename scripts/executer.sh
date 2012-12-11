@@ -76,6 +76,18 @@ function start-tests {
 			done
 		done
 	done
+
+	# Run the replay fuzzer against ARG for a while
+	echo Running fuzzer test
+	start-test 9 $runtime 0 100 >/dev/null & 
+	testpid=$!
+	while is-running $testpid
+	do
+		echo -ne "${eraseline}Around $i seconds remaining"
+		sleep 1
+		i=$(($i - 1))
+	done
+	echo -e "${eraseline}Test completed"
 }
 
 # Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
@@ -158,8 +170,13 @@ function stop-test {
 #	3 - TCP Hopper connectivity
 #	4 - Composite connectivity test (all the above)
 #
-#	5 - Flood legitimate
-#	6 - Flood illegitimate
+#	5 - UDP NAT invalid test
+#	6 - TCP NAT invalid test
+#	7 - Composite NAT invalid test
+#
+#	8 - Composite valid and invalid tests
+#
+#	9 - Replay fuzzer test. Replay's ARG packets with random parts changed
 # Usage: start-generators <test num> [<packet rate>]
 function start-generators {
 	if [[ $IS_LOCAL ]]
@@ -292,6 +309,12 @@ function start-generators {
 			start-generators 4 "$packetRate"
 			sleep 1
 			start-generators 7 "$packetRate"
+		elif [[ "$1" == "9" ]]
+		then
+			start-generators 8 "$packetRate"
+			sleep 1
+			start-malicious-generator 
+			# TBD finish this
 		else
 			echo Test number invalid
 			help start-generators
@@ -365,6 +388,20 @@ function start-generator {
 			./gen_traffic.py -t "$type" -p "$port" -h "$host" -d "$delay" $valid >"$filename" 2>&1 &
 			disown $!
 		fi
+	fi
+}
+
+# Starts a replay/replay with alterations generator on the external host
+# Usage: start-malicious-generator
+function start-malicious-generator {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $EXT - scripts/malicious_traffic.py scripts/gen_traffic.py scripts/process_run.py
+		run-on $EXT - start-malicious-generator
+	else
+		filename="`hostname`-malicious.log"
+		sudo ./malicious_traffic.py >"$filename" 2>&1 &
+		disown $!
 	fi
 }
 

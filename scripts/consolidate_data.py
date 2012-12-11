@@ -32,7 +32,8 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 			# Get stats
 			stats = generate_stats(db, begin_time_buffer, end_time_buffer)
 		except Exception as e:
-			print('Found database at {}, but unable to use ({})'.format(db_path, str(e)))
+			print('\nFound database at {}, but unable to use ({})'.format(db_path, str(e)))
+			print('Continuing to get stats...', end='')
 
 			if remove_bad:
 				print('Removing bad database')
