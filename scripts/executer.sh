@@ -49,29 +49,7 @@ function start-tests {
 			do
 				for testnum in {0..8}
 				do
-					echo Running test:
-					echo "  Test: $testnum"
-					echo "  Hop rate: $hr ms"
-					echo "  Packet rate: $packetrate ms"
-					echo "  Latency: $latency ms"
-					echo "  Run time: $runtime s"
-
-					start-test $testnum $runtime $latency $hr $packetrate >/dev/null & 
-					testpid=$!
-					
-					# Wait for it to finish, but give ourselves a bit of extra time
-					# The actual test has a lot of setup and tear-down time
-					i=$(($runtime + 35))
-
-					while is-running $testpid
-					do
-						echo -ne "${eraseline}Around $i seconds remaining"
-						sleep 1
-						i=$(($i - 1))
-					done
-				
-					# Finish the status line
-					echo -e "${eraseline}Test completed"
+					start-silent-test $testnum $runtime $latency $hr $packetrate
 				done
 			done
 		done
@@ -79,14 +57,55 @@ function start-tests {
 
 	# Run the replay fuzzer against ARG for a while
 	echo Running fuzzer test
-	start-test 9 $runtime 0 100 >/dev/null & 
+	start-silent-test 9 $runtime 0 100 >/dev/null & 
+}
+
+# Begins the given test, only displays a pretty view with teh parameters
+# and an approximate countdown
+# Usage: start-silent-test <test num> <time> <latency> <hop rate> [<extra params>...]
+#	extra params - some tests may take additional data. That is given here
+function start-silent-test {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	if [[ "$#" -lt 4 ]]
+	then
+		echo Not enough parameters
+		help start-silent-test
+		return
+	fi
+
+	testnum=$1
+	runtime=$2
+	latency=$3
+	hr=$4
+	shift 4
+
+	echo Running test:
+	echo "  Test: $testnum"
+	echo "  Hop rate: $hr ms"
+	echo "  Packet rate: $packetrate ms"
+	echo "  Latency: $latency ms"
+	echo "  Run time: $runtime s"
+
+	start-test $testnum $runtime $latency $hr "$@" >/dev/null & 
 	testpid=$!
+	
+	# Wait for it to finish, but give ourselves a bit of extra time
+	# The actual test has a lot of setup and tear-down time
+	i=$(($runtime + 40))
+
 	while is-running $testpid
 	do
 		echo -ne "${eraseline}Around $i seconds remaining"
 		sleep 1
 		i=$(($i - 1))
 	done
+
+	# Finish the status line
 	echo -e "${eraseline}Test completed"
 }
 
