@@ -32,6 +32,11 @@ function start-tests {
 		runtime=$1
 	fi
 
+	defaultlatency=10
+	defaulttest=8
+	defaultrate=.2
+	defaulthr=500
+
 	# Ensure we have the newest build
 	if ! run-make
 	then
@@ -39,25 +44,39 @@ function start-tests {
 		return
 	fi
 
-	# Do every combination of hop rate (hr), latency, and test
-	# First one is no hopping as a consequence of the hop taking the full test length + some
+	# Basic tests, proving individual components work
+	for hr in 500 50
+	do
+		for testnum in {0..8}
+		do
+			start-silent-test $testnum $runtime $defaultlatency $hr $defaultrate
+		done
+	done
+
+	# Determine the max packet rate the gates can handle
+	for packetrate in 1 .5 .2 .1 .05 .01 .005 .001
+	do
+		for hr in 500 50 
+		do
+			start-silent-test $defaulttest $runtime $defaultlatency $hr $packetrate
+		done
+	done
+
+	# Max hop rate with various latencies
 	for latency in 0 30 100 500
 	do
-		for packetrate in 1 .5 .2 .1 .05 .01
+		for hr in 1000 100 50 15 10 5 
 		do
-			for hr in 1000 100 50 $(($runtime * 1000 + 60000)) 15 5 
-			do
-				for testnum in {0..8}
-				do
-					start-silent-test $testnum $runtime $latency $hr $packetrate
-				done
-			done
+			start-silent-test $defaulttest $runtime $latency $hr $defaultrate
 		done
 	done
 
 	# Run the replay fuzzer against ARG for a while
-	echo Running fuzzer test
-	start-silent-test 9 $runtime 0 100 >/dev/null & 
+	echo Running fuzzer tests
+	for hr in 1000 500 50 15 
+	do
+		start-silent-test 9 $runtime $defaultlatency $hr $defaultrate 
+	done
 }
 
 # Begins the given test, only displays a pretty view with teh parameters
@@ -87,9 +106,9 @@ function start-silent-test {
 	echo Running test:
 	echo "  Test: $testnum"
 	echo "  Hop rate: $hr ms"
-	echo "  Packet rate: $packetrate ms"
 	echo "  Latency: $latency ms"
 	echo "  Run time: $runtime s"
+	echo "  Additional params: $@"
 
 	start-test $testnum $runtime $latency $hr "$@" >/dev/null & 
 	testpid=$!
