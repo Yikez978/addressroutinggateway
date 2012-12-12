@@ -920,7 +920,7 @@ def record_gate_traffic_log(db, name, log):
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(out_dip)
-			dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
+			dest_id = get_system(db, ip=dest_ip)
 			true_dest_id = None
 
 			full_hash = out_full_hash
@@ -1094,19 +1094,24 @@ def complete_packet_intentions(db):
 	# find data to fill it in
 	print('Finalizing true packet intentions')
 
+	# Get packets missing data
 	missing = db.cursor()
 	missing.execute('''SELECT id, true_src_id, true_dest_id
 						FROM packets
 						WHERE truth_failed=0
 							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
 
+	c = db.cursor()
+
+	# Caches
+	truth_data = list()
+	failed_data = list()
 
 	count = 0
 	for row in missing:
 		packet_id = row[0]
 		
 		# Find the beginning of this trace
-		c = db.cursor()
 		curr_id = packet_id
 		while True:
 			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
@@ -1147,18 +1152,20 @@ def complete_packet_intentions(db):
 
 		# Fix what we can
 		if src_found or dest_found:
-			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+			truth_data.append((true_src_id, true_dest_id, packet_id))
 		else:
-			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
-
-		db.commit()
-		c.close()
+			failed_data.append((packet_id,))
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tFinalizing packet {}'.format(count))
 	
+	# Update the database
+	c.execute('BEGIN TRANSACTION')
+	c.executemany('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', truth_data)
+	c.executemany('UPDATE packets SET truth_failed=1 WHERE id=?', failed_data)
 	db.commit()
+	c.close()
 	missing.close()
 
 	if count > 0:
@@ -1185,7 +1192,6 @@ def locate_trace_terminations(db):
 	curr_packet = len(unterminated_packets)
 
 	count = 0
-
 	while True:
 		if curr_packet >= len(unterminated_packets):
 			print('\tGrabbing packets that need processing')
@@ -1219,8 +1225,6 @@ def locate_trace_terminations(db):
 		count += 1
 		if count % 1000 == 0:
 			print('\tTerminated {} packets of {}'.format(count, total_count))
-			db.commit()
-			c.execute('BEGIN TRANSACTION')
 
 	db.commit()
 	c.close()
