@@ -8,12 +8,12 @@ import sys
 import time
 import os
 import os.path
-import sqlite3
 import argparse
 import re
 import pcap
 import scapy.all
 import hashlib
+import psycopg2
 from glob import glob
 
 IP_REGEX='''(?:\d{1,3}\.){3}\d{1,3}'''
@@ -74,35 +74,38 @@ def create_schema(db):
 	c = db.cursor()	
 	c.execute('DROP TABLE IF EXISTS systems')
 	c.execute('''CREATE TABLE systems (
-						id INTEGER, name VARCHAR(25), ip INT, base_ip INT, mask INT,
-						PRIMARY KEY(id ASC))''')
+						id SERIAL PRIMARY KEY,
+						name VARCHAR(25),
+						ip BIGINT,
+						base_ip BIGINT,
+						mask BIGINT)''')
 	
 	c.execute('DROP TABLE IF EXISTS reasons')
-	c.execute('''CREATE TABLE reasons (id INTEGER, msg VARCHAR(255),
-						PRIMARY KEY(id ASC))''')
+	c.execute('''CREATE TABLE reasons (
+						id SERIAL PRIMARY KEY,
+						msg VARCHAR(255))''')
 	
 	c.execute('DROP TABLE IF EXISTS settings')
-	c.execute('''CREATE TABLE IF NOT EXISTS settings (
-						id INTEGER,
-						name VARCHAR(20),
-						value VARCHAR(20),
-						PRIMARY KEY (id ASC))''')
+	c.execute('''CREATE TABLE settings (
+						id SERIAL PRIMARY KEY,
+						name VARCHAR(30),
+						value VARCHAR(50))''')
 
 	c.execute('DROP TABLE IF EXISTS packets')
-	c.execute('''CREATE TABLE IF NOT EXISTS packets (
-						id INTEGER,
-						system_id INTEGER,
+	c.execute('''CREATE TABLE packets (
+						id SERIAL PRIMARY KEY,
+						system_id INT,
 						log_line INT,
 						pcap_log_line INT,
-						time DOUBLE,
-						is_send TINYINT DEFAULT NULL,
-						is_valid TINYINT DEFAULT 1,
-						proto SHORTINT,
-						syn TINYINT,
-						ack TINYINT,
+						time REAL,
+						is_send BOOLEAN DEFAULT NULL,
+						is_valid BOOLEAN DEFAULT TRUE,
+						proto INT,
+						syn BOOLEAN,
+						ack BOOLEAN,
 						len INT,
-						src_ip INT,
-						dest_ip INT,
+						src_ip BIGINT,
+						dest_ip BIGINT,
 						src_id INT,
 						dest_id INT,
 						true_src_id INT,
@@ -111,21 +114,15 @@ def create_schema(db):
 						partial_hash CHARACTER(32),
 						next_hop_id INT DEFAULT NULL,
 						terminal_hop_id INT DEFAULT NULL,
-						trace_failed TINYINT DEFAULT 0,
-						truth_failed TINYINT DEFAULT 0,
-						reason_id INT,
-						PRIMARY KEY (id ASC))''')
+						trace_failed BOOLEAN DEFAULT FALSE,
+						truth_failed BOOLEAN DEFAULT FALSE,
+						reason_id INT)''')
 
 	# After much experimentation, this combination of indexes proves effective. While
 	# insert speeds are not impacted much by adding more indexes, the packet tracer updates
 	# next_hop_id and trace_failed so often that having them indexed actually hurts things
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_full_hash ON packets (full_hash)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_partial_hash ON packets (partial_hash)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_system_id ON packets (system_id)''')
-	#c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
-	#c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	
+	db.commit()
 	c.close()
 
 def check_schema(db):
@@ -140,7 +137,7 @@ def check_schema(db):
 			valid_db = False
 
 		c.close()
-	except sqlite3.OperationalError as e:
+	except Exception as e:
 		valid_db = False
 
 	return valid_db
@@ -153,12 +150,16 @@ def add_reason(db, reason):
 		return id
 	
 	c = db.cursor()
-	c.execute('INSERT INTO reasons (msg) VALUES (?)', (reason,))
-	return c.lastrowid
+	c.execute('INSERT INTO reasons (msg) VALUES (%s)', (reason,))
+	id = c.lastrowid
+	db.commit()
+	c.close()
+
+	return id
 
 def get_reason(db, reason):
 	c = db.cursor()
-	c.execute('SELECT id FROM reasons WHERE msg=?', (reason,))
+	c.execute('SELECT id FROM reasons WHERE msg=%s', (reason,))
 	r = c.fetchone()
 	if r is not None:
 		return r[0]
@@ -171,6 +172,7 @@ def read_all_settings(db, logdir):
 	# Clean slate
 	c = db.cursor()
 	c.execute('DELETE FROM settings')
+	db.commit()
 	c.close()
 
 	print('Reading in run settings')
@@ -227,14 +229,16 @@ def read_all_settings(db, logdir):
 def add_setting(db, name, value):
 	c = db.cursor()
 	try:
-		c.execute('INSERT INTO settings (name, value) VALUES (?, ?)', (name, str(value)))
-	except sqlite3.IntegrityError:
-		c.execute('UPDATE settings SET value=? WHERE name=?', (str(value), name))
+		c.execute('INSERT INTO settings (name, value) VALUES (%s, %s)', (name, str(value)))
+	except Exception as e:
+		raise
+		c.execute('UPDATE settings SET value=%s WHERE name=%s', (str(value), name))
+	db.commit()
 	c.close()
 
 def get_setting(db, name):
 	c = db.cursor()
-	c.execute('SELECT id, value FROM settings WHERE name=?', (name,))
+	c.execute('SELECT id, value FROM settings WHERE name=%s', (name,))
 	result = c.fetchall()
 	c.close()
 	if result:
@@ -379,12 +383,16 @@ def add_system(db, name, ip, ext_base=None, ext_mask=None):
 	# Actually add
 	c = db.cursor()
 	if not ext_base:
-		c.execute('INSERT INTO systems (name, ip) VALUES (?, ?)', (name, ip))
+		c.execute('INSERT INTO systems (name, ip) VALUES (%s, %s)', (name, ip))
 		return c.lastrowid
 	else:
-		c.execute('INSERT INTO systems (name, ip, base_ip, mask) VALUES (?, ?, ?, ?)',
+		c.execute('INSERT INTO systems (name, ip, base_ip, mask) VALUES (%s, %s, %s, %s)',
 			(name, ip, ext_base, ext_mask))
-		return c.lastrowid
+	
+	id = c.lastrowid
+	db.commit()
+	c.close()
+	return id
 
 def check_systems(db):
 	# Ensures that none of the assumptions regarding system naming are violated
@@ -436,7 +444,7 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 	# If prefer_gate is True, matches against ONLY the base_ip/mask, not ip
 	if name is not None:
 		c = db.cursor()
-		c.execute('SELECT id FROM systems WHERE name=?', (name,))
+		c.execute('SELECT id FROM systems WHERE name=%s', (name,))
 		r = c.fetchone()
 		c.close()
 
@@ -453,9 +461,9 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 		c = db.cursor()
 		c.execute('''SELECT id, ip, name
 						FROM systems
-						WHERE ip=? OR (mask & ? = mask & base_ip)
+						WHERE ip=%s OR (mask & %s = mask & base_ip)
 						ORDER BY base_ip {}
-						LIMIT 1'''.format('DESC' if prefer_gate else 'ASC'), (ip, ip))
+						LIMIT 1'''.format('ASC' if prefer_gate else 'DESC'), (ip, ip))
 		row = c.fetchone()
 		c.close()
 
@@ -466,7 +474,7 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 
 	elif id is not None:
 		c = db.cursor()
-		c.execute('SELECT id, ip, name FROM systems WHERE id=?', (id,))
+		c.execute('SELECT id, ip, name FROM systems WHERE id=%s', (id,))
 		r = c.fetchone()
 		c.close()
 
@@ -478,7 +486,7 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 def get_gates(db):
 	# Returns the IDs of all the gates in the database
 	c = db.cursor()
-	c.execute('SELECT id FROM systems WHERE name LIKE "gate%"')
+	c.execute("SELECT id FROM systems WHERE name LIKE 'gate%'")
 	ids = c.fetchall()
 	c.close()
 	return [x[0] for x in ids]
@@ -634,7 +642,7 @@ def record_traffic_pcap(db, logdir):
 								is_send, proto, syn, ack, len,
 								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+							VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
 							(system_id, time, pcap_count,
 								is_send, ip_layer.proto, syn, ack, len(packet),
 								src_ip, dest_ip, src_id, dest_id,
@@ -760,19 +768,19 @@ def record_client_traffic_log(db, name, log):
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
 		c.execute('''SELECT id FROM packets 
-						WHERE system_id=?
-							AND src_id=?
-							AND dest_id=?
+						WHERE system_id=%s
+							AND src_id=%s
+							AND dest_id=%s
 							AND log_line IS NULL
-							AND partial_hash=?
+							AND partial_hash=%s
 						ORDER BY id
 						LIMIT 1''',
 						(system_id, src_id, dest_id, partial_hash))
 		packet_id = c.fetchone()
 		if packet_id is not None:
-			c.execute('''UPDATE packets SET is_valid=?,
-								true_src_id=?, true_dest_id=?, log_line=?
-							WHERE id=?''',
+			c.execute('''UPDATE packets SET is_valid=%s,
+								true_src_id=%s, true_dest_id=%s, log_line=%s
+							WHERE id=%s''',
 							(is_valid, true_src_id, true_dest_id, log_line_num,
 								packet_id[0]))
 		else:
@@ -859,19 +867,19 @@ def record_gate_traffic_log(db, name, log):
 						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))
 
 			c.execute('''SELECT id FROM packets
-							WHERE system_id=?
-								AND src_id=?
-								AND dest_id=?
+							WHERE system_id=%s
+								AND src_id=%s
+								AND dest_id=%s
 								AND log_line IS NULL
-								AND full_hash=?
+								AND full_hash=%s
 							ORDER BY id
 							LIMIT 1''',
 							(system_id, src_id, dest_id, full_hash))
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
-								true_src_id=?, true_dest_id=? WHERE id=?''',
+				c.execute('''UPDATE packets SET log_line=%s, reason_id=%s,
+								true_src_id=%s, true_dest_id=%s WHERE id=%s''',
 								(log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									in_packet_id))
@@ -916,16 +924,16 @@ def record_gate_traffic_log(db, name, log):
 					true_dest_id = dest_id
 
 			c.execute('''SELECT id FROM packets
-							WHERE system_id=?
+							WHERE system_id=%s
 								AND log_line IS NULL
-								AND full_hash=?
+								AND full_hash=%s
 							ORDER BY id
 							LIMIT 1''', (system_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
-								true_src_id=?, true_dest_id=? WHERE id=?''',
+				c.execute('''UPDATE packets SET log_line=%s, reason_id=%s,
+								true_src_id=%s, true_dest_id=%s WHERE id=%s''',
 								(log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									out_packet_id))
@@ -936,7 +944,7 @@ def record_gate_traffic_log(db, name, log):
 
 		# If this was a transformation/a send in response to a receive, record the linkage
 		if in_packet_id is not None and out_packet_id is not None:
-			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
+			c.execute('UPDATE packets SET next_hop_id=%s WHERE id=%s', (out_packet_id, in_packet_id))
 
 		if module == 'Admin':
 			admin_count += 1
@@ -963,7 +971,7 @@ def trace_packets(db):
 	c = db.cursor()
 	c.execute('BEGIN TRANSACTION')
 	
-	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+	c.execute('SELECT count(*) FROM packets WHERE is_send=TRUE AND next_hop_id IS NULL')
 	total_count = c.fetchone()[0]
 
 	hopless_packets = list()
@@ -977,10 +985,10 @@ def trace_packets(db):
 			print('\tGrabbing packets that need processing')
 			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto
 							FROM packets
-							WHERE is_send=1
-								AND trace_failed=0
+							WHERE is_send=TRUE
+								AND trace_failed=FALSE
 								AND next_hop_id IS NULL
-							LIMIT ?''', (ROW_CACHE_SIZE,))
+							LIMIT %s''', (ROW_CACHE_SIZE,))
 			hopless_packets = c.fetchall()
 			curr_packet = 0
 
@@ -998,14 +1006,14 @@ def trace_packets(db):
 		c.execute('''SELECT p1.id, p1.next_hop_id, p1.system_id
 						FROM packets AS p1
 						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
-						WHERE p1.is_send=0						-- Looking for receives
+						WHERE p1.is_send=FALSE					-- Looking for receives
 							AND p2.next_hop_id IS NULL			-- Can't be matched already
-							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
-							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
-							AND p1.proto=?
-							AND p1.full_hash=?
-							AND NOT p1.id=?						-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
-							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
+							AND NOT p1.system_id=%s				-- Shouldn't be on the same system as the send
+							AND p1.src_id=%s AND p1.dest_id=%s	-- Make sure packet matches
+							AND p1.proto=%s
+							AND p1.full_hash=%s
+							AND NOT p1.id=%s					-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
+							AND p1.time BETWEEN %s AND %s		-- Time should be similar to send
 						ORDER BY p1.time ASC					-- Match earlier packets first
 						LIMIT 1''',
 						(system_id,
@@ -1018,12 +1026,12 @@ def trace_packets(db):
 			raise Exception('Problem! The pcap processor did not determine the source and destination of a packet it saw (specifically, packet {})'.format(packet_id))
 		
 		if len(receives) == 1:
-			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
+			c.execute('UPDATE packets SET next_hop_id=%s WHERE id=%s', (receives[0][0], packet_id))
 
 		else:
 			# No matches found. We'll figure this one out later
 			#print('Unable to locate corresponding receive for packet {}'.format(packet_id))
-			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
+			c.execute('UPDATE packets SET trace_failed=TRUE WHERE id=%s', (packet_id,))
 			failed_count += 1
 
 		count += 1
@@ -1032,9 +1040,6 @@ def trace_packets(db):
 			start_time = time.time()
 			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
 				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
-
-			db.commit()
-			c.execute('BEGIN TRANSACTION')
 
 	db.commit()
 
@@ -1045,7 +1050,11 @@ def trace_packets(db):
 
 	# Add next_hop_id index now that all the data is ready
 	print('Creating index for routing data')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
+	c.execute('''CREATE INDEX idx_next_id ON packets (next_hop_id)''')
+	c.execute('''CREATE INDEX idx_full_hash ON packets (full_hash)''')
+	c.execute('''CREATE INDEX idx_partial_hash ON packets (partial_hash)''')
+	c.execute('''CREATE INDEX idx_system_id ON packets (system_id)''')
+	c.execute('''CREATE INDEX idx_src_dest ON packets (src_id, dest_id)''')
 	
 	db.commit()
 	c.close()
@@ -1059,19 +1068,19 @@ def complete_packet_intentions(db):
 	missing = db.cursor()
 	missing.execute('''SELECT id, true_src_id, true_dest_id
 						FROM packets
-						WHERE truth_failed=0
+						WHERE truth_failed=FALSE
 							AND (true_src_id IS NULL OR true_dest_id IS NULL)''')
 
+	c = db.cursor()
 
 	count = 0
 	for row in missing:
 		packet_id = row[0]
 		
 		# Find the beginning of this trace
-		c = db.cursor()
 		curr_id = packet_id
 		while True:
-			c.execute('SELECT id FROM packets WHERE next_hop_id=?', (curr_id,))
+			c.execute('SELECT id FROM packets WHERE next_hop_id=%s', (curr_id,))
 			prev_id = c.fetchone()
 			if prev_id is None:
 				break
@@ -1088,7 +1097,7 @@ def complete_packet_intentions(db):
 		while curr_id is not None and (true_src_id is None or true_dest_id is None):
 			c.execute('''SELECT next_hop_id, true_src_id, true_dest_id 
 							FROM packets
-							WHERE id=?''', (curr_id,))
+							WHERE id=%s''', (curr_id,))
 			next_id, src, dest = c.fetchone()
 			
 			if src is not None:
@@ -1109,18 +1118,16 @@ def complete_packet_intentions(db):
 
 		# Fix what we can
 		if src_found or dest_found:
-			c.execute('UPDATE packets SET true_src_id=?, true_dest_id=? WHERE id=?', (true_src_id, true_dest_id, packet_id))
+			c.execute('UPDATE packets SET true_src_id=%s, true_dest_id=%s WHERE id=%s', (true_src_id, true_dest_id, packet_id))
 		else:
-			c.execute('UPDATE packets SET truth_failed=1 WHERE id=?', (packet_id,))
-
-		db.commit()
-		c.close()
+			c.execute('UPDATE packets SET truth_failed=TRUE WHERE id=%s', (packet_id,))
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tFinalizing packet {}'.format(count))
 	
 	db.commit()
+	c.close()
 	missing.close()
 
 	if count > 0:
@@ -1155,7 +1162,7 @@ def locate_trace_terminations(db):
 									WHERE next_hop_id IS NOT NULL
 										AND terminal_hop_id IS NULL
 									ORDER BY id DESC
-									LIMIT ?''', (ROW_CACHE_SIZE,))
+									LIMIT %s''', (ROW_CACHE_SIZE,))
 			unterminated_packets = c.fetchall()
 			curr_packet = 0
 
@@ -1168,11 +1175,11 @@ def locate_trace_terminations(db):
 
 		# Loop forward until we find a packet that has terminal_hop_id set
 		while True:
-			c.execute('''SELECT next_hop_id, terminal_hop_id FROM packets WHERE id=?''', (next_hop,))
+			c.execute('''SELECT next_hop_id, terminal_hop_id FROM packets WHERE id=%s''', (next_hop,))
 			next_hop, next_terminal = c.fetchone()
 
 			if next_terminal is not None:
-				c.execute('''UPDATE packets SET terminal_hop_id=? WHERE id=?''', (next_terminal, curr_id))
+				c.execute('''UPDATE packets SET terminal_hop_id=%s WHERE id=%s''', (next_terminal, curr_id))
 				break
 			elif next_hop is None:
 				raise Exception('Reached end of trace without finding terminal packet. This should not be possible')
@@ -1181,8 +1188,6 @@ def locate_trace_terminations(db):
 		count += 1
 		if count % 1000 == 0:
 			print('\tTerminated {} packets of {}'.format(count, total_count))
-			db.commit()
-			c.execute('BEGIN TRANSACTION')
 
 	db.commit()
 	c.close()
@@ -1212,7 +1217,7 @@ def check_trace(db, packet_id, cycle_limit=10):
 
 	cycles = 0
 	while curr_id is not None and cycles < cycle_limit:
-		c.execute('''SELECT next_hop_id FROM packets WHERE id=?''', (curr_id,))
+		c.execute('''SELECT next_hop_id FROM packets WHERE id=%s''', (curr_id,))
 		row = c.fetchone()
 		if row is None:
 			break
@@ -1234,7 +1239,7 @@ def show_trace(db, packet_id, cycle_limit=10):
 
 	cycles = 0
 	while curr_id is not None and cycles < cycle_limit:
-		c.execute('''SELECT is_send, full_hash, next_hop_id FROM packets WHERE id=?''', (curr_id,))
+		c.execute('''SELECT is_send, full_hash, next_hop_id FROM packets WHERE id=%s''', (curr_id,))
 		row = c.fetchone()
 		if row is None:
 			break
@@ -1265,11 +1270,10 @@ def show_trace(db, packet_id, cycle_limit=10):
 
 def for_all_traces(db, callback):
 	c = db.cursor()
-	c.execute('''SELECT l.id, r.next_hop_id AS rhop
-						FROM packets AS l
-						LEFT OUTER JOIN packets AS r ON l.id = r.next_hop_id
-					WHERE l.is_send=1
-						AND rhop IS NULL ''')
+	c.execute('''SELECT l.id FROM packets AS l
+					LEFT OUTER JOIN packets AS r ON l.id = r.next_hop_id
+					WHERE l.is_send=TRUE
+						AND r.next_hop_id IS NULL''')
 	failures = list()
 	for row in c:
 		if not callback(db, row[0]):
@@ -1317,7 +1321,7 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['time.total'] = abs_end_time - abs_begin_time
 
 	# Total packets
-	c.execute('''SELECT count(*) FROM packets WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+	c.execute('''SELECT count(*) FROM packets WHERE time BETWEEN %s AND %s''', (abs_begin_time, abs_end_time))
 	stats['total.packets'] = c.fetchone()[0]
 
 	# Packet rate gates were handling
@@ -1327,7 +1331,7 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 
 	# Trace problems
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
-					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+					WHERE time BETWEEN %s AND %s''', (abs_begin_time, abs_end_time))
 	failed_trace_count, failed_truth_count = c.fetchone()
 	stats['failed.traces'] = failed_trace_count
 	stats['failed.truth'] = failed_truth_count
@@ -1404,19 +1408,19 @@ def get_packet_losses(db, begin, end, valid=True):
 						JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
 						LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
 						JOIN systems ON p2.system_id=systems.id
-					WHERE p1.is_send=1
+					WHERE p1.is_send=TRUE
 						AND p1.log_line IS NOT NULL
-						AND p1.is_valid=?
+						AND p1.is_valid=%s
 						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
-						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))
+						AND p1.time BETWEEN %s AND %s''', (valid, begin, end))
 	losses = c.fetchall()
 
 	# How many packets were sent total?
 	c.execute('''SELECT count(*) FROM packets AS p1 
-					WHERE p1.is_send=1
+					WHERE p1.is_send=TRUE
 						AND p1.log_line IS NOT NULL
-						AND p1.is_valid=?
-						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))	
+						AND p1.is_valid=%s
+						AND p1.time BETWEEN %s AND %s''', (valid, begin, end))	
 	send_count = c.fetchone()[0]
 	recv_count = send_count - len(losses)
 
@@ -1485,9 +1489,9 @@ def avg_latency(db, begin, end):
 					JOIN systems ON p1.system_id=systems.id
 					WHERE name NOT LIKE 'gate%'
 						AND p1.true_dest_id=p2.system_id
-						AND p1.is_send=1
-						AND p1.is_valid=1
-						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+						AND p1.is_send=TRUE
+						AND p1.is_valid=TRUE
+						AND p1.time BETWEEN %s AND %s''', (begin, end))	
 	overall = c.fetchone()[0]
 	if overall is None:
 		overall = 0
@@ -1500,9 +1504,9 @@ def avg_latency(db, begin, end):
 					WHERE name NOT LIKE 'gate%'
 						AND reasons.msg LIKE '%rewrite'
 						AND p1.true_dest_id=p2.system_id
-						AND p1.is_send=1
-						AND p1.is_valid=1
-						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+						AND p1.is_send=TRUE
+						AND p1.is_valid=TRUE
+						AND p1.time BETWEEN %s AND %s''', (begin, end))	
 	nat = c.fetchone()[0]
 	if nat is None:
 		nat = 0
@@ -1515,9 +1519,9 @@ def avg_latency(db, begin, end):
 					WHERE name NOT LIKE 'gate%'
 						AND reasons.msg LIKE '%wrapped'
 						AND p1.true_dest_id=p2.system_id
-						AND p1.is_send=1
-						AND p1.is_valid=1
-						AND p1.time BETWEEN ? AND ?''', (begin, end))	
+						AND p1.is_send=TRUE
+						AND p1.is_valid=TRUE
+						AND p1.time BETWEEN %s AND %s''', (begin, end))	
 	hopper = c.fetchone()[0]
 	if hopper is None:
 		hopper = 0
@@ -1529,14 +1533,15 @@ def gate_packets_per_second(db, begin, end):
 	# Determines how many packets per second each gateway handled on average
 	c = db.cursor()
 	rates = {}
-	for gate in get_gates(db):
-		c.execute('''SELECT count(*)/(max(time)-min(time)), name
-						FROM packets
-						JOIN systems ON systems.id=system_id
-						WHERE system_id=? 
-							AND time BETWEEN ? AND ?''', (gate, begin, end))
+	c.execute('''SELECT count(*)/(max(time)-min(time)), name
+					FROM packets
+					JOIN systems ON systems.id=system_id
+					WHERE time BETWEEN %s AND %s
+					GROUP BY name''', (begin, end))
 
-		rate, name = c.fetchone()
+	rows = c.fetchall()
+	for r in rows:
+		rate, name = r
 		rates[name] = rate
 
 	c.close()
@@ -1673,10 +1678,16 @@ def main(argv):
 	# Parse command line
 	parser = argparse.ArgumentParser(description='Process an ARG test network run')
 	parser.add_argument('-l', '--logdir', default='.', help='Directory with pcap and log files from a test')
-	parser.add_argument('-db', '--database', default=':memory:',
-		help='SQLite database to save packet-tracing data to. If it already exists, \
+
+	parser.add_argument('-u', '--user', help='User for database')
+	parser.add_argument('-p', '--password', help='Password for database')
+	parser.add_argument('-db', '--database', default='arg',
+		help='Database to save packet-tracing data to. If it already exists, \
 			we assume it contains trace data. If not given, will be done in memory.')
+	parser.add_argument('--host', default='localhost', help='Database host')
+
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
+
 	parser.add_argument('-t', '--skip-trace', action='store_true', help='Do not ensure tracing is complete')
 	parser.add_argument('--offset', type=int, default=0, help='How many seconds to ignore at beginning AND end of run. Overriden by --start-offset and --end-offset')
 	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
@@ -1692,19 +1703,17 @@ def main(argv):
 
 	# Ensure database is empty
 	# If it is and/or if --empty-database was given, create the schema
-	already_exists = os.path.exists(args.database)
-	if args.empty_database and already_exists:
-		print('Clearing data in the current database')
-		os.unlink(args.database)
-		already_exists = False
+	# TBD
+	already_exists = False
 
 	# Open database and create schema if it doesn't exist already
-	db = sqlite3.connect(args.database)
+	db = psycopg2.connect("dbname='{}' user='{}' host='{}' password='{}'".format(
+		args.database, args.user, args.host, args.password))
 	if not already_exists:
 		try:
 			create_schema(db)
 			do_record = True
-		except sqlite3.OperationalError as e:
+		except Exception as e:
 			print('Unable to create database: ', e)
 			return 1
 	else:
