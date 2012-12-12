@@ -917,10 +917,13 @@ def record_gate_traffic_log(db, name, log):
 
 			c.execute('''SELECT id FROM packets
 							WHERE system_id=?
+								AND src_id=?
+								AND dest_id=?
 								AND log_line IS NULL
 								AND full_hash=?
 							ORDER BY id
-							LIMIT 1''', (system_id, full_hash))
+							LIMIT 1''',
+							(system_id, src_id, dest_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
