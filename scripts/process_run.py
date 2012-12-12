@@ -145,6 +145,16 @@ def check_schema(db):
 
 	return valid_db
 
+def configure_sqlite(db):
+	print('Configuring sqlite for better performance')
+	c = db.cursor()
+	c.execute('PRAGMA journal_mode=memory')
+	c.execute('PRAGMA fullfsync=false')
+	c.execute('PRAGMA synchronous=off')
+	c.execute('PRAGMA temp_store=memory')
+	#c.execute('PRAGMA cache_size=100000')
+	c.close()
+
 ##############################################
 # Manange reasons table
 def add_reason(db, reason):
@@ -488,9 +498,9 @@ def get_gates(db):
 def record_traffic_pcap(db, logdir):
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
-	c.execute('DELETE FROM packets')
 
-	c.execute('BEGIN TRANSACTION')
+	# Cache data here, will insert it later
+	packet_data = list()
 
 	# Go through each log file and record what packets each host sent
 	for logName in glob(os.path.join(logdir, '*.pcap')):
@@ -628,14 +638,9 @@ def record_traffic_pcap(db, logdir):
 						dest_id = system_id
 			else:
 				raise Exception('Not a gate, ext, or prot system. Bad pcap file present')
-
-			# Insert it
-			c.execute('''INSERT INTO packets (system_id, time, pcap_log_line,
-								is_send, proto, syn, ack, len,
-								src_ip, dest_ip, src_id, dest_id,
-								full_hash, partial_hash)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-							(system_id, time, pcap_count,
+			
+			# Will insert data later
+			packet_data.append((system_id, time, pcap_count,
 								is_send, ip_layer.proto, syn, ack, len(packet),
 								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash,))
@@ -645,6 +650,17 @@ def record_traffic_pcap(db, logdir):
 				print('\tProcessed {} packets so far'.format(count))
 
 		print('\t{} total packets processed'.format(count))
+
+	# Insert them all
+	c.execute('DELETE FROM packets')
+	db.commit()
+	c.execute('BEGIN TRANSACTION')
+	c.executemany('''INSERT INTO packets (system_id, time, pcap_log_line,
+						is_send, proto, syn, ack, len,
+						src_ip, dest_ip, src_id, dest_id,
+						full_hash, partial_hash)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+					packet_data)
 
 	db.commit()
 	c.close()
@@ -691,7 +707,7 @@ def record_client_traffic_log(db, name, log):
 
 	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) (valid|invalid) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
-	c.execute('BEGIN TRANSACTION')
+	update_data = list()
 
 	for line in log:
 		log_line_num += 1
@@ -759,30 +775,46 @@ def record_client_traffic_log(db, name, log):
 				gate_name = get_system(db, id=dest_id)[2]
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
 
-		c.execute('''SELECT id FROM packets 
-						WHERE system_id=?
-							AND src_id=?
-							AND dest_id=?
-							AND log_line IS NULL
-							AND partial_hash=?
-						ORDER BY id
-						LIMIT 1''',
-						(system_id, src_id, dest_id, partial_hash))
-		packet_id = c.fetchone()
-		if packet_id is not None:
-			c.execute('''UPDATE packets SET is_valid=?,
-								true_src_id=?, true_dest_id=?, log_line=?
-							WHERE id=?''',
-							(is_valid, true_src_id, true_dest_id, log_line_num,
-								packet_id[0]))
-		else:
-			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
+		# Do it in a single query with caching
+		update_data.append((is_valid, true_src_id, true_dest_id, log_line_num,
+							system_id, src_id, dest_id, partial_hash,))
+		# Separate, error-reporting version
+		#c.execute('''SELECT id FROM packets 
+		#				WHERE system_id=?
+		#					AND src_id=?
+		#					AND dest_id=?
+		#					AND log_line IS NULL
+		#					AND partial_hash=?
+		#				ORDER BY id
+		#				LIMIT 1''',
+		#				(system_id, src_id, dest_id, partial_hash))
+		#packet_id = c.fetchone()
+		#if packet_id is not None:
+		#	c.execute('''UPDATE packets SET is_valid=?,
+		#						true_src_id=?, true_dest_id=?, log_line=?
+		#					WHERE id=?''',
+		#					(is_valid, true_src_id, true_dest_id, log_line_num,
+		#						packet_id[0]))
+		#else:
+		#	print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tProcessed {} packets so far'.format(count))
 
 	print('\t{} total packets processed'.format(count))
+
+	# Update everything
+	c.execute('BEGIN TRANSACTION')
+	c.executemany('''UPDATE packets SET is_valid=?, true_src_id=?, true_dest_id=?, log_line=?
+					WHERE id= (SELECT id FROM packets 
+								WHERE system_id=?
+									AND src_id=?
+									AND dest_id=?
+									AND log_line IS NULL
+									AND partial_hash=?
+								ORDER BY id
+								LIMIT 1)''', update_data)
 	db.commit()
 	c.close()
 
@@ -801,7 +833,9 @@ def record_gate_traffic_log(db, name, log):
 	
 	gate_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
-	c.execute('BEGIN TRANSACTION')
+	# Data caches for updates
+	log_data = list()
+	link_data = list()
 
 	for line in log:
 		log_line_num += 1
@@ -870,9 +904,7 @@ def record_gate_traffic_log(db, name, log):
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
-								true_src_id=?, true_dest_id=? WHERE id=?''',
-								(log_line_num, reason_id,
+				log_data.append((log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									in_packet_id))
 			else:
@@ -888,7 +920,7 @@ def record_gate_traffic_log(db, name, log):
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(out_dip)
-			dest_id = get_system(db, ip=dest_ip)
+			dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
 			true_dest_id = None
 
 			full_hash = out_full_hash
@@ -917,16 +949,16 @@ def record_gate_traffic_log(db, name, log):
 
 			c.execute('''SELECT id FROM packets
 							WHERE system_id=?
+								AND src_id=?
+								AND dest_id=?
 								AND log_line IS NULL
 								AND full_hash=?
 							ORDER BY id
-							LIMIT 1''', (system_id, full_hash))
+							LIMIT 1''', (system_id, src_id, dest_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
-				c.execute('''UPDATE packets SET log_line=?, reason_id=?,
-								true_src_id=?, true_dest_id=? WHERE id=?''',
-								(log_line_num, reason_id,
+				log_data.append((log_line_num, reason_id,
 									true_src_id, true_dest_id,
 									out_packet_id))
 			else:
@@ -936,7 +968,7 @@ def record_gate_traffic_log(db, name, log):
 
 		# If this was a transformation/a send in response to a receive, record the linkage
 		if in_packet_id is not None and out_packet_id is not None:
-			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (out_packet_id, in_packet_id))
+			link_data.append((out_packet_id, in_packet_id))
 
 		if module == 'Admin':
 			admin_count += 1
@@ -950,6 +982,12 @@ def record_gate_traffic_log(db, name, log):
 		
 	print('\t{} total admin packets processed'.format(admin_count - 1))
 	print('\t{} total transforms processed'.format(transform_count - 1))
+	
+	# Do various updates
+	c.execute('BEGIN TRANSACTION')
+	c.executemany('''UPDATE packets SET log_line=?, reason_id=?,
+						true_src_id=?, true_dest_id=? WHERE id=?''', log_data)
+	c.executemany('''UPDATE packets SET next_hop_id=? WHERE id=?''', link_data)
 	db.commit()
 	c.close()
 
@@ -1700,6 +1738,7 @@ def main(argv):
 
 	# Open database and create schema if it doesn't exist already
 	db = sqlite3.connect(args.database)
+	configure_sqlite(db)
 	if not already_exists:
 		try:
 			create_schema(db)
