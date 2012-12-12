@@ -49,6 +49,7 @@ function start-tests {
 	do
 		for testnum in {0..8}
 		do
+			echo Basic tests
 			start-silent-test $testnum $runtime $defaultlatency $hr $defaultrate
 		done
 	done
@@ -58,6 +59,7 @@ function start-tests {
 	do
 		for hr in 500 50 
 		do
+			echo Testing max packet rate
 			start-silent-test $defaulttest $runtime $defaultlatency $hr $packetrate
 		done
 	done
@@ -67,14 +69,15 @@ function start-tests {
 	do
 		for hr in 1000 100 50 15 10 5 
 		do
+			echo Testing max hop rate
 			start-silent-test $defaulttest $runtime $latency $hr $defaultrate
 		done
 	done
 
 	# Run the replay fuzzer against ARG for a while
-	echo Running fuzzer tests
 	for hr in 1000 500 50 15 
 	do
+		echo Running fuzzer tests
 		start-silent-test 9 $runtime $defaultlatency $hr $defaultrate 
 	done
 }
