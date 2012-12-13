@@ -67,7 +67,7 @@ function start-tests {
 	# Max hop rate with various latencies
 	for latency in 0 30 100 500
 	do
-		for hr in 1000 100 50 15 10 5 
+		for hr in 1000 100 50 30 15 10 5 
 		do
 			echo Testing max hop rate
 			start-silent-test $defaulttest $runtime $latency $hr $defaultrate
