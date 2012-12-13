@@ -1764,6 +1764,9 @@ def main(argv):
 	if args.end_offset is None:
 		args.end_offset = args.offset
 
+	# Time processing
+	start_proc_time = time.time()
+
 	# Open database and create schema if it doesn't exist already
 	already_exists = os.path.exists(args.database)
 	db = sqlite3.connect(args.database)
@@ -1806,6 +1809,10 @@ def main(argv):
 
 	complete_packet_intentions(db)
 	locate_trace_terminations(db)
+
+	# End time
+	proc_time = time.time() - start_proc_time
+	print('Processing completed in {} seconds'.format(proc_time))
 
 	# Collect stats
 	if check_schema(db):
