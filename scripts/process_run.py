@@ -143,22 +143,19 @@ def create_schema(db):
 def check_schema(db):
 	valid_db = True
 
-	try:
-		c = db.cursor()
+	c = db.cursor()
 
-		c.execute('SELECT count(*) FROM completed_actions WHERE done=0')
-		num = c.fetchone()[0]
-		if num > 0:
-			valid_db = False
-
-		c.execute('SELECT count(*) FROM packets')
-		num = c.fetchone()[0]
-		if num == 0:
-			valid_db = False
-
-		c.close()
-	except sqlite3.OperationalError as e:
+	c.execute('SELECT count(*) FROM completed_actions WHERE done=0')
+	num = c.fetchone()[0]
+	if num > 0:
 		valid_db = False
+
+	c.execute('SELECT count(*) FROM packets')
+	num = c.fetchone()[0]
+	if num == 0:
+		valid_db = False
+
+	c.close()
 
 	return valid_db
 
@@ -1778,8 +1775,12 @@ def main(argv):
 		except sqlite3.OperationalError as e:
 			print('Unable to create database: ', e)
 			return 1
-	elif not check_schema(db):
-		print('Database exists but is unreadable, recreating')
+	
+	# Ensure all the tables we need are there
+	try:
+		check_schema(db)
+	except sqlite3.OperationalError:
+		print('Database exists but is unreadable. Recreating')
 		create_schema(db)
 
 	# Ensure all the systems and settings are in place before we begin
