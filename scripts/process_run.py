@@ -72,6 +72,8 @@ def create_schema(db):
 	#	- name (text) - Name of the setting
 	#	- value (text) - Value of setting
 	c = db.cursor()	
+	c.execute('BEGIN TRANSACTION')
+
 	c.execute('DROP TABLE IF EXISTS systems')
 	c.execute('''CREATE TABLE systems (
 						id INTEGER, name VARCHAR(25), ip INT, base_ip INT, mask INT,
@@ -129,6 +131,7 @@ def create_schema(db):
 	#c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	
+	db.commit()
 	c.close()
 
 def check_schema(db):
@@ -184,12 +187,15 @@ def add_reason(db, reason):
 	
 	c = db.cursor()
 	c.execute('INSERT INTO reasons (msg) VALUES (?)', (reason,))
-	return c.lastrowid
+	id = c.lastrowid
+	c.close()
+	return id
 
 def get_reason(db, reason):
 	c = db.cursor()
 	c.execute('SELECT id FROM reasons WHERE msg=?', (reason,))
 	r = c.fetchone()
+	c.close()
 	if r is not None:
 		return r[0]
 	else:
@@ -294,7 +300,8 @@ def show_settings(db):
 		c.execute('SELECT name, value FROM settings ORDER BY name ASC')
 		for row in c:
 			print(outstr.format(row[0], row[1]))
-		c.close()
+
+	c.close()
 
 def get_test_number(db):
 	c = db.cursor()
@@ -428,11 +435,13 @@ def add_system(db, name, ip, ext_base=None, ext_mask=None):
 	c = db.cursor()
 	if not ext_base:
 		c.execute('INSERT INTO systems (name, ip) VALUES (?, ?)', (name, ip))
-		return c.lastrowid
+		id = c.lastrowid
 	else:
 		c.execute('INSERT INTO systems (name, ip, base_ip, mask) VALUES (?, ?, ?, ?)',
 			(name, ip, ext_base, ext_mask))
-		return c.lastrowid
+		id = c.lastrowid
+	c.close()
+	return id
 
 def check_systems(db):
 	# Ensures that none of the assumptions regarding system naming are violated
@@ -1600,15 +1609,6 @@ def inet_ntoa_integer(addr):
 		ip = str(addr >> i & 0xFF) + '.' + ip
 	return ip[:-1]
 
-def get_time_limits(db):
-	c = db.cursor()
-	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
-	beg = c.fetchone()[0]
-	c.execute('SELECT time FROM packets ORDER BY time ASC LIMIT 1')
-	end = c.fetchone()[0]
-	c.close()
-	return (beg, end)
-
 def print_raw(string):
 	# Prints the raw bytes of a string in hex
 	curr = 0
@@ -1742,10 +1742,6 @@ def main(argv):
 		except sqlite3.OperationalError as e:
 			print('Unable to create database: ', e)
 			return 1
-	else:
-		# This database already existed before, check the data to ensure it's at least somewhat filled
-		if not check_schema(db):
-			print('Database already existed, but is incomplete\n')
 
 	# Ensure all the systems and settings are in place before we begin
 	read_all_settings(db, args.logdir)
