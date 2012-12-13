@@ -1034,13 +1034,10 @@ def record_gate_traffic_log(db, log_name, name, log):
 
 			c.execute('''SELECT id FROM packets
 							WHERE system_id=?
-								AND src_id=?
-								AND dest_id=?
 								AND log_line IS NULL
 								AND full_hash=?
 							ORDER BY id
-							LIMIT 1''',
-							(system_id, full_hash))
+							LIMIT 1''', (system_id, full_hash))
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
@@ -1827,8 +1824,8 @@ def main(argv):
 	else:
 		print('Database is still invalid, unable to generate stats. Check run data')
 
-	# All done
-	db.commit()
+	# All done. Don't commit here. Either the steps before did what they wanted
+	# and committed or they didn't. Don't push bad stuff
 	db.close()
 
 	return 0
