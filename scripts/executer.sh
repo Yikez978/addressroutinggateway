@@ -181,8 +181,15 @@ function stop-test {
 function start-generators {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $EXT $PROT - scripts/gen_traffic.py scripts/malicious_traffic.py scripts/process_run.py
-		run-on $EXT $PROT - start-generators "$@"
+		if [[ "$1" == "9" ]]
+		then
+			# Malicious generator runs on gates, not external/protected
+			start-malicious-generator 
+			start-generators 8 "$packetRate"
+		else
+			push-to $EXT $PROT - scripts/gen_traffic.py 
+			run-on $EXT $PROT - start-generators "$@"
+		fi
 	else
 		# The basic tests (0-3) all send packets at a fixed rate. What should that rate be?
 		if [[ "$#" == "1" ]]
@@ -309,12 +316,6 @@ function start-generators {
 			start-generators 4 "$packetRate"
 			sleep 1
 			start-generators 7 "$packetRate"
-		elif [[ "$1" == "9" ]]
-		then
-			start-generators 8 "$packetRate"
-			sleep 1
-			start-malicious-generator 
-			# TBD finish this
 		else
 			echo Test number invalid
 			help start-generators
@@ -396,8 +397,8 @@ function start-generator {
 function start-malicious-generator {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $EXT - scripts/malicious_traffic.py scripts/gen_traffic.py scripts/process_run.py
-		run-on $EXT - start-malicious-generator
+		push-to $GATES - scripts/malicious_traffic.py scripts/gen_traffic.py scripts/process_run.py
+		run-on $GATES - start-malicious-generator
 	else
 		filename="`hostname`-malicious.log"
 		sudo ./malicious_traffic.py >"$filename" 2>&1 &

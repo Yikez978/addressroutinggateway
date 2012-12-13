@@ -74,7 +74,10 @@ def create_schema(db):
 	c = db.cursor()	
 	c.execute('DROP TABLE IF EXISTS systems')
 	c.execute('''CREATE TABLE systems (
-						id INTEGER, name VARCHAR(25), ip INT, base_ip INT, mask INT,
+						id INTEGER,
+						name VARCHAR(25),
+						ip INT,
+						mask INT,
 						PRIMARY KEY(id ASC))''')
 	
 	c.execute('DROP TABLE IF EXISTS reasons')
@@ -125,6 +128,9 @@ def create_schema(db):
 	#c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
 	#c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
+
+	# System index. IP and mask are used ALL the time
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_mask ON systems (mask)''')
 	
 	c.close()
 
@@ -334,15 +340,15 @@ def add_gate(db, name, log):
 			if m is None:
 				raise IOError('Found address line, but unable to parse it for {}'.format(name))
 
-			ip = m.group(1)
-			base = m.group(2)
+			int_ip = m.group(1)
+			ext_ip = m.group(2)
 			mask = m.group(3)
 			break
 
-	if ip is None:
+	if ext_ip is None:
 		raise IOError('Unable to find address from log file for {}'.format(name))
 	
-	add_system(db, name, ip, base, mask)
+	add_system(db, name, ext_ip, mask)
 
 def add_client(db, name, log):
 	# Finds the client's IP address and adds it to the database
@@ -362,29 +368,25 @@ def add_client(db, name, log):
 	else:
 		raise IOError('Unable to find IP for {} in log file'.format(name))
 
-def add_system(db, name, ip, ext_base=None, ext_mask=None):
+def add_system(db, name, ip, mask=None):
 	# Add system only if it doesn't already exist. Otherwise, just return the rowid
 	id = get_system(db, name=name)
 	if id is not None:
-		return id
+		return id[0]
 
 	# Convert IPs/mask to decimal
 	if type(ip) is str:
 		ip = inet_aton_integer(ip)
-	if type(ext_base) is str:
-		ext_base = inet_aton_integer(ext_base)
-	if type(ext_mask) is str:
-		ext_mask = inet_aton_integer(ext_mask)
+	if mask is None:
+		mask = 0xFFFFFFFF
+	if type(mask) is str:
+		mask = inet_aton_integer(mask)
 
 	# Actually add
 	c = db.cursor()
-	if not ext_base:
-		c.execute('INSERT INTO systems (name, ip) VALUES (?, ?)', (name, ip))
-		return c.lastrowid
-	else:
-		c.execute('INSERT INTO systems (name, ip, base_ip, mask) VALUES (?, ?, ?, ?)',
-			(name, ip, ext_base, ext_mask))
-		return c.lastrowid
+	c.execute('INSERT INTO systems (name, ip, mask) VALUES (?, ?, ?)',
+		(name, ip, mask))
+	return c.lastrowid
 
 def check_systems(db):
 	# Ensures that none of the assumptions regarding system naming are violated
@@ -432,19 +434,17 @@ def check_systems(db):
 	return True
 
 def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
+
 	# Gets a system ID based on the given name or ip
-	# If prefer_gate is True, matches against ONLY the base_ip/mask, not ip
+	# If prefer_gate is True, gates are returned, even if there is an exact IP match
 	if name is not None:
 		c = db.cursor()
-		c.execute('SELECT id FROM systems WHERE name=?', (name,))
+		c.execute('SELECT id, ip, name FROM systems WHERE name=?', (name,))
 		r = c.fetchone()
 		c.close()
 
-		if r is not None:
-			return r[0]
-		else:
-			return None
-	
+		return r
+
 	elif ip is not None:
 		# Convert IPs/mask to decimal
 		if type(ip) is str:
@@ -453,16 +453,13 @@ def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
 		c = db.cursor()
 		c.execute('''SELECT id, ip, name
 						FROM systems
-						WHERE ip=? OR (mask & ? = mask & base_ip)
-						ORDER BY base_ip {}
-						LIMIT 1'''.format('DESC' if prefer_gate else 'ASC'), (ip, ip))
-		row = c.fetchone()
+						WHERE mask & ? = mask & ip
+						ORDER BY mask {}
+						LIMIT 1'''.format('ASC' if prefer_gate else 'DESC'), (ip,))
+		r = c.fetchone()
 		c.close()
 
-		if row is not None:
-			return row[0]
-		else:
-			return None
+		return r
 
 	elif id is not None:
 		c = db.cursor()
@@ -515,9 +512,9 @@ def record_traffic_pcap(db, logdir):
 			network = name[4]
 
 		if is_gate:
-			prot_client_id = get_system(db, name='prot{}1'.format(network))
+			prot_client_id = get_system(db, name='prot{}1'.format(network))[0]
 		elif is_prot:
-			gate_id = get_system(db, name='gate{}'.format(network))
+			gate_id = get_system(db, name='gate{}'.format(network))[0]
 
 		print('Processing pcap file {} for {}'.format(logName, name))
 		
@@ -525,12 +522,12 @@ def record_traffic_pcap(db, logdir):
 		p.open_offline(logName.encode('utf-8'))
 
 		# Grab the system ID for this log
-		system_id = get_system(db, name=name)
-		if system_id is None:
+		s = get_system(db, name=name)
+		if s is None:
 			print('\tSkipping, this system is not in the database. There were likely no log files')
 			continue
 
-		system_ip = get_system(db, id=system_id)
+		system_id, system_ip, name = s
 
 		pcap_count = 0
 		count = 0
@@ -564,11 +561,11 @@ def record_traffic_pcap(db, logdir):
 			dest_ip = inet_aton_integer(ip_layer.dst)
 
 			if is_gate and not is_inner_log:
-				src_id = get_system(db, ip=src_ip, prefer_gate=True)
-				dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
+				src_id = get_system(db, ip=src_ip, prefer_gate=True)[0]
+				dest_id = get_system(db, ip=dest_ip, prefer_gate=True)[0]
 			else:
-				src_id = get_system(db, ip=src_ip)
-				dest_id = get_system(db, ip=dest_ip)
+				src_id = get_system(db, ip=src_ip)[0]
+				dest_id = get_system(db, ip=dest_ip)[0]
 
 			# Direction? NOTE: is_send may be None, indicating we don't know
 			# We use this to help determine the src_id and dest_id, which are
@@ -589,6 +586,7 @@ def record_traffic_pcap(db, logdir):
 			else:
 				# Unable to tell
 				print('Unable to tell direction of packet with full hash {}, pcap line {}. Discarding'.format(full_hash, pcap_count))
+				print('system_id', system_id, 'src ip', src_ip, 'dest ip', dest_ip, 'src id', src_id, 'dest id', dest_id, 'gate ?', is_gate)
 				continue
 
 			# Determine who the next system to see this packet ACTUALLY should be
@@ -604,9 +602,9 @@ def record_traffic_pcap(db, logdir):
 				# External clients must send their packets through the gate of
 				# the correct network.
 				if is_send == True:
-					dest_id = get_system(db, ip=dest_ip, prefer_gate=True)
+					dest_id = get_system(db, ip=dest_ip, prefer_gate=True)[0]
 				elif is_send == False:
-					src_id = get_system(db, ip=src_ip, prefer_gate=True)
+					src_id = get_system(db, ip=src_ip, prefer_gate=True)[0]
 			elif is_gate:
 				if is_inner_log:
 					if is_send == True:
@@ -673,14 +671,13 @@ def record_traffic_logs(db, logdir):
 				record_client_traffic_log(db, name, log) 
 
 def record_client_traffic_log(db, name, log): 
-	system_id = get_system(db, name=name)
-	system_ip = None
+	system_id, system_ip, name = get_system(db, name=name)
 
 	is_prot = name.startswith('prot')
 	is_ext = name.startswith('ext')
 	if is_prot:
 		network = name[4]
-		gate_id = get_system(db, name='gate'+network)
+		gate_id = get_system(db, name='gate'+network)[0]
 
 	log.seek(0)
 	c = db.cursor()
@@ -712,7 +709,7 @@ def record_client_traffic_log(db, name, log):
 		time = float(time)
 		is_valid = (valid == 'valid')
 		their_ip = inet_aton_integer(their_ip)
-		their_id = get_system(db, ip=their_ip)
+		their_id = get_system(db, ip=their_ip)[0]
 
 		if direction == 'Received':
 			is_send = False
@@ -731,10 +728,8 @@ def record_client_traffic_log(db, name, log):
 			else:
 				# For an external client, a received packet must be coming from the gateway and the
 				# true sender must be the client behind that gate
-				src_id = get_system(db, ip=their_ip, prefer_gate=True)
-
-				gate_name = get_system(db, id=src_id)[2]
-				true_src_id = get_system(db, name='prot{}1'.format(gate_name[4]))
+				src_id, temp, gate_name = get_system(db, ip=their_ip, prefer_gate=True)
+				true_src_id = get_system(db, name='prot{}1'.format(gate_name[4]))[0]
 		else: 
 			is_send = True
 
@@ -754,10 +749,8 @@ def record_client_traffic_log(db, name, log):
 				# we require (for the test) that there's only one of them and we know the 
 				# network they're on, so we can figure it out. The dest of this packet
 				# must be the gate first though.
-				dest_id = get_system(db, ip=their_ip, prefer_gate=True)
-
-				gate_name = get_system(db, id=dest_id)[2]
-				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))
+				dest_id, temp, gate_name = get_system(db, ip=their_ip, prefer_gate=True)
+				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))[0]
 
 		c.execute('''SELECT id FROM packets 
 						WHERE system_id=?
@@ -787,10 +780,9 @@ def record_client_traffic_log(db, name, log):
 	c.close()
 
 def record_gate_traffic_log(db, name, log):
-	system_id = get_system(db, name=name)
-	system_ip = None
+	system_id, system_ip, name = get_system(db, name=name)
 	network = name[4]
-	prot_id = get_system(db, name='prot{}1'.format(network))
+	prot_id = get_system(db, name='prot{}1'.format(network))[0]
 
 	log.seek(0)
 	c = db.cursor()
@@ -828,7 +820,7 @@ def record_gate_traffic_log(db, name, log):
 			is_send = False
 
 			src_ip = inet_aton_integer(in_sip)
-			src_id = get_system(db, ip=src_ip)
+			src_id = get_system(db, ip=src_ip)[0]
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(in_dip)
@@ -841,7 +833,7 @@ def record_gate_traffic_log(db, name, log):
 				# For an outbound receive, this packet must have come from a protected client
 				# We therefore know the real destination and source. Easy!
 				true_src_id = src_id
-				true_dest_id = get_system(db, ip=dest_ip)
+				true_dest_id = get_system(db, ip=dest_ip)[0]
 			else:
 				# For an inbound receive, the packet may have come from either an external
 				# client or the other gateway. For the other gateway, we know the it could be an
@@ -855,8 +847,8 @@ def record_gate_traffic_log(db, name, log):
 					true_dest_id = system_id
 				else:
 					if out_sip is not None:
-						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))
-						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))
+						true_src_id = get_system(db, ip=inet_aton_integer(out_sip))[0]
+						true_dest_id = get_system(db, ip=inet_aton_integer(out_dip))[0]
 
 			c.execute('''SELECT id FROM packets
 							WHERE system_id=?
@@ -888,7 +880,7 @@ def record_gate_traffic_log(db, name, log):
 			true_src_id = None
 
 			dest_ip = inet_aton_integer(out_dip)
-			dest_id = get_system(db, ip=dest_ip)
+			dest_id = get_system(db, ip=dest_ip)[0]
 			true_dest_id = None
 
 			full_hash = out_full_hash
@@ -903,8 +895,8 @@ def record_gate_traffic_log(db, name, log):
 					# True source and destination can be deduced through what we
 					# received, as that prompted this send
 					if in_sip is not None:
-						true_src_id = get_system(db, ip=inet_aton_integer(in_sip))
-						true_dest_id = get_system(db, ip=inet_aton_integer(in_dip))
+						true_src_id = get_system(db, ip=inet_aton_integer(in_sip))[0]
+						true_dest_id = get_system(db, ip=inet_aton_integer(in_dip))[0]
 
 			else:
 				if module == 'Admin':
@@ -912,7 +904,7 @@ def record_gate_traffic_log(db, name, log):
 					true_dest_id = dest_id
 
 				else:
-					true_src_id = get_system(db, ip=src_ip)
+					true_src_id = get_system(db, ip=src_ip)[0]
 					true_dest_id = dest_id
 
 			c.execute('''SELECT id FROM packets
