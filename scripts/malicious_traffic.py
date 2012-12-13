@@ -41,6 +41,7 @@ def alter_and_replay_packet(pkt, alteration=None, delay=None):
 		return
 
 	# Hardcode some stuff, I don't care
+	delay = .5
 	mask = inet_aton_integer("255.255.0.0")
 
 	# How (if) should we alter the packet?
@@ -132,6 +133,7 @@ def log_recv(pkt):
 	log('Received {}:{} from {} to {}'.format(ip.proto, m, ip.src, ip.dst))
 
 def end_traffic(sig, stack):
+	log('User requested we stop')
 	sys.exit()
 
 def main(argv):

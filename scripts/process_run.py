@@ -229,10 +229,11 @@ def read_all_settings(db, logdir):
 
 	# Latency and test number comes from folder name
 	dirname = os.path.basename(os.path.realpath(logdir))
-	m = re.search('''-t([0-9]+)-l([0-9a-zA-Z]+)-''', dirname)
+	m = re.search('''^([0-9a-z]+)-t([0-9]+)-l([0-9a-zA-Z]+)-''', dirname)
 	if m is not None:
-		add_setting(db, 'Test', m.group(1))
-		add_setting(db, 'Latency', m.group(2))
+		add_setting(db, 'Label', m.group(1))
+		add_setting(db, 'Test', m.group(2))
+		add_setting(db, 'Latency', m.group(3))
 	else:
 		add_setting(db, 'Latency', 'unknown')
 

@@ -32,7 +32,7 @@ function start-tests {
 		runtime=$1
 	fi
 
-	defaultlatency=10
+	defaultlatency=20
 	defaulttest=8
 	defaultrate=.2
 	defaulthr=500
@@ -50,7 +50,7 @@ function start-tests {
 		for testnum in {0..8}
 		do
 			echo Basic tests
-			start-silent-test $testnum $runtime $defaultlatency $hr $defaultrate
+			start-silent-test "basic" $testnum $runtime $defaultlatency $hr $defaultrate
 		done
 	done
 
@@ -60,7 +60,7 @@ function start-tests {
 		for hr in 500 50 
 		do
 			echo Testing max packet rate
-			start-silent-test $defaulttest $runtime $defaultlatency $hr $packetrate
+			start-silent-test "packetrate" $defaulttest $runtime $defaultlatency $hr $packetrate
 		done
 	done
 
@@ -70,7 +70,7 @@ function start-tests {
 		for hr in 1000 100 50 30 15 10 5 
 		do
 			echo Testing max hop rate
-			start-silent-test $defaulttest $runtime $latency $hr $defaultrate
+			start-silent-test "hoprate" $defaulttest $runtime $latency $hr $defaultrate
 		done
 	done
 
@@ -78,13 +78,14 @@ function start-tests {
 	for hr in 1000 500 50 15 
 	do
 		echo Running fuzzer tests
-		start-silent-test 9 $runtime $defaultlatency $hr $defaultrate 
+		start-silent-test 9 "fuzzer" $runtime $defaultlatency $hr $defaultrate 
 	done
 }
 
 # Begins the given test, only displays a pretty view with teh parameters
-# and an approximate countdown
-# Usage: start-silent-test <test num> <time> <latency> <hop rate> [<extra params>...]
+# and an approximate countdown. Test label is used to name the folders to
+# know what the purpose of the run was
+# Usage: start-silent-test <test-label> <test num> <time> <latency> <hop rate> [<extra params>...]
 #	extra params - some tests may take additional data. That is given here
 function start-silent-test {
 	if [[ ! $IS_LOCAL ]]
@@ -100,20 +101,21 @@ function start-silent-test {
 		return
 	fi
 
-	testnum=$1
-	runtime=$2
-	latency=$3
-	hr=$4
-	shift 4
+	label=$1
+	testnum=$2
+	runtime=$3
+	latency=$4
+	hr=$5
+	shift 5
 
-	echo Running test:
+	echo Running test $label:
 	echo "  Test: $testnum"
 	echo "  Hop rate: $hr ms"
 	echo "  Latency: $latency ms"
 	echo "  Run time: $runtime s"
 	echo "  Additional params: $@"
 
-	start-test $testnum $runtime $latency $hr "$@" >/dev/null & 
+	start-test $label $testnum $runtime $latency $hr "$@" >/dev/null & 
 	testpid=$!
 	
 	# Wait for it to finish, but give ourselves a bit of extra time
@@ -133,7 +135,7 @@ function start-silent-test {
 
 # Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
 # with <delay> latency (see set-latency), with ARG hopping every <hop rate> milliseconds.
-# Usage: start-test <test num> <time> <latency> <hop rate> [<extra params>...]
+# Usage: start-test <test-label> <test num> <time> <latency> <hop rate> [<extra params>...]
 #	extra params - some tests may take additional data. That is given here
 function start-test {
 	if [[ ! $IS_LOCAL ]]
@@ -149,14 +151,12 @@ function start-test {
 		return
 	fi
 
-	testnum=$1
-	runtime=$2
-	latency=$3
-	hoprate=$4
-	shift
-	shift
-	shift
-	shift
+	label=$1
+	testnum=$2
+	runtime=$3
+	latency=$4
+	hoprate=$5
+	shift 5
 
 	stop-test
 
@@ -189,7 +189,7 @@ function start-test {
 	echo Ending experiment $testnum
 	stop-test
 
-	d="`date +%Y-%m-%d-%H:%M:%S`-t$testnum-l$latency-hr${hoprate}ms"
+	d="$label-t$testnum-l$latency-hr${hoprate}ms-`date +%Y-%m-%d-%H:%M:%S`"
 	echo Pulling logs into $RESULTSDIR/$d
 	clean-pulled
 	retrieve-logs "$d"
