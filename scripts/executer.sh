@@ -32,6 +32,11 @@ function start-tests {
 		runtime=$1
 	fi
 
+	defaultlatency=10
+	defaulttest=8
+	defaultrate=.2
+	defaulthr=500
+
 	# Ensure we have the newest build
 	if ! run-make
 	then
@@ -39,54 +44,90 @@ function start-tests {
 		return
 	fi
 
-	# Do every combination of hop rate (hr), latency, and test
-	# First one is no hopping as a consequence of the hop taking the full test length + some
+	# Basic tests, proving individual components work
+	for hr in 500 50
+	do
+		for testnum in {0..8}
+		do
+			echo Basic tests
+			start-silent-test $testnum $runtime $defaultlatency $hr $defaultrate
+		done
+	done
+
+	# Determine the max packet rate the gates can handle
+	for packetrate in 1 .5 .2 .1 .05 .01 .005 .001
+	do
+		for hr in 500 50 
+		do
+			echo Testing max packet rate
+			start-silent-test $defaulttest $runtime $defaultlatency $hr $packetrate
+		done
+	done
+
+	# Max hop rate with various latencies
 	for latency in 0 30 100 500
 	do
-		for packetrate in 1 .5 .2 .1 .05 .01
+		for hr in 1000 100 50 30 15 10 5 
 		do
-			for hr in 1000 100 50 $(($runtime * 1000 + 60000)) 15 5 
-			do
-				for testnum in {0..8}
-				do
-					echo Running test:
-					echo "  Test: $testnum"
-					echo "  Hop rate: $hr ms"
-					echo "  Packet rate: $packetrate ms"
-					echo "  Latency: $latency ms"
-					echo "  Run time: $runtime s"
-
-					start-test $testnum $runtime $latency $hr $packetrate >/dev/null & 
-					testpid=$!
-					
-					# Wait for it to finish, but give ourselves a bit of extra time
-					# The actual test has a lot of setup and tear-down time
-					i=$(($runtime + 35))
-
-					while is-running $testpid
-					do
-						echo -ne "${eraseline}Around $i seconds remaining"
-						sleep 1
-						i=$(($i - 1))
-					done
-				
-					# Finish the status line
-					echo -e "${eraseline}Test completed"
-				done
-			done
+			echo Testing max hop rate
+			start-silent-test $defaulttest $runtime $latency $hr $defaultrate
 		done
 	done
 
 	# Run the replay fuzzer against ARG for a while
-	echo Running fuzzer test
-	start-test 9 $runtime 0 100 >/dev/null & 
+	for hr in 1000 500 50 15 
+	do
+		echo Running fuzzer tests
+		start-silent-test 9 $runtime $defaultlatency $hr $defaultrate 
+	done
+}
+
+# Begins the given test, only displays a pretty view with teh parameters
+# and an approximate countdown
+# Usage: start-silent-test <test num> <time> <latency> <hop rate> [<extra params>...]
+#	extra params - some tests may take additional data. That is given here
+function start-silent-test {
+	if [[ ! $IS_LOCAL ]]
+	then
+		echo Must be run from local
+		return
+	fi
+
+	if [[ "$#" -lt 4 ]]
+	then
+		echo Not enough parameters
+		help start-silent-test
+		return
+	fi
+
+	testnum=$1
+	runtime=$2
+	latency=$3
+	hr=$4
+	shift 4
+
+	echo Running test:
+	echo "  Test: $testnum"
+	echo "  Hop rate: $hr ms"
+	echo "  Latency: $latency ms"
+	echo "  Run time: $runtime s"
+	echo "  Additional params: $@"
+
+	start-test $testnum $runtime $latency $hr "$@" >/dev/null & 
 	testpid=$!
+	
+	# Wait for it to finish, but give ourselves a bit of extra time
+	# The actual test has a lot of setup and tear-down time
+	i=$(($runtime + 40))
+
 	while is-running $testpid
 	do
 		echo -ne "${eraseline}Around $i seconds remaining"
 		sleep 1
 		i=$(($i - 1))
 	done
+
+	# Finish the status line
 	echo -e "${eraseline}Test completed"
 }
 
