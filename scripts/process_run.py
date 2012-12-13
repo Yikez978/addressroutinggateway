@@ -1786,6 +1786,9 @@ def main(argv):
 		except sqlite3.OperationalError as e:
 			print('Unable to create database: ', e)
 			return 1
+	elif not check_schema(db):
+		print('Database exists but is unreadable, recreating')
+		create_schema(db)
 
 	# Ensure all the systems and settings are in place before we begin
 	read_all_settings(db, args.logdir)
