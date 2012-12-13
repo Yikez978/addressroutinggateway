@@ -115,6 +115,11 @@ def create_schema(db):
 						truth_failed TINYINT DEFAULT 0,
 						reason_id INT,
 						PRIMARY KEY (id ASC))''')
+	
+	c.execute('DROP TABLE IF EXISTS completed_actions')
+	c.execute('''CREATE TABLE completed_actions (
+						action VARCHAR(50) NOT NULL,
+						done TINYINT)''')
 
 	# After much experimentation, this combination of indexes proves effective
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_full_hash ON packets (full_hash)''')
@@ -132,6 +137,11 @@ def check_schema(db):
 	try:
 		c = db.cursor()
 
+		c.execute('SELECT count(*) FROM completed_actions WHERE done=0')
+		num = c.fetchone()[0]
+		if num > 0:
+			valid_db = False
+
 		c.execute('SELECT count(*) FROM packets')
 		num = c.fetchone()[0]
 		if num == 0:
@@ -142,6 +152,28 @@ def check_schema(db):
 		valid_db = False
 
 	return valid_db
+
+##############################################
+# Manage actions (status of processing)
+def is_action_done(db, action):
+	c = db.cursor()
+	c.execute('SELECT done FROM completed_actions WHERE action=?', (action,))
+	done = c.fetchone()
+	c.close()
+	if done is not None:
+		return (not not done[0])
+	else:
+		return False
+
+def add_action(db, action):
+	c = db.cursor()
+	c.execute('INSERT INTO completed_actions (action, done) VALUES (?, 0)', (action,))
+	c.close()
+
+def mark_action_done(db, action):
+	c = db.cursor()
+	c.execute('UPDATE completed_actions SET done=1 WHERE action=?', (action,))
+	c.close()
 
 ##############################################
 # Manange reasons table
@@ -166,12 +198,15 @@ def get_reason(db, reason):
 ##############################################
 # Manage settings table
 def read_all_settings(db, logdir):
-	# Clean slate
-	c = db.cursor()
-	c.execute('DELETE FROM settings')
-	c.close()
+	if is_action_done(db, 'settings'):
+		print('Settings already read in')
+		return
+	else:
+		add_action(db, 'settings')
 
 	print('Reading in run settings')
+	c = db.cursor()
+	c.execute('BEGIN TRANSACTION')
 
 	# Latency and test number comes from folder name
 	dirname = os.path.basename(os.path.realpath(logdir))
@@ -221,6 +256,11 @@ def read_all_settings(db, logdir):
 					add_setting(db, '{} sender'.format(name), '{}, {}:{}, {} second delay'.format(proto, ip, port, delay))
 				else:
 					print('WARNING: Log file {} improperly named, unable to setup information')
+
+	# Done!
+	mark_action_done(db, 'settings')
+	db.commit()
+	c.close()
 
 def add_setting(db, name, value):
 	c = db.cursor()
@@ -297,10 +337,15 @@ def get_network_latency(db):
 ##############################################
 # Manange system table
 def add_all_systems(db, logdir):
-	# Clean slate
+	# Done already?
+	if is_action_done(db, 'systems'):
+		print('Systems already read in')
+		return
+	else:
+		add_action(db, 'systems')
+
 	c = db.cursor()
-	c.execute('DELETE FROM systems')
-	c.close()
+	c.execute('BEGIN TRANSACTION')
 
 	print('Adding all systems to database')
 
@@ -323,6 +368,11 @@ def add_all_systems(db, logdir):
 				add_gate(db, name, log)
 			else:
 				add_client(db, name, log)
+
+	# Done!
+	mark_action_done(db, 'systems')
+	db.commit()
+	c.close()
 
 def add_gate(db, name, log):
 	ip = None
@@ -484,10 +534,15 @@ def get_gates(db):
 ###############################################
 # Parse sends
 def record_traffic_pcap(db, logdir):
+	# Done already?
+	if is_action_done(db, 'pcap'):
+		print('pcap files already read in')
+		return
+	else:
+		add_action(db, 'pcap')
+
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
-	c.execute('DELETE FROM packets')
-
 	c.execute('BEGIN TRANSACTION')
 
 	# Go through each log file and record what packets each host sent
@@ -644,6 +699,8 @@ def record_traffic_pcap(db, logdir):
 
 		print('\t{} total packets processed'.format(count))
 
+	# Done!
+	mark_action_done(db, 'pcap')
 	db.commit()
 	c.close()
 
@@ -662,15 +719,23 @@ def record_traffic_logs(db, logdir):
 		if not is_gate and not is_prot and not is_ext:
 			continue
 
-		print('Processing log file {} for {}'.format(logName, name))
-		
 		with open(logName) as log:
  			if is_gate:
-				record_gate_traffic_log(db, name, log)
+				record_gate_traffic_log(db, logName, name, log)
  			else:
-				record_client_traffic_log(db, name, log) 
+				record_client_traffic_log(db, logName, name, log) 
 
-def record_client_traffic_log(db, name, log): 
+def record_client_traffic_log(db, log_name, name, log): 
+	# Done already?
+	action_name = 'client log {}'.format(log_name)
+	if is_action_done(db, action_name):
+		print('{} already read in'.format(log_name))
+		return
+	else:
+		add_action(db, action_name)
+
+	print('Processing client log file {} for {}'.format(log_name, name))
+	
 	system_id = get_system(db, name=name)
 	system_ip = None
 
@@ -781,10 +846,23 @@ def record_client_traffic_log(db, name, log):
 			print('\tProcessed {} packets so far'.format(count))
 
 	print('\t{} total packets processed'.format(count))
+
+	# Done!
+	mark_action_done(db, action_name)
 	db.commit()
 	c.close()
 
-def record_gate_traffic_log(db, name, log):
+def record_gate_traffic_log(db, log_name, name, log):
+	# Done already?
+	action_name = 'gate log {}'.format(log_name)
+	if is_action_done(db, action_name):
+		print('{} already read in'.format(log_name))
+		return
+	else:
+		add_action(db, action_name)
+
+	print('Processing gate log file {} for {}'.format(log_name, name))
+
 	system_id = get_system(db, name=name)
 	system_ip = None
 	network = name[4]
@@ -949,6 +1027,9 @@ def record_gate_traffic_log(db, name, log):
 		
 	print('\t{} total admin packets processed'.format(admin_count - 1))
 	print('\t{} total transforms processed'.format(transform_count - 1))
+
+	# Done!
+	mark_action_done(db, action_name)
 	db.commit()
 	c.close()
 
@@ -956,6 +1037,13 @@ def record_gate_traffic_log(db, name, log):
 # Track each sent packet through the system and determine either where it died or that
 # it reached its destination
 def trace_packets(db):
+	# Done already?
+	if is_action_done(db, 'trace'):
+		print('Packet trace already done')
+		return
+	else:
+		add_action(db, 'trace')
+
 	print('Beginning packet trace')
 
 	# Go one-by-one through packets and match them up
@@ -984,12 +1072,12 @@ def trace_packets(db):
 	tot_time = time.time() - start_time
 	print('\tTraced packets in {} seconds'.format(tot_time))
 
-	db.commit()
-
 	# Add next_hop_id index now that all the data is ready
 	print('Creating index for routing data')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
 	
+	# Done!
+	mark_action_done(db, 'trace')
 	db.commit()
 	c.close()
 
@@ -997,6 +1085,13 @@ def complete_packet_intentions(db):
 	# Find any packets that don't know their true source or destination, find
 	# the beginning of the trace they are a part of, and run through it trying to
 	# find data to fill it in
+	# Already done?
+	if is_action_done(db, 'truth'):
+		print('Packet intentions already done')
+		return
+	else:
+		add_action(db, 'truth')
+
 	print('Finalizing true packet intentions')
 
 	missing = db.cursor()
@@ -1062,16 +1157,22 @@ def complete_packet_intentions(db):
 		count += 1
 		if count % 1000 == 0:
 			print('\tFinalizing packet {}'.format(count))
+
+	print('\t{} packets finalized'.format(count))
 	
+	# Done!
+	mark_action_done(db, 'truth')
 	db.commit()
 	missing.close()
 
-	if count > 0:
-		print('\t{} packets finalized'.format(count))
-	else:
-		print('\tNo work needed')
-
 def locate_trace_terminations(db):
+	# Already done?
+	if is_action_done(db, 'termination'):
+		print('Packet terminations already done')
+		return
+	else:
+		add_action(db, 'termination')
+
 	print('Determining terminal packet of all traces')
 
 	# Terminal packets terminate at themselves, take care of that first
@@ -1127,21 +1228,19 @@ def locate_trace_terminations(db):
 			db.commit()
 			c.execute('BEGIN TRANSACTION')
 
+	print('\tTerminated {} packets total'.format(count, total_count))
+
+	mark_action_done(db, 'termination')
 	db.commit()
 	c.close()
 
-	if count > 0:
-		print('\tTerminated {} packets total'.format(count, total_count))
-	else:
-		print('\tNothing to be done')
-
 def check_for_trace_cycles(db):
-	print('Checking for cycles in packet traces: ')
+	print('Checking for cycles in packet traces: ', end='')
 	bad = for_all_traces(db, check_trace)
 	if bad:
-		print('\tCycles found for packet IDs {}'.format(bad))
+		print('WARNING!! Cycles found for packet IDs {}'.format(bad))
 	else:
-		print('\tNo cycles found')
+		print('none')
 	return bad
 
 def show_all_traces(db):
@@ -1633,69 +1732,48 @@ def main(argv):
 	if args.end_offset is None:
 		args.end_offset = args.offset
 
-	# Ensure database is empty
-	# If it is and/or if --empty-database was given, create the schema
-	already_exists = os.path.exists(args.database)
-	if args.empty_database and already_exists:
-		print('Clearing data in the current database')
-		os.unlink(args.database)
-		already_exists = False
-
 	# Open database and create schema if it doesn't exist already
+	already_exists = os.path.exists(args.database)
 	db = sqlite3.connect(args.database)
-	if not already_exists:
+	if not already_exists or args.empty_database:
 		try:
+			print('Creating new database')
 			create_schema(db)
-			do_record = True
 		except sqlite3.OperationalError as e:
 			print('Unable to create database: ', e)
 			return 1
 	else:
 		# This database already existed before, check the data to ensure it's at least somewhat filled
-		if check_schema(db):
-			print('Database already exists, skipping data recording.')
-			print('To override this and force a record and trace, give --empty-database on the command line\n')
-			do_record = False
-		else:
-			print('Database already existed, but was unreadable. Re-recording data\n')
-			create_schema(db)
-			do_record = True
+		if not check_schema(db):
+			print('Database already existed, but is incomplete\n')
 
 	# Ensure all the systems and settings are in place before we begin
-	if do_record:
-		read_all_settings(db, args.logdir)
-		add_all_systems(db, args.logdir)
-		if not check_systems(db):
-			print('Problems detected with setup. Correct and re-run the test')
-			return 1
+	read_all_settings(db, args.logdir)
+	add_all_systems(db, args.logdir)
+	if not check_systems(db):
+		print('Problems detected with setup. Correct and re-run the test')
+		return 1
 
 	# Trace packets
-	if do_record:
-		# What did each host attempt to do?
-		record_traffic_pcap(db, args.logdir)
-		record_traffic_logs(db, args.logdir)
+	# What did each host attempt to do?
+	record_traffic_pcap(db, args.logdir)
+	record_traffic_logs(db, args.logdir)
 
-	if not args.skip_trace:
-		# Follow each packet through the network and figure out where each packet
-		# was meant to go (many were already resolved above, but NAT traffic needs
-		# additional assistance)
-		trace_packets(db)
+	# Follow each packet through the network and figure out where each packet
+	# was meant to go (many were already resolved above, but NAT traffic needs
+	# additional assistance)
+	trace_packets(db)
+	cycles = check_for_trace_cycles(db)
+	if cycles:
+		print('WARNING: Cycles found in trace data. Results may be incorrect')
+		if args.show_cycles:
+			for id in cycles:
+				show_trace(db, id)
+		else:
+			print('To display the cycles, specify --show-cycles on the command line')
 
-		# Check for problems
-		cycles = check_for_trace_cycles(db)
-		if cycles:
-			print('WARNING: Cycles found in trace data. Results may be incorrect')
-			if args.show_cycles:
-				for id in cycles:
-					show_trace(db, id)
-			else:
-				print('To display the cycles, specify --show-cycles on the command line')
-
-		complete_packet_intentions(db)
-		locate_trace_terminations(db)
-	elif do_record:
-		print('--skip-trace was specified but new data was recorded. Unable to provide stats')
-		return 1
+	complete_packet_intentions(db)
+	locate_trace_terminations(db)
 
 	# Collect stats
 	if check_schema(db):
