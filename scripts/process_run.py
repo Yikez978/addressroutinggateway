@@ -24,6 +24,7 @@ EMPTY_HASH=hashlib.md5().hexdigest()
 # Times on each host may not match up perfectly. How many second on either side do we allow?
 TIME_SLACK=15
 ROW_CACHE_SIZE=50000
+SQLITE_PROG_UPDATE_FREQ=10000000
 
 def create_schema(db):
 	# Schema:
@@ -706,9 +707,9 @@ def record_traffic_pcap(db, logdir):
 
 			count += 1
 			if count % 1000 == 0:
-				print('\tProcessed {} packets so far'.format(count))
+				print('\tInserted {} packets so far'.format(count))
 
-		print('\t{} total packets processed'.format(count))
+		print('\t{} total packets inserted'.format(count))
 
 	# Insert them all
 	c.execute('BEGIN TRANSACTION')
@@ -721,6 +722,7 @@ def record_traffic_pcap(db, logdir):
 
 	# Done!
 	mark_action_done(db, 'pcap')
+	print('\tCommitting packets to database')
 	db.commit()
 	c.close()
 
@@ -867,9 +869,10 @@ def record_client_traffic_log(db, log_name, name, log):
 	print('\t{} total packets processed'.format(count))
 
 	# Update everything
+	print('\tUpdating packets with new information...')
 	c.execute('BEGIN TRANSACTION')
 	c.executemany('''UPDATE packets SET is_valid=?, true_src_id=?, true_dest_id=?, log_line=?
-					WHERE id= (SELECT id FROM packets 
+						WHERE id=(SELECT id FROM packets 
 								WHERE system_id=?
 									AND src_id=?
 									AND dest_id=?
@@ -880,6 +883,7 @@ def record_client_traffic_log(db, log_name, name, log):
 
 	# Done!
 	mark_action_done(db, action_name)
+	print('\tCommitting processing')
 	db.commit()
 	c.close()
 
@@ -1057,6 +1061,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 	print('\t{} total transforms processed'.format(transform_count - 1))
 	
 	# Do various updates
+	print('\tUpdating packets with new information...')
 	c.execute('BEGIN TRANSACTION')
 	c.executemany('''UPDATE packets SET log_line=?, reason_id=?,
 						true_src_id=?, true_dest_id=? WHERE id=?''', log_data)
@@ -1064,6 +1069,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 
 	# Done!
 	mark_action_done(db, action_name)
+	print('\tCommitting processing')
 	db.commit()
 	c.close()
 
@@ -1078,13 +1084,16 @@ def trace_packets(db):
 	else:
 		add_action(db, 'trace')
 
-	print('Beginning packet trace')
+	print('Tracing packets...', end='')
 
 	# Go one-by-one through packets and match them up
 	start_time = time.time()
 	c = db.cursor()
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace ON packets (src_id, dest_id, system_id, proto, full_hash)''')
 	db.commit()
+
+	# Keep status of work
+	db.set_progress_handler(print_dot, SQLITE_PROG_UPDATE_FREQ)
 
 	c.execute('BEGIN TRANSACTION')
 	c.execute('''SELECT rp.id, sp.id
@@ -1103,6 +1112,8 @@ def trace_packets(db):
 					''')
 	c.executemany('UPDATE packets SET next_hop_id=? WHERE id=?', c.fetchall())
 
+	db.set_progress_handler(None)
+
 	tot_time = time.time() - start_time
 	print('\tTraced packets in {} seconds'.format(tot_time))
 
@@ -1112,6 +1123,7 @@ def trace_packets(db):
 	
 	# Done!
 	mark_action_done(db, 'trace')
+	print('\tCommitting trace')
 	db.commit()
 	c.close()
 
@@ -1656,6 +1668,10 @@ def print_raw(string):
 
 	if curr % 16 != 0:
 		print()
+
+def print_dot():
+	print('.', end='')
+	sys.stdout.flush()
 
 def md5_packet(pkt):
 	# Returns two MD5's of the packet:
