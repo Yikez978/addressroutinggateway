@@ -80,8 +80,6 @@ def tcp_sender(ip, port, delay=1, size=None, is_valid=True):
 			# Get response back?
 			try:
 				buf = s.recv(MAX_PACKET_SIZE)
-				if not buf:
-					break
 				log_recv(6, ip, port, buf, is_valid)
 			except socket.timeout:
 				continue
@@ -127,8 +125,6 @@ def tcp_receiver_handler(conn, ip, port, stopper, echo=False, size=None, is_vali
 		while not stopper.is_set():
 			try:
 				buf = conn.recv(MAX_PACKET_SIZE)
-				if not buf:
-					break
 				log_recv(6, ip, port, buf, is_valid)
 			except socket.timeout:
 				# Check if we're supposed to be done
@@ -175,8 +171,6 @@ def udp_sender(ip, port, delay=1, size=None, is_valid=True):
 			# Get response back?
 			try:
 				buf = s.recv(MAX_PACKET_SIZE)
-				if not buf:
-					break
 				log_recv(17, ip, port, buf, is_valid)
 			except socket.timeout:
 				continue
