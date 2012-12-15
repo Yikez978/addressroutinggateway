@@ -4,7 +4,7 @@ PULLDIR="pulled"
 RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
-TESTLOG="$RESULTSDIR/tests.log"
+TESTLOG="test.log"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -78,7 +78,7 @@ function start-tests {
 	for hr in 1000 500 50 15 
 	do
 		echo Running fuzzer tests
-		start-silent-test 9 "fuzzer" $runtime $defaultlatency $hr $defaultrate 
+		start-silent-test "fuzzer" 9 $runtime $defaultlatency $hr $defaultrate 
 	done
 }
 
@@ -115,9 +115,9 @@ function start-silent-test {
 	echo "  Run time: $runtime s"
 	echo "  Additional params: $@"
 
-	start-test $label $testnum $runtime $latency $hr "$@" >/dev/null & 
+	start-test $label $testnum $runtime $latency $hr "$@" >"$TESTLOG" 2>&1 & 
 	testpid=$!
-	
+
 	# Wait for it to finish, but give ourselves a bit of extra time
 	# The actual test has a lot of setup and tear-down time
 	i=$(($runtime + 40))
@@ -130,7 +130,7 @@ function start-silent-test {
 	done
 
 	# Finish the status line
-	echo -e "${eraseline}Test completed"
+	echo -e ${eraseline}Test completed in $(($runtime + 40 - $i)) seconds
 }
 
 # Begins the tests! Runs test <test num> (see start-generators) for <time> seconds
