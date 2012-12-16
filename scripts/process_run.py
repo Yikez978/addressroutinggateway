@@ -163,7 +163,7 @@ def check_schema(db):
 def configure_sqlite(db):
 	print('Configuring sqlite for better performance')
 	c = db.cursor()
-	c.execute('PRAGMA journal_mode=memory')
+	#c.execute('PRAGMA journal_mode=memory')
 	c.execute('PRAGMA fullfsync=false')
 	c.execute('PRAGMA synchronous=off')
 	#c.execute('PRAGMA temp_store=memory')

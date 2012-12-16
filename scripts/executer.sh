@@ -13,9 +13,11 @@ GATES="gateA gateB gateC"
 EXT="ext1"
 PROT="protA1 protB1 protC1"
 
+EC2="aws1"
+
 ALL="$GATES $EXT $PROT"
 
-eraseline="\r                                \r"
+eraseline="\r                                      \r"
 
 # Starts the given test number 
 # Usage: start-tests [<time>]
@@ -540,14 +542,10 @@ function process-runs {
 		return
 	fi
 
-	export local=00
-	export gateA=00
-	export gateB=00
-	export gateC=00
-	export protA1=00
-	export protB1=00
-	export protC1=00
-	export ext1=00
+	declare local=
+	declare -a servers=($EC2)
+	declare -a procids
+
 	for results in $RESULTSDIR/*
 	do
 		if [ ! -d "$results" ]
@@ -565,59 +563,44 @@ function process-runs {
 
 		while (( 1 ))
 		do
-			if ! is-running $protA1
-			then
-				echo Farming "$results" off to protA1
-				process-run-remote protA1 "$results" | grep 'Completed processing' &
-				protA1=$!
-				break
-			elif ! is-running $protB1
-			then
-				echo Farming "$results" off to protB1
-				process-run-remote protB1 "$results" | grep 'Completed processing' &
-				protB1=$!
-				break
-			elif ! is-running $protC1
-			then
-				echo Farming "$results" off to protC1
-				process-run-remote protC1 "$results" | grep 'Completed processing' &
-				protC1=$!
-				break
-			elif ! is-running $gateA
-			then
-				echo Farming "$results" off to gateA
-				process-run-remote gateA "$results" | grep 'Completed processing' &
-				gateA=$!
-				break
-			elif ! is-running $gateB
-			then
-				echo Farming "$results" off to gateB
-				process-run-remote gateB "$results" | grep 'Completed processing' &
-				gateB=$!
-				break
-			elif ! is-running $gateC
-			then
-				echo Farming "$results" off to gateC
-				process-run-remote gateC "$results" | grep 'Completed processing' &
-				gateC=$!
-				break
-			elif ! is-running $ext1
-			then
-				echo Farming "$results" off to ext1
-				process-run-remote ext1 "$results" | grep 'Completed processing' &
-				ext1=$!
-				break
-			elif ! is-running $local
-			then
-				echo Farming "$results" off to local system
-				process-run "$results" | grep 'Completed processing' &
-				local=$!
-				break
-			fi
+			found=
+			curr=0
+			while (( $curr < ${#servers[@]} ))
+			do
+				if ! is-running "${procids[$curr]}"
+				then
+					remote=${servers[$curr]}
+					echo Farming "$results" off to ${servers[$curr]} 
+					process-run-remote "$remote" "$results" | grep 'Completed processing' &
+					procids[$curr]=$!
+					found=1
+					break
+				fi
+
+				curr=$(($curr + 1))
+			done
+
+			# Check local if needed
+			#if [[ ! $found ]]
+			#then
+			#	if ! is-running "$local"
+			#	then
+			#		echo Farming "$results" off to local system
+			#		process-run "$results" | grep 'Completed processing' &
+			#		local=$!
+			#		found=1
+			#	fi
+			#fi
 
 			# Don't try again too soon
-			echo Waiting for a slot to open up to process $results
-			sleep 10
+			if [[ $found ]]
+			then
+				break
+			else
+				echo -ne ${eraseline}Waiting to process\r
+				sleep 10
+				echo -ne ${eraseline}
+			fi
 		done
 
 		sleep 1
@@ -1081,6 +1064,35 @@ function install-vmware-tools {
 	fi
 }
 
+# Ensure environment on the EC2 servers is ready to go
+# Usage: setup-processing-env 
+function setup-processing-env {
+	if [[ $IS_LOCAL ]]
+	then
+		# Get the list of servers to run on. Lists ends with '-'
+		systems=$EC2
+		if [[ "$systems" == "" ]]
+		then
+			echo No systems supplied
+			return 1
+		fi
+
+		# Ensure 'pushed' dir is available
+		for s in $systems
+		do
+			echo -e "\t$s"
+			ssh "$s" "mkdir -p ~/pushed" 2>&1 | grep -v 'closed by remote host'
+		done
+
+		# Install stuff
+		e push-to $systems -
+		e run-on $systems - setup-processing-env
+	else
+		# Install anything needed
+		sudo apt-get install -y python-libpcap scapy
+	fi
+}
+
 # Installs the packages necessary to build ARG on the gates
 # Usage: setup-gate-env
 function setup-gate-env {
@@ -1310,9 +1322,10 @@ function await-dropbox {
 function is-running {
 	if [[ "$#" != "1" ]]
 	then
-		echo Not enough parameters given
-		help is-running
-		return 
+		return 1
+	elif [[ "$1" == "" ]]
+	then
+		return 1
 	fi
 
 	if [[ -z "`ps ax | grep -E \"^\s*$1\"`" ]]
