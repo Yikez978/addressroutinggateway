@@ -5,6 +5,8 @@ RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
+TEMPFILE=".temp.e.txt"
+BASE_SSH_CONF="conf/ssh_conf"
 
 LOCAL="ramlap"
 IS_LOCAL=1
@@ -12,10 +14,14 @@ IS_LOCAL=1
 GATES="gateA gateB gateC"
 EXT="ext1"
 PROT="protA1 protB1 protC1"
-
-EC2="aws1"
-
 ALL="$GATES $EXT $PROT"
+
+EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19"
+EC2_IMAGE="ami-3d4ff254"
+EC2_TYPE="t1.micro"
+export EC2_KEYPAIR="ec2thesis" # name only, not the file name
+export EC2_PRIVATE_KEY="conf/pk-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
+export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 
 eraseline="\r                                      \r"
 
@@ -606,9 +612,29 @@ function process-runs {
 		sleep 1
 	done
 
-	# Make sure everything finishes
+	# Make sure everything finishes. Shutdown servers once they aren't needed. Keep trying
+	# until all processors are done
 	echo Waiting for final processing to complete
-	wait
+	found=1
+	while [[ $found ]]
+	do
+		found=
+		curr=0
+		while (( $curr < ${#servers[@]} ))
+		do
+			if ! is-running "${procids[$curr]}"
+			then
+				remote=${servers[$curr]}
+				echo Shutting down $remote
+				push-to $remote - >/dev/null
+				run-on $remote - shutdown >/dev/null
+			else
+				found=1
+			fi
+
+			curr=$(($curr + 1))
+		done
+	done
 
 	echo All processing completed
 
@@ -1064,6 +1090,81 @@ function install-vmware-tools {
 	fi
 }
 
+# Creates EC2 instances according to what's given in the $EC2 array
+# (must be called ecX, where X starts at 1 and increases). Prepares
+# each for processing
+# Usage: create-and-prepare-instances
+function create-and-prepare-instances {
+	declare -a servers=($EC2)
+	echo Creating ${#servers[@]} instances
+	create-instances ${#servers[@]}
+
+	echo Waiting for instances to start
+	while [[ -n "`ec2-describe-instances | grep pending`" ]]
+	do
+		echo -ne ${eraseline}Not done yet, still waiting
+		sleep 30
+		echo -ne ${eraseline}Querying AWS for EC2 status
+	done
+
+	echo -e ${eraseline}Instances all started
+
+	echo Creating SSH config
+	cp -f "$BASE_SSH_CONF" "$TEMPFILE"
+	chmod 600 "$TEMPFILE"
+	generate-ec2-ssh-conf "$TEMPFILE"
+	mv -f "$TEMPFILE" "$HOME/.ssh/config"
+
+	echo Configuring EC2
+	sleep 10
+	setup-processing-env
+}
+
+# Creates EC2 instances
+# Usage: create-instances <num>
+function create-instances {
+	if [[ "$#" != 1 ]]
+	then
+		echo Must give number of EC2 instances to spawn
+		help create-instances
+		return
+	fi
+
+	echo Attempting to launch instances
+	ec2-run-instances "$EC2_IMAGE" -t "$EC2_TYPE" -k "$EC2_KEYPAIR" --instance-initiated-shutdown-behavior terminate -n $1 
+}
+
+# Creates the EC2 portion of the SSH config file, including the
+# identify file line. APPENDS it to the given file
+# Usage: generate-ec2-ssh-conf <ssh-config>
+function generate-ec2-ssh-conf {
+	if [[ "$#" != 1 ]]
+	then
+		echo No file to append to specified
+		help generate-ec2-ssh-conf
+		return
+	fi
+
+	declare -a servers=($EC2)
+
+	echo Getting instance descriptions
+	count=0
+	while read addr
+	do
+		echo Found $addr
+		echo -e "\nHost ${servers[$count]}" >> "$1"
+		echo -e "\tHostname $addr" >> "$1"
+		echo -e "\tUser ubuntu" >> "$1"
+		echo -e "\tIdentityFile ~/thesis/arg/conf/ec2thesis.pem" >> "$1"
+		count=$(($count + 1))
+	done < <(ec2-describe-instances | grep "running" | grep "$EC2_TYPE" | awk '{print $4}')
+
+	echo Final SSH config:
+	cat "$1"
+
+	return $count
+}
+
 # Ensure environment on the EC2 servers is ready to go
 # Usage: setup-processing-env 
 function setup-processing-env {
@@ -1081,6 +1182,7 @@ function setup-processing-env {
 		for s in $systems
 		do
 			echo -e "\t$s"
+			#ssh "$s" "rm -r ~/pushed" 2>&1 | grep -v 'closed by remote host'
 			ssh "$s" "mkdir -p ~/pushed" 2>&1 | grep -v 'closed by remote host'
 		done
 
@@ -1089,7 +1191,7 @@ function setup-processing-env {
 		e run-on $systems - setup-processing-env
 	else
 		# Install anything needed
-		sudo apt-get install -y python-libpcap scapy
+		sudo apt-get install -y python-libpcap python-scapy
 	fi
 }
 

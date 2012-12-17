@@ -6,6 +6,7 @@
 *.h.*
 *.o.*
 *.symvers
+*.pem
 *.pyc
 *.db
 modules.order

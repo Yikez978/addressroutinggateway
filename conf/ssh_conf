@@ -30,7 +30,3 @@ Host delay1
 	Hostname 10.1.1.61
 	User traherom
 
-Host aws1
-	Hostname ec2-54-242-123-90.compute-1.amazonaws.com
-	User ubuntu
-	IdentityFile ~/thesis/arg/conf/ec2thesis.pem
