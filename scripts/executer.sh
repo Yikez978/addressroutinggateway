@@ -8,6 +8,8 @@ TESTLOG="test.log"
 TEMPFILE=".temp.e.txt"
 BASE_SSH_CONF="conf/ssh_conf"
 
+FINISHINDICATOR="alldonewithprocessing.tmp"
+
 LOCAL="ramlap"
 IS_LOCAL=1
 
@@ -693,12 +695,22 @@ function process-run-remote {
 			help process-run-remote
 		fi
 
-		echo Processing $2 on $1
 
+		# Start processing
+		echo Processing $2 on $1
 		clean-pushed "$1"
 		push-to "$1" - scripts/process_run.py "$2"
 		base=`basename "$2"`
 		run-on "$1" - process-run-remote "$base"
+
+		# Wait for it to complete
+		sleep 30
+		while [[ -n "`ssh $1 ls pushed/$FINISHINDICATOR 2>&1 | grep 'cannot access'`" ]]
+		do
+			echo -ne ${eraseline}Not done yet, still waiting
+			sleep 30
+			echo -ne ${eraseline}Checking if complete status
+		done
 
 		# Prevent one result overwriting another
 		backoff=$(($RANDOM % 20 + 2))
@@ -740,7 +752,9 @@ function process-run-remote {
 
 		echo Completed processing of $2 on $1
 	else
-		./process_run.py -l "$1" -db "$RUNDB" 2>&1 | tee "$PROCESSLOG"
+		rm -f "$FINISHINDICATOR"
+		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$FINISHINDICATOR" 2>&1 >"$PROCESSLOG" &
+		disown $!
 	fi
 }
 
@@ -1100,6 +1114,7 @@ function create-and-prepare-instances {
 	create-instances ${#servers[@]}
 
 	echo Waiting for instances to start
+	sleep 30
 	while [[ -n "`ec2-describe-instances | grep pending`" ]]
 	do
 		echo -ne ${eraseline}Not done yet, still waiting

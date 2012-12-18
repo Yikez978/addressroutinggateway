@@ -156,6 +156,9 @@ def check_schema(db):
 	if num == 0:
 		valid_db = False
 
+	if get_setting(db, 'Processing Time') is None:
+		valid_db = False
+
 	c.close()
 
 	return valid_db
@@ -1425,13 +1428,6 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	for name, rate in rates.iteritems():
 		stats['{}.pps'.format(name).lower()] = rate
 
-	# Trace problems
-	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
-					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
-	failed_trace_count, failed_truth_count = c.fetchone()
-	stats['failed.traces'] = failed_trace_count
-	stats['failed.truth'] = failed_truth_count
-
 	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count, lost_packets = valid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['valid.sent'] = sent_count
@@ -1469,9 +1465,6 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	for k, v in stats.iteritems():
 		if k.endswith('.pps'):
 			print('{}: {} packets per seconds'.format(k, v))
-
-	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
-	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
 
 	print('\nValid packets sent: {}'.format(stats['valid.sent']))
 	print('Valid packets received: {}'.format(stats['valid.recv']))
@@ -1777,6 +1770,7 @@ def main(argv):
 	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
 	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
+	parser.add_argument('--finish-indicator', help='Empty file to create when processing completes')
 	args = parser.parse_args(argv[1:])
 
 	# Offsets
@@ -1804,7 +1798,6 @@ def main(argv):
 		# Time processing
 		start_proc_time = time.time()
 
-	
 		# Ensure all the tables we need are there
 		try:
 			check_schema(db)
@@ -1842,6 +1835,8 @@ def main(argv):
 
 		# End time
 		proc_time = time.time() - start_proc_time
+		if get_setting(db, 'Processing Time') is None:
+			add_setting(db, 'Processing Time', proc_time)
 		print('Processing completed in {} seconds'.format(proc_time))
 
 	# Collect stats
@@ -1856,6 +1851,10 @@ def main(argv):
 	# All done. Don't commit here. Either the steps before did what they wanted
 	# and committed or they didn't. Don't push bad stuff
 	db.close()
+
+	# Leave file to indicate we're done
+	if args.file_indicator:
+		open(args.file_indicator, 'w').close()
 
 	return 0
 
