@@ -18,9 +18,8 @@ EXT="ext1"
 PROT="protA1 protB1 protC1"
 ALL="$GATES $EXT $PROT"
 
-EC2="ec0 ec1"
-#EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19"
-#EC2="ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
+EC2="ec0"
+#EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
 EC2_IMAGE="ami-3d4ff254"
 EC2_TYPE="t1.micro"
 export EC2_KEYPAIR="ec2thesis" # name only, not the file name
@@ -1133,10 +1132,7 @@ function create-and-prepare-instances {
 	echo -e ${eraseline}Instances all started
 
 	echo Creating SSH config
-	cp -f "$BASE_SSH_CONF" "$TEMPFILE"
-	chmod 600 "$TEMPFILE"
-	generate-ec2-ssh-conf "$TEMPFILE"
-	mv -f "$TEMPFILE" "$HOME/.ssh/config"
+	generate-ec2-ssh-conf 
 
 	echo Configuring EC2
 	sleep 10
@@ -1158,15 +1154,12 @@ function create-instances {
 }
 
 # Creates the EC2 portion of the SSH config file, including the
-# identify file line. APPENDS it to the given file
-# Usage: generate-ec2-ssh-conf <ssh-config>
+# identify file line. 
+# Usage: generate-ec2-ssh-conf 
 function generate-ec2-ssh-conf {
-	if [[ "$#" != 1 ]]
-	then
-		echo No file to append to specified
-		help generate-ec2-ssh-conf
-		return
-	fi
+	# Prepare base file
+	cp -f "$BASE_SSH_CONF" "$TEMPFILE"
+	chmod 600 "$TEMPFILE"
 
 	declare -a servers=($EC2)
 
@@ -1175,21 +1168,32 @@ function generate-ec2-ssh-conf {
 	while read addr
 	do
 		echo Found $addr
-		echo -e "\nHost ${servers[$count]}" >> "$1"
-		echo -e "\tHostname $addr" >> "$1"
-		echo -e "\tUser ubuntu" >> "$1"
-		echo -e "\tIdentityFile ~/thesis/arg/conf/ec2thesis.pem" >> "$1"
-		echo -e "\tUserKnownHostsFile /dev/null" >> "$1"
-		echo -e "\tStrictHostKeyChecking no" >> "$1"
+		echo -e "\nHost ${servers[$count]}" >> "$TEMPFILE"
+		echo -e "\tHostname $addr" >> "$TEMPFILE"
+		echo -e "\tUser ubuntu" >> "$TEMPFILE"
+		echo -e "\tIdentityFile ~/thesis/arg/conf/ec2thesis.pem" >> "$TEMPFILE"
+		echo -e "\tUserKnownHostsFile /dev/null" >> "$TEMPFILE"
+		echo -e "\tStrictHostKeyChecking no" >> "$TEMPFILE"
 		count=$(($count + 1))
 	done < <(ec2-describe-instances | grep "running" | grep "$EC2_TYPE" | awk '{print $4}')
 
-	echo "" >> "$1"
+	echo "" >> "$TEMPFILE"
 
 	echo Final SSH config:
-	cat "$1"
+	cat "$TEMPFILE"
+	mv -f "$TEMPFILE" "$HOME/.ssh/config"
 
 	return $count
+}
+
+# Terminate all EC2 instances
+# Usage: terminate-instances
+function terminate-instances {
+	if [[ $IS_LOCAL ]]
+	then
+		push-to $EC2 - 
+		run-on $EC2 - shutdown
+	fi
 }
 
 # Ensure environment on the EC2 servers is ready to go
