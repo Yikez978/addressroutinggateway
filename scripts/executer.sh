@@ -1,5 +1,5 @@
 #!/bin/bash
-PUSHDIR="~/pushed"
+PUSHDIR="pushed"
 PULLDIR="pulled"
 RESULTSDIR="$HOME/results"
 RUNDB="run.db"
@@ -18,13 +18,16 @@ EXT="ext1"
 PROT="protA1 protB1 protC1"
 ALL="$GATES $EXT $PROT"
 
+EC2="ec0 ec1"
 #EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19"
-EC2="ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
+#EC2="ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
 EC2_IMAGE="ami-3d4ff254"
 EC2_TYPE="t1.micro"
 export EC2_KEYPAIR="ec2thesis" # name only, not the file name
 export EC2_PRIVATE_KEY="conf/pk-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
+
+HOSTKEYS=""
 
 eraseline="\r                                      \r"
 
@@ -708,15 +711,14 @@ function process-run-remote {
 
 		# Wait for it to complete
 		sleep 30
-		while [[ -n "`ssh $1 ls pushed/$FINISHINDICATOR 2>&1 | grep 'cannot access'`" ]]
+		while [[ -n "`ssh $1 ls pushed/$base/$FINISHINDICATOR 2>&1 | grep 'cannot access'`" ]]
 		do
 			echo -ne "${eraseline}Not done yet, still waiting"
 			sleep 30
 			echo -ne "${eraseline}Checking if complete"
 		done
 
-		echo -e "${eraseline}Completed processing of $2 on $1"
-		ssh "$1" rm -f "pushed/$FINISHINDICATOR" 2>&1
+		ssh "$1" rm -f "pushed/$base/$FINISHINDICATOR" 2>&1
 
 		# Prevent one result overwriting another
 		backoff=$(($RANDOM % 20 + 2))
@@ -751,15 +753,15 @@ function process-run-remote {
 		clean-pulled
 		touch "$PULLDIR/$RUNDB"
 
-		pull-from "$1" - "$2/$RUNDB"
-		pull-from "$1" - "$2/$PROCESSLOG"
+		pull-from "$1" - "$base/$RUNDB"
+		pull-from "$1" - "$base/$PROCESSLOG"
 		mv "$PULLDIR/$RUNDB" "$2/$RUNDB"
 		mv "$PULLDIR/$PROCESSLOG" "$2/$PROCESSLOG"
 
 		echo Completed processing of $2 on $1
 	else
-		rm -f "$FINISHINDICATOR"
-		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
+		rm -f "$1/$FINISHINDICATOR"
+		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$1/$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
 		disown $!
 	fi
 }
@@ -1177,8 +1179,12 @@ function generate-ec2-ssh-conf {
 		echo -e "\tHostname $addr" >> "$1"
 		echo -e "\tUser ubuntu" >> "$1"
 		echo -e "\tIdentityFile ~/thesis/arg/conf/ec2thesis.pem" >> "$1"
+		echo -e "\tUserKnownHostsFile /dev/null" >> "$1"
+		echo -e "\tStrictHostKeyChecking no" >> "$1"
 		count=$(($count + 1))
 	done < <(ec2-describe-instances | grep "running" | grep "$EC2_TYPE" | awk '{print $4}')
+
+	echo "" >> "$1"
 
 	echo Final SSH config:
 	cat "$1"

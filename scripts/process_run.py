@@ -1779,82 +1779,85 @@ def main(argv):
 	if args.end_offset is None:
 		args.end_offset = args.offset
 
-	# Open database 
-	already_exists = os.path.exists(args.database)
-	db = sqlite3.connect(args.database)
+	try:
+		# Open database 
+		already_exists = os.path.exists(args.database)
+		db = sqlite3.connect(args.database)
 
-	configure_sqlite(db)
+		configure_sqlite(db)
 
-	# Create schema if it doesn't exist already
-	if not already_exists or args.empty_database:
-		try:
-			print('Creating new database')
-			create_schema(db)
-		except sqlite3.OperationalError as e:
-			print('Unable to create database: ', e)
-			return 1
+		# Create schema if it doesn't exist already
+		if not already_exists or args.empty_database:
+			try:
+				print('Creating new database')
+				create_schema(db)
+			except sqlite3.OperationalError as e:
+				print('Unable to create database: ', e)
+				return 1
 
-	if not args.skip_processing:
-		# Time processing
-		start_proc_time = time.time()
+		if not args.skip_processing and get_setting(db, 'Processing Time') is None:
+			# Time processing
+			start_proc_time = time.time()
 
-		# Ensure all the tables we need are there
-		try:
-			check_schema(db)
-		except sqlite3.OperationalError:
-			print('Database exists but is unreadable. Recreating')
-			create_schema(db)
+			# Ensure all the tables we need are there
+			try:
+				check_schema(db)
+			except sqlite3.OperationalError:
+				print('Database exists but is unreadable. Recreating')
+				create_schema(db)
 
-		# Ensure all the systems and settings are in place before we begin
-		read_all_settings(db, args.logdir)
-		add_all_systems(db, args.logdir)
-		if not check_systems(db):
-			print('Problems detected with setup. Correct and re-run the test')
-			return 1
+			# Ensure all the systems and settings are in place before we begin
+			read_all_settings(db, args.logdir)
+			add_all_systems(db, args.logdir)
+			if not check_systems(db):
+				print('Problems detected with setup. Correct and re-run the test')
+				return 1
 
-		# Trace packets
-		# What did each host attempt to do?
-		record_traffic_pcap(db, args.logdir)
-		record_traffic_logs(db, args.logdir)
+			# Trace packets
+			# What did each host attempt to do?
+			record_traffic_pcap(db, args.logdir)
+			record_traffic_logs(db, args.logdir)
 
-		# Follow each packet through the network and figure out where each packet
-		# was meant to go (many were already resolved above, but NAT traffic needs
-		# additional assistance)
-		trace_packets(db)
-		cycles = check_for_trace_cycles(db)
-		if cycles:
-			print('WARNING: Cycles found in trace data. Results may be incorrect')
-			if args.show_cycles:
-				for id in cycles:
-					show_trace(db, id)
-			else:
-				print('To display the cycles, specify --show-cycles on the command line')
+			# Follow each packet through the network and figure out where each packet
+			# was meant to go (many were already resolved above, but NAT traffic needs
+			# additional assistance)
+			trace_packets(db)
+			cycles = check_for_trace_cycles(db)
+			if cycles:
+				print('WARNING: Cycles found in trace data. Results may be incorrect')
+				if args.show_cycles:
+					for id in cycles:
+						show_trace(db, id)
+				else:
+					print('To display the cycles, specify --show-cycles on the command line')
 
-		complete_packet_intentions(db)
-		locate_trace_terminations(db)
+			complete_packet_intentions(db)
+			locate_trace_terminations(db)
 
-		# End time
-		proc_time = time.time() - start_proc_time
-		if get_setting(db, 'Processing Time') is None:
-			add_setting(db, 'Processing Time', proc_time)
-		print('Processing completed in {} seconds'.format(proc_time))
+			# End time
+			proc_time = time.time() - start_proc_time
+			if get_setting(db, 'Processing Time') is None:
+				add_setting(db, 'Processing Time', proc_time)
+				db.commit()
+			print('Processing completed in {} seconds'.format(proc_time))
 
-	# Collect stats
-	if check_schema(db):
-		print('\n----------------------')
-		show_settings(db)
-		print()
-		print_stats(db, args.start_offset, args.end_offset)
-	else:
-		print('Database is still invalid, unable to generate stats. Check run data')
+		# Collect stats
+		if check_schema(db):
+			print('\n----------------------')
+			show_settings(db)
+			print()
+			print_stats(db, args.start_offset, args.end_offset)
+		else:
+			print('Database is still invalid, unable to generate stats. Check run data')
 
-	# All done. Don't commit here. Either the steps before did what they wanted
-	# and committed or they didn't. Don't push bad stuff
-	db.close()
+		# All done. Don't commit here. Either the steps before did what they wanted
+		# and committed or they didn't. Don't push bad stuff
+		db.close()
 
-	# Leave file to indicate we're done
-	if args.file_indicator:
-		open(args.file_indicator, 'w').close()
+	finally:
+		# Leave file to indicate we're done
+		if args.finish_indicator:
+			open(args.finish_indicator, 'w').close()
 
 	return 0
 
