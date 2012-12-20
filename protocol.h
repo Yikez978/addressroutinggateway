@@ -43,12 +43,11 @@ struct arg_network_info;
  *
  * Connect process
  * - Signed with private key
- *	1. Ensure auth
  *	2. Local sends CONN_REQ containing its hop key, hop interval, and
  *		symmetric key, all encrypted with global key. (Remote MAY save this data,
  *		or it could simply do its own request next.)
  *	3. Remote sends CONN_RESP acknowledgement back, containing the remote
- *		hop key, hop interval, and symmetric key. Again, encrypted with global key
+ *		hop key, hop interval, and symmetric key. 
  *	4. Local receives data and saves it. Gateway is marked as having connection
  *		data, but not fully connected unless time sync data is also present. 
  *

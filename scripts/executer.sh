@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="~/pushed"
 PULLDIR="pulled"
-RESULTSDIR="results"
+RESULTSDIR="$HOME/results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -18,7 +18,8 @@ EXT="ext1"
 PROT="protA1 protB1 protC1"
 ALL="$GATES $EXT $PROT"
 
-EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19"
+#EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19"
+EC2="ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
 EC2_IMAGE="ami-3d4ff254"
 EC2_TYPE="t1.micro"
 export EC2_KEYPAIR="ec2thesis" # name only, not the file name
@@ -43,8 +44,8 @@ function start-tests {
 	fi
 
 	defaultlatency=20
-	defaulttest=8
-	defaultrate=.2
+	defaulttest=4
+	defaultrate=.3
 	defaulthr=500
 
 	# Ensure we have the newest build
@@ -65,7 +66,7 @@ function start-tests {
 	done
 
 	# Determine the max packet rate the gates can handle
-	for packetrate in 1 .5 .2 .1 .05 .01 .005 .001
+	for packetrate in .2 .1 .05 .01 .005 .001
 	do
 		for hr in 500 50 
 		do
@@ -85,7 +86,7 @@ function start-tests {
 	done
 
 	# Run the replay fuzzer against ARG for a while
-	for hr in 1000 500 50 15 
+	for hr in 500 50 
 	do
 		echo Running fuzzer tests
 		start-silent-test "fuzzer" 9 $runtime $defaultlatency $hr $defaultrate 
@@ -554,6 +555,7 @@ function process-runs {
 	declare -a servers=($EC2)
 	declare -a procids
 
+	#du -hs $RESULTSDIR/* | sort -h | awk '{print $2}' | while read results
 	for results in $RESULTSDIR/*
 	do
 		if [ ! -d "$results" ]
@@ -605,9 +607,9 @@ function process-runs {
 			then
 				break
 			else
-				echo -ne ${eraseline}Waiting to process\r
+				echo -ne "${eraseline}Waiting to process\r"
 				sleep 10
-				echo -ne ${eraseline}
+				echo -ne "${eraseline}"
 			fi
 		done
 
@@ -620,6 +622,8 @@ function process-runs {
 	found=1
 	while [[ $found ]]
 	do
+		sleep 30
+
 		found=
 		curr=0
 		while (( $curr < ${#servers[@]} ))
@@ -628,8 +632,8 @@ function process-runs {
 			then
 				remote=${servers[$curr]}
 				echo Shutting down $remote
-				push-to $remote - >/dev/null
-				run-on $remote - shutdown >/dev/null
+				push-to $remote - 
+				run-on $remote - shutdown 
 			else
 				found=1
 			fi
@@ -695,7 +699,6 @@ function process-run-remote {
 			help process-run-remote
 		fi
 
-
 		# Start processing
 		echo Processing $2 on $1
 		clean-pushed "$1"
@@ -707,10 +710,13 @@ function process-run-remote {
 		sleep 30
 		while [[ -n "`ssh $1 ls pushed/$FINISHINDICATOR 2>&1 | grep 'cannot access'`" ]]
 		do
-			echo -ne ${eraseline}Not done yet, still waiting
+			echo -ne "${eraseline}Not done yet, still waiting"
 			sleep 30
-			echo -ne ${eraseline}Checking if complete status
+			echo -ne "${eraseline}Checking if complete"
 		done
+
+		echo -e "${eraseline}Completed processing of $2 on $1"
+		ssh "$1" rm -f "pushed/$FINISHINDICATOR" 2>&1
 
 		# Prevent one result overwriting another
 		backoff=$(($RANDOM % 20 + 2))
@@ -745,15 +751,15 @@ function process-run-remote {
 		clean-pulled
 		touch "$PULLDIR/$RUNDB"
 
-		pull-from "$1" - "$RUNDB"
-		pull-from "$1" - "$PROCESSLOG"
+		pull-from "$1" - "$2/$RUNDB"
+		pull-from "$1" - "$2/$PROCESSLOG"
 		mv "$PULLDIR/$RUNDB" "$2/$RUNDB"
 		mv "$PULLDIR/$PROCESSLOG" "$2/$PROCESSLOG"
 
 		echo Completed processing of $2 on $1
 	else
 		rm -f "$FINISHINDICATOR"
-		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$FINISHINDICATOR" 2>&1 >"$PROCESSLOG" &
+		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
 		disown $!
 	fi
 }
@@ -823,8 +829,8 @@ function process-run {
 function stop-processing {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $ALL
-		run-on $ALL - stop-processing
+		push-to $EC2
+		run-on $EC2 - stop-processing
 	else
 		_stop-process python
 	fi
