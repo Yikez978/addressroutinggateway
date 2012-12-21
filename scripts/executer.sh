@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="$HOME/results"
+RESULTSDIR="$HOME/hdd/test"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -558,8 +558,9 @@ function process-runs {
 	declare -a procids
 
 	#du -hs $RESULTSDIR/* | sort -h | awk '{print $2}' | while read results
-	for results in $RESULTSDIR/*
+	for results in "$RESULTSDIR/"*
 	do
+		echo $results
 		if [ ! -d "$results" ]
 		then
 			continue
@@ -634,7 +635,7 @@ function process-runs {
 			then
 				remote=${servers[$curr]}
 				echo Shutting down $remote
-				push-to $remote - 
+				#push-to $remote - 
 				run-on $remote - shutdown 
 			else
 				found=1
@@ -1171,7 +1172,7 @@ function generate-ec2-ssh-conf {
 		echo -e "\nHost ${servers[$count]}" >> "$TEMPFILE"
 		echo -e "\tHostname $addr" >> "$TEMPFILE"
 		echo -e "\tUser ubuntu" >> "$TEMPFILE"
-		echo -e "\tIdentityFile ~/thesis/arg/conf/ec2thesis.pem" >> "$TEMPFILE"
+		echo -e "\tIdentityFile `pwd`/conf/ec2thesis.pem" >> "$TEMPFILE"
 		echo -e "\tUserKnownHostsFile /dev/null" >> "$TEMPFILE"
 		echo -e "\tStrictHostKeyChecking no" >> "$TEMPFILE"
 		count=$(($count + 1))
@@ -1181,6 +1182,7 @@ function generate-ec2-ssh-conf {
 
 	echo Final SSH config:
 	cat "$TEMPFILE"
+	mkdir -p "$HOME/.ssh"
 	mv -f "$TEMPFILE" "$HOME/.ssh/config"
 
 	return $count
@@ -1218,8 +1220,8 @@ function setup-processing-env {
 		done
 
 		# Install stuff
-		e push-to $systems -
-		e run-on $systems - setup-processing-env
+		push-to $systems -
+		run-on $systems - setup-processing-env
 	else
 		# Install anything needed
 		sudo apt-get install -y python-libpcap python-scapy
@@ -1529,7 +1531,7 @@ function _main {
 	# For local, we move back up to the parent, giving us nice access to all of the source
 	HOST=`hostname`
 	TYPE=`hostname | sed -E 's/([[:lower:]]+).*/\1/g'`
-	if [[ "$LOCAL" == "$TYPE" || "$HOST" == "dev" ]]
+	if [[ "$LOCAL" == "$TYPE" || "$HOST" == "dev" || "$HOST" == "ubuntu" ]]
 	then
 		cd ..
 		SCRIPT="scripts/`basename $SOURCE`"
