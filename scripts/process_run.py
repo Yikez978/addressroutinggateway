@@ -771,24 +771,30 @@ def record_traffic_logs(db, logdir):
 		if not is_gate and not is_prot and not is_ext:
 			continue
 
+		# Done already?
+		action_name = os.path.basename(log_name)
+		if is_action_done(db, action_name):
+			print('{} already read in'.format(log_name))
+			return
+		else:
+			add_action(db, action_name)
+
+		clean_finish = False
 		with open(logName) as log:
  			if is_gate:
-				record_gate_traffic_log(db, os.path.basename(logName), name, log)
+				clean_finish = record_gate_traffic_log(db, action_name, name, log)
  			else:
-				record_client_traffic_log(db, os.path.basename(logName), name, log) 
+				clean_finish = record_client_traffic_log(db, action_name, name, log) 
+
+		# This file is done now, right?
+		if clean_finish:
+			mark_action_done(db, action_name)
+			db.commit()
 
 	mark_action_done(db, 'record_logs')
 	db.commit()
 
 def record_client_traffic_log(db, log_name, name, log): 
-	# Done already?
-	action_name = log_name
-	if is_action_done(db, action_name):
-		print('{} already read in'.format(log_name))
-		return
-	else:
-		add_action(db, action_name)
-
 	print('Processing client log file {} for {}'.format(log_name, name))
 
 	system_id, system_ip, name = get_system(db, name=name)
@@ -915,20 +921,13 @@ def record_client_traffic_log(db, log_name, name, log):
 								LIMIT 1)''', update_data)
 
 	# Done!
-	mark_action_done(db, action_name)
 	print('\tCommitting processing')
 	db.commit()
 	c.close()
 
-def record_gate_traffic_log(db, log_name, name, log):
-	# Done already?
-	action_name = log_name
-	if is_action_done(db, action_name):
-		print('{} already read in'.format(log_name))
-		return
-	else:
-		add_action(db, action_name)
+	return True
 
+def record_gate_traffic_log(db, log_name, name, log):
 	print('Processing gate log file {} for {}'.format(log_name, name))
 
 	system_id, system_ip, name = get_system(db, name=name)
@@ -1101,10 +1100,11 @@ def record_gate_traffic_log(db, log_name, name, log):
 	c.executemany('''UPDATE packets SET next_hop_id=? WHERE id=?''', link_data)
 
 	# Done!
-	mark_action_done(db, action_name)
 	print('\tCommitting processing')
 	db.commit()
 	c.close()
+
+	return True
 
 ##########################################
 # Track each sent packet through the system and determine either where it died or that
