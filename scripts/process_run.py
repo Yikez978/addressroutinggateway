@@ -1094,9 +1094,8 @@ def trace_packets(db):
 	else:
 		add_action(db, 'trace')
 
-	print('Tracing packets...', end='')
+	print('Beginnig packet trace')
 
-	# Go one-by-one through packets and match them up
 	start_time = time.time()
 	c = db.cursor()
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace ON packets (src_id, dest_id, system_id, proto, full_hash)''')
@@ -1105,27 +1104,86 @@ def trace_packets(db):
 	# Keep status of work
 	db.set_progress_handler(print_dot, SQLITE_PROG_UPDATE_FREQ)
 
-	c.execute('BEGIN TRANSACTION')
-	c.execute('''SELECT rp.id, sp.id
-					FROM packets AS rp
-					JOIN packets AS sp
-						ON rp.system_id != sp.system_id 
-							AND rp.src_id=sp.src_id
-							AND rp.dest_id=sp.dest_id
-							AND rp.proto=sp.proto
-							AND rp.full_hash=sp.full_hash
-					LEFT OUTER JOIN packets AS mp ON rp.id=mp.next_hop_id
-					WHERE rp.is_send=0								-- Looking for receives
-						AND mp.next_hop_id IS NULL					-- Can't be matched already
-						AND rp.time BETWEEN sp.time-5 AND sp.time+5	-- Time should be similar to send
-					ORDER BY rp.time ASC							-- Match earlier packets first
-					''')
-	c.executemany('UPDATE packets SET next_hop_id=? WHERE id=?', c.fetchall())
+	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
+	total_count = c.fetchone()[0]
+
+	hopless_packets = list()
+	curr_packet = len(hopless_packets)
 
 	db.set_progress_handler(None, SQLITE_PROG_UPDATE_FREQ)
 
-	tot_time = time.time() - start_time
-	print('\tTraced packets in {} seconds'.format(tot_time))
+	# Go one-by-one through packets and match them up
+	c.execute('BEGIN TRANSACTION')
+	count = 0
+	failed_count = 0
+	start_time = time.time()
+	while True:
+		if curr_packet >= len(hopless_packets):
+			print('\tGrabbing packets that need processing')
+			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto
+							FROM packets
+							WHERE is_send=1
+								AND trace_failed=0
+								AND next_hop_id IS NULL
+							LIMIT ?''', (ROW_CACHE_SIZE,))
+			hopless_packets = c.fetchall()
+			curr_packet = 0
+
+			# If we're all out of packets, terminate
+			if not hopless_packets:
+				break
+
+		sent_packet = hopless_packets[curr_packet]
+		curr_packet += 1
+		system_id, packet_id, packet_time, full_hash, src_id, dest_id, proto = sent_packet
+
+		# Find corresponding received packet
+		# Receive packet must be reasonably similar in time, have the same data,
+		# and not already be the "next hop" for another packet
+		c.execute('''SELECT p1.id, p1.next_hop_id, p1.system_id
+						FROM packets AS p1
+						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
+						WHERE p1.is_send=0						-- Looking for receives
+							AND p2.next_hop_id IS NULL			-- Can't be matched already
+							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
+							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
+							AND p1.proto=?
+							AND p1.full_hash=?
+							AND NOT p1.id=?						-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
+							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
+						ORDER BY p1.time ASC					-- Match earlier packets first
+						LIMIT 1''',
+						(system_id,
+							src_id, dest_id, proto, full_hash,
+							packet_id,
+							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
+		receives = c.fetchall()
+
+		if src_id is None or dest_id is None:
+			raise Exception('Problem! The pcap processor did not determine the source and destination of a packet it saw (specifically, packet {})'.format(packet_id))
+		
+		if len(receives) == 1:
+			c.execute('UPDATE packets SET next_hop_id=? WHERE id=?', (receives[0][0], packet_id))
+
+		else:
+			# No matches found. We'll figure this one out later
+			#print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
+			failed_count += 1
+
+		count += 1
+		if count % 500 == 0:
+			time_per_chunk = time.time() - start_time
+			start_time = time.time()
+			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
+				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
+
+	db.commit()
+
+	if count > 0:
+		print('\t{} traces attempted, {} failed'.format(count, failed_count))
+	else:
+		print('\tEverything appears to be in order here. No traces needed')
 
 	# Add next_hop_id index now that all the data is ready
 	print('Creating index for routing data')
@@ -1136,6 +1194,9 @@ def trace_packets(db):
 	print('\tCommitting trace')
 	db.commit()
 	c.close()
+
+	tot_time = time.time() - start_time
+	print('\tTraced packets in {} seconds'.format(tot_time))
 
 def complete_packet_intentions(db):
 	# Find any packets that don't know their true source or destination, find
@@ -1428,6 +1489,13 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	for name, rate in rates.iteritems():
 		stats['{}.pps'.format(name).lower()] = rate
 
+	# Trace problems
+	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
+					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+	failed_trace_count, failed_truth_count = c.fetchone()
+	stats['failed.traces'] = failed_trace_count
+	stats['failed.truth'] = failed_truth_count
+
 	# Valid sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count, lost_packets = valid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['valid.sent'] = sent_count
@@ -1465,6 +1533,9 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	for k, v in stats.iteritems():
 		if k.endswith('.pps'):
 			print('{}: {} packets per seconds'.format(k, v))
+
+	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
+	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
 
 	print('\nValid packets sent: {}'.format(stats['valid.sent']))
 	print('Valid packets received: {}'.format(stats['valid.recv']))
