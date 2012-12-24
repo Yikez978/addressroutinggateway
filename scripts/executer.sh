@@ -18,13 +18,14 @@ EXT="ext1"
 PROT="protA1 protB1 protC1"
 ALL="$GATES $EXT $PROT"
 
-EC2="ec0"
-#EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
+EC2="ec0 ec1 ec2 ec3 ec4 ec5 ec6 ec7 ec8 ec9 ec10 ec11 ec12 ec13 ec14 ec15 ec16 ec17 ec18 ec19 ec20 ec21 ec22 ec23 ec24 ec25 ec26 ec27 ec28 ec29 ec30 ec31 ec32 ec33 ec34 ec35 ec36 ec37 ec38 ec39 ec40 ec41 ec42 ec43 ec44 ec45 ec46 ec47 ec48 ec49 ec50 ec51 ec52 ec53 ec54 ec55 ec56 ec57 ec58 ec59 ec60 ec61 ec62 ec63 ec64 ec65 ec66 ec67 ec68 ec69 ec70 ec71 ec72 ec73 ec74"
 EC2_IMAGE="ami-3d4ff254"
 EC2_TYPE="t1.micro"
 export EC2_KEYPAIR="ec2thesis" # name only, not the file name
 export EC2_PRIVATE_KEY="conf/pk-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
+
+PROCESSING_NODES="$GATES $EXT $PROT"
 
 HOSTKEYS=""
 
@@ -554,7 +555,7 @@ function process-runs {
 	fi
 
 	declare local=
-	declare -a servers=($EC2)
+	declare -a servers=($PROCESSING_NODES)
 	declare -a procids
 
 	#du -hs $RESULTSDIR/* | sort -h | awk '{print $2}' | while read results
@@ -831,8 +832,8 @@ function process-run {
 function stop-processing {
 	if [[ $IS_LOCAL ]]
 	then
-		push-to $EC2
-		run-on $EC2 - stop-processing
+		push-to $PROCESSING_NODES
+		run-on $PROCESSING_NODES - stop-processing
 	else
 		_stop-process python
 	fi
@@ -1152,7 +1153,7 @@ function create-instances {
 	fi
 
 	echo Attempting to launch instances
-	ec2-run-instances "$EC2_IMAGE" -t "$EC2_TYPE" -k "$EC2_KEYPAIR" --instance-initiated-shutdown-behavior terminate -n $1 
+	ec2-run-instances "$EC2_IMAGE" -t "$EC2_TYPE" -k "$EC2_KEYPAIR" -n $1 
 }
 
 # Creates the EC2 portion of the SSH config file, including the
@@ -1205,7 +1206,7 @@ function setup-processing-env {
 	if [[ $IS_LOCAL ]]
 	then
 		# Get the list of servers to run on. Lists ends with '-'
-		systems=$EC2
+		systems=$PROCESSING_NODES
 		if [[ "$systems" == "" ]]
 		then
 			echo No systems supplied
