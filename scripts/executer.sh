@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="$HOME/hdd/test"
+RESULTSDIR="$HOME/hdd/results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -635,7 +635,7 @@ function process-runs {
 			then
 				remote=${servers[$curr]}
 				echo Shutting down $remote
-				#push-to $remote - 
+				push-to $remote - 
 				run-on $remote - shutdown 
 			else
 				found=1
@@ -998,6 +998,7 @@ function set-time {
 		run-on $ALL - set-time "`date '+%m/%d/%Y +%H:%M:%S'`"
 	else
 		sudo date -s "$@"
+		date
 	fi
 }
 
