@@ -124,7 +124,7 @@ def create_schema(db):
 	
 	c.execute('DROP TABLE IF EXISTS completed_actions')
 	c.execute('''CREATE TABLE completed_actions (
-						action VARCHAR(50) NOT NULL,
+						action VARCHAR(50) UNIQUE,
 						done TINYINT)''')
 
 	# After much experimentation, this combination of indexes proves effective
@@ -194,7 +194,11 @@ def is_action_done(db, action):
 
 def add_action(db, action):
 	c = db.cursor()
-	c.execute('INSERT INTO completed_actions (action, done) VALUES (?, 0)', (action,))
+	try:
+		c.execute('INSERT INTO completed_actions (action, done) VALUES (?, 0)', (action,))
+	except sqlite3.IntegrityError:
+		# Action already existed
+		pass
 	c.close()
 
 def mark_action_done(db, action):
@@ -573,6 +577,13 @@ def record_traffic_pcap(db, logdir):
 
 	# Go through each log file and record what packets each host sent
 	for logName in glob(os.path.join(logdir, '*.pcap')):
+		action_name = os.path.basename(log_name)
+		if is_action_done(db, action_name):
+			print('{} already read in'.format(log_name))
+			continue
+		else:
+			add_action(db, action_name)
+
 		# Determine who this log belongs to
 		name = os.path.basename(logName)
 
@@ -721,14 +732,17 @@ def record_traffic_pcap(db, logdir):
 
 		print('\t{} total packets inserted'.format(count))
 
-	# Insert them all
-	c.execute('BEGIN TRANSACTION')
-	c.executemany('''INSERT INTO packets (system_id, time, pcap_log_line,
-						is_send, proto, syn, ack, len,
-						src_ip, dest_ip, src_id, dest_id,
-						full_hash, partial_hash)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-					packet_data)
+		# Insert them all
+		c.execute('BEGIN TRANSACTION')
+		c.executemany('''INSERT INTO packets (system_id, time, pcap_log_line,
+							is_send, proto, syn, ack, len,
+							src_ip, dest_ip, src_id, dest_id,
+							full_hash, partial_hash)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+						packet_data)
+		mark_action_done(db, action_name)
+		print('\tCommitting pcap file packets')
+		db.commit()
 
 	# Done!
 	mark_action_done(db, 'pcap')
@@ -1103,7 +1117,7 @@ def trace_packets(db):
 	else:
 		add_action(db, 'trace')
 
-	print('Beginnig packet trace')
+	print('Beginning packet trace')
 
 	start_time = time.time()
 	c = db.cursor()
