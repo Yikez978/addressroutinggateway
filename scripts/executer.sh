@@ -25,7 +25,7 @@ export EC2_KEYPAIR="ec2thesis" # name only, not the file name
 export EC2_PRIVATE_KEY="conf/pk-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 
-PROCESSING_NODES="$GATES $EXT $PROT"
+PROCESSING_NODES="$GATES $PROT"
 
 HOSTKEYS=""
 
@@ -634,10 +634,14 @@ function process-runs {
 		do
 			if ! is-running "${procids[$curr]}"
 			then
+				# Only shutdown EC2 servers
 				remote=${servers[$curr]}
-				echo Shutting down $remote
-				push-to $remote - 
-				run-on $remote - shutdown 
+				if [[ "$EC2" == *"$remote"* ]]
+				then
+					echo Shutting down $remote
+					push-to $remote - 
+					run-on $remote - shutdown 
+				fi
 			else
 				found=1
 			fi
