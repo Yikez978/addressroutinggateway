@@ -126,6 +126,7 @@ def create_schema(db):
 	c.execute('''CREATE TABLE completed_actions (
 						action VARCHAR(50) UNIQUE,
 						done TINYINT)''')
+	add_action(db, 'processing')
 
 	# After much experimentation, this combination of indexes proves effective
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_full_hash ON packets (full_hash)''')
@@ -1878,8 +1879,6 @@ def main(argv):
 		already_exists = os.path.exists(args.database)
 		db = sqlite3.connect(args.database)
 
-		configure_sqlite(db)
-
 		# Create schema if it doesn't exist already
 		if not already_exists or args.empty_database:
 			try:
@@ -1889,7 +1888,11 @@ def main(argv):
 				print('Unable to create database: ', e)
 				return 1
 
-		if not args.skip_processing and get_setting(db, 'Processing Time') is None:
+		if not args.skip_processing and not is_action_done(db, 'processing'):
+			add_action(db, 'processing')
+
+			configure_sqlite(db)
+
 			# Time processing
 			start_proc_time = time.time()
 
@@ -1934,6 +1937,9 @@ def main(argv):
 				add_setting(db, 'Processing Time', proc_time)
 				db.commit()
 			print('Processing completed in {} seconds'.format(proc_time))
+
+			mark_action_done(db, 'processing')
+			db.commit()
 
 		# Collect stats
 		if check_schema(db):
