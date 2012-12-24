@@ -737,6 +737,12 @@ def record_traffic_pcap(db, logdir):
 	c.close()
 
 def record_traffic_logs(db, logdir):
+	if is_action_done(db, 'record_logs'):
+		print('Traffic logs already recorded')
+		return
+	else:
+		add_action(db, 'record_logs')
+
 	# Go through each log files and record what packets each host believes it sent
 	# Use this information to augment what we pulled from the pcap logs earlier
 	for logName in glob(os.path.join(logdir, '*.log')):
@@ -756,6 +762,9 @@ def record_traffic_logs(db, logdir):
 				record_gate_traffic_log(db, os.path.basename(logName), name, log)
  			else:
 				record_client_traffic_log(db, os.path.basename(logName), name, log) 
+
+	mark_action_done(db, 'record_logs')
+	db.commit()
 
 def record_client_traffic_log(db, log_name, name, log): 
 	# Done already?
