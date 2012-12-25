@@ -144,24 +144,39 @@ def create_schema(db):
 
 def check_schema(db):
 	valid_db = True
-
 	c = db.cursor()
 
-	c.execute('SELECT count(*) FROM completed_actions WHERE done=0')
-	num = c.fetchone()[0]
-	if num > 0:
-		valid_db = False
-
-	c.execute('SELECT count(*) FROM packets')
-	num = c.fetchone()[0]
-	if num == 0:
-		valid_db = False
-
-	if get_setting(db, 'Processing Time') is None:
+	try:
+		c.execute('SELECT 1 FROM settings')
+		c.execute('SELECT 1 FROM completed_actions')
+		c.execute('SELECT 1 FROM systems')
+		c.execute('SELECT 1 FROM reasons')
+		c.execute('SELECT 1 FROM packets')
+	except:
 		valid_db = False
 
 	c.close()
+	return valid_db
 
+def check_complete(db):
+	if not check_schema(db):
+		return False
+
+	valid_db = True
+	c = db.cursor()
+
+	try:
+		c.execute('SELECT count(*) FROM completed_actions WHERE done=0')
+		num = c.fetchone()[0]
+		if num > 0:
+			valid_db = False
+
+		if is_action_done(db, 'processing') is None:
+			valid_db = False
+	except:
+		valid_db = False
+
+	c.close()
 	return valid_db
 
 def configure_sqlite(db):
@@ -254,9 +269,9 @@ def read_all_settings(db, logdir):
 		add_setting(db, 'Latency', 'unknown')
 
 	# Read the settings for each log file
-	for logName in glob(os.path.join(logdir, '*.log')):
+	for log_name in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
-		name = os.path.basename(logName)
+		name = os.path.basename(log_name)
 		name = name[:name.find('-')]
 
 		is_gate = name.startswith('gate')
@@ -272,21 +287,21 @@ def read_all_settings(db, logdir):
 			if get_setting(db, hr_set_name) is not None:
 				continue
 
-			m = re.search('''-hr([0-9]+ms)''', logName)
+			m = re.search('''-hr([0-9]+ms)''', log_name)
 			if m is not None:
 				add_setting(db, hr_set_name, m.group(1))
 			else:
 				add_setting(db, hr_set_name, 'unknown')
 		else:
-			if logName.find('send') == -1:
-				m = re.search('''listen-(tcp|udp):([0-9]+)\.log''', logName)
+			if log_name.find('send') == -1:
+				m = re.search('''listen-(tcp|udp):([0-9]+)\.log''', log_name)
 				if m is not None:
 					proto, port = m.groups()
 					add_setting(db, '{} listener'.format(name), '{}, port {}'.format(proto, port))
 				else:
 					print('WARNING: Log file {} improperly named, unable to setup information')
 			else:
-				m = re.search('''send-(tcp|udp)-({}):([0-9]+)-delay:([0-9\.]+)\.log'''.format(IP_REGEX), logName)
+				m = re.search('''send-(tcp|udp)-({}):([0-9]+)-delay:([0-9\.]+)\.log'''.format(IP_REGEX), log_name)
 				if m is not None:
 					proto, ip, port, delay = m.groups()
 					add_setting(db, '{} sender'.format(name), '{}, {}:{}, {} second delay'.format(proto, ip, port, delay))
@@ -386,21 +401,21 @@ def add_all_systems(db, logdir):
 
 	print('Adding all systems to database')
 
-	for logName in glob(os.path.join(logdir, '*.log')):
+	for log_name in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
-		name = os.path.basename(logName)
+		name = os.path.basename(log_name)
 		name = name[:name.find('-')]
 
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
 
-		print('\tFound {} with log {}'.format(name, logName))
+		print('\tFound {} with log {}'.format(name, log_name))
 
 		if not is_gate and not is_prot and not is_ext:
 			continue
 		
-		with open(logName) as log:
+		with open(log_name) as log:
 			if is_gate:
 				add_gate(db, name, log)
 			else:
@@ -577,7 +592,7 @@ def record_traffic_pcap(db, logdir):
 	packet_data = list()
 
 	# Go through each log file and record what packets each host sent
-	for logName in glob(os.path.join(logdir, '*.pcap')):
+	for log_name in glob(os.path.join(logdir, '*.pcap')):
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(log_name))
@@ -586,7 +601,7 @@ def record_traffic_pcap(db, logdir):
 			add_action(db, action_name)
 
 		# Determine who this log belongs to
-		name = os.path.basename(logName)
+		name = os.path.basename(log_name)
 
 		m = re.match('^([a-zA-Z0-9]+?)(?:|-(inner|outer))\.', name)
 		if m is None:
@@ -610,10 +625,10 @@ def record_traffic_pcap(db, logdir):
 		elif is_prot:
 			gate_id = get_system(db, name='gate{}'.format(network))[0]
 
-		print('Processing pcap file {} for {}'.format(logName, name))
+		print('Processing pcap file {} for {}'.format(log_name, name))
 		
 		p = pcap.pcapObject()
-		p.open_offline(logName.encode('utf-8'))
+		p.open_offline(log_name.encode('utf-8'))
 
 		# Grab the system ID for this log
 		s = get_system(db, name=name)
@@ -760,9 +775,9 @@ def record_traffic_logs(db, logdir):
 
 	# Go through each log files and record what packets each host believes it sent
 	# Use this information to augment what we pulled from the pcap logs earlier
-	for logName in glob(os.path.join(logdir, '*.log')):
+	for log_name in glob(os.path.join(logdir, '*.log')):
 		# Determine what type of log this is. Alters parsing and processing
-		name = os.path.basename(logName)
+		name = os.path.basename(log_name)
 		name = name[:name.find('-')]
 
 		is_gate = name.startswith('gate')
@@ -781,7 +796,7 @@ def record_traffic_logs(db, logdir):
 			add_action(db, action_name)
 
 		clean_finish = False
-		with open(logName) as log:
+		with open(log_name) as log:
  			if is_gate:
 				clean_finish = record_gate_traffic_log(db, action_name, name, log)
  			else:
@@ -1880,7 +1895,7 @@ def main(argv):
 		db = sqlite3.connect(args.database)
 
 		# Create schema if it doesn't exist already
-		if not already_exists or args.empty_database:
+		if not already_exists or args.empty_database or not check_schema(db):
 			try:
 				print('Creating new database')
 				create_schema(db)
@@ -1888,20 +1903,13 @@ def main(argv):
 				print('Unable to create database: ', e)
 				return 1
 
-		if not args.skip_processing and not is_action_done(db, 'processing'):
+		if not args.skip_processing and not check_complete(db):
 			add_action(db, 'processing')
 
 			configure_sqlite(db)
 
 			# Time processing
 			start_proc_time = time.time()
-
-			# Ensure all the tables we need are there
-			try:
-				check_schema(db)
-			except sqlite3.OperationalError:
-				print('Database exists but is unreadable. Recreating')
-				create_schema(db)
 
 			# Ensure all the systems and settings are in place before we begin
 			read_all_settings(db, args.logdir)
@@ -1942,7 +1950,7 @@ def main(argv):
 			db.commit()
 
 		# Collect stats
-		if check_schema(db):
+		if check_complete(db):
 			print('\n----------------------')
 			show_settings(db)
 			print()

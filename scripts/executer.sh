@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="$HOME/hdd/results"
+RESULTSDIR="$HOME/results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -25,7 +25,7 @@ export EC2_KEYPAIR="ec2thesis" # name only, not the file name
 export EC2_PRIVATE_KEY="conf/pk-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 
-PROCESSING_NODES="$GATES $PROT"
+PROCESSING_NODES="$GATES $EXT $PROT"
 
 HOSTKEYS=""
 
@@ -96,7 +96,7 @@ function start-tests {
 	done
 }
 
-# Begins the given test, only displays a pretty view with teh parameters
+# Begins the given test, only displays a pretty view with the parameters
 # and an approximate countdown. Test label is used to name the folders to
 # know what the purpose of the run was
 # Usage: start-silent-test <test-label> <test num> <time> <latency> <hop rate> [<extra params>...]
@@ -561,7 +561,6 @@ function process-runs {
 	#du -hs $RESULTSDIR/* | sort -h | awk '{print $2}' | while read results
 	for results in "$RESULTSDIR/"*
 	do
-		echo $results
 		if [ ! -d "$results" ]
 		then
 			continue
@@ -570,7 +569,8 @@ function process-runs {
 		# Don't handle if it has already been processed
 		if [ -f "$results/$RUNDB" ]
 		then
-			continue
+			echo $RUNDB already exists, sending it off for processing anyway
+			#continue
 		fi
 
 		echo Finding a host to process $results	
@@ -715,7 +715,7 @@ function process-run-remote {
 		run-on "$1" - process-run-remote "$base"
 
 		# Wait for it to complete
-		sleep 30
+		sleep 10
 		while [[ -n "`ssh $1 ls pushed/$base/$FINISHINDICATOR 2>&1 | grep 'cannot access'`" ]]
 		do
 			echo -ne "${eraseline}Not done yet, still waiting"

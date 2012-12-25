@@ -24,7 +24,7 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 		db = None
 		try:
 			db = sqlite3.connect(db_path)
-			if check_schema(db):
+			if check_complete(db):
 				sys.stdout.flush()
 			else:
 				raise Exception('contents are invalid'.format(db_path))
