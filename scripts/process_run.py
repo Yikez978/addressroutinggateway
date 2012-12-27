@@ -594,12 +594,11 @@ def record_traffic_pcap(db, logdir):
 
 	# Go through each log file and record what packets each host sent
 	for log_name in glob(os.path.join(logdir, '*.pcap')):
+		# Don't actually add teh action yet, it may be a pcap file we don't care about
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(os.path.basename(log_name)))
 			continue
-		else:
-			add_action(db, action_name)
 
 		# Determine who this log belongs to
 		name = os.path.basename(log_name)
@@ -616,7 +615,11 @@ def record_traffic_pcap(db, logdir):
 		is_ext = name.startswith('ext')
 
 		if not is_gate and not is_prot and not is_ext:
+			print('\tUnrecognized pcap file, this is a problem')
 			continue
+
+		# Definitely using this file
+		add_action(db, action_name)
 
 		if not is_ext:
 			network = name[4]
@@ -635,6 +638,8 @@ def record_traffic_pcap(db, logdir):
 		s = get_system(db, name=name)
 		if s is None:
 			print('\tSkipping, this system is not in the database. There were likely no log files')
+			mark_action_done(db, action_name)
+			db.commit()
 			continue
 
 		system_id, system_ip, name = s
@@ -784,6 +789,7 @@ def record_traffic_logs(db, logdir, shortcut=False):
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_client_log ON packets (system_id, log_line, partial_hash, src_id, dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_gate_log ON packets (system_id, log_line, full_hash, src_id, dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_time ON packets (time)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	db.commit()
 	c.close()
 
@@ -805,7 +811,7 @@ def record_traffic_logs(db, logdir, shortcut=False):
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(os.path.basename(log_name)))
-			return
+			continue
 		else:
 			add_action(db, action_name)
 
@@ -1173,7 +1179,8 @@ def trace_packets(db):
 	start_chunk_time = time.time()
 	while True:
 		if curr_packet >= len(hopless_packets):
-			print('\tGrabbing packets that need processing')
+			print('\tGrabbing packets that need processing...', end='')
+			sys.stdout.flush()
 			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto
 							FROM packets
 							WHERE is_send=1
@@ -1182,6 +1189,7 @@ def trace_packets(db):
 							LIMIT ?''', (ROW_CACHE_SIZE,))
 			hopless_packets = c.fetchall()
 			curr_packet = 0
+			print('done')
 
 			start_chunk_time = time.time()
 
@@ -1229,7 +1237,7 @@ def trace_packets(db):
 		if count % 500 == 0:
 			time_per_chunk = time.time() - start_chunk_time
 			start_chunk_time = time.time()
-			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
+			print('\tTracing packets {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
 				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
 
 		if count % 10000 == 0:
