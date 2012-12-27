@@ -766,7 +766,7 @@ function process-run-remote {
 		echo Completed processing of $2 on $1
 	else
 		rm -f "$1/$FINISHINDICATOR"
-		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$1/$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
+		./process_run.py -l "$1" -db "$1/$RUNDB" --skip-stats --finish-indicator "$1/$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
 		disown $!
 	fi
 }

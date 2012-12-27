@@ -128,12 +128,8 @@ def create_schema(db):
 						done TINYINT)''')
 	add_action(db, 'processing')
 
-	# After much experimentation, this combination of indexes proves effective
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
-
 	# System index. IP and mask are used ALL the time
+	# Other indexes are added as needed by the various processing functions
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_ip ON systems (mask, ip, id, name)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_name ON systems (name)''')
 	
@@ -1160,9 +1156,9 @@ def trace_packets(db):
 	start_time = time.time()
 
 	c = db.cursor()
-	print('\tCreating trace indexes')
+	print('\tCreating trace indices')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_needed ON packets (is_send, trace_failed, next_hop_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_match ON packets (is_send, next_hop_id, system_id, src_id, dest_id, proto, full_hash, time, id, next_hop_id, system_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_match ON packets (is_send, src_id, dest_id, proto, full_hash, time)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
 	db.commit()
 
@@ -1208,17 +1204,17 @@ def trace_packets(db):
 						FROM packets AS p1
 						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
 						WHERE p1.is_send=0						-- Looking for receives
-							AND p2.next_hop_id IS NULL			-- Can't be matched already
-							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
 							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
 							AND p1.proto=?
 							AND p1.full_hash=?
 							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
+							AND p2.next_hop_id IS NULL			-- Can't be matched already
+							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
 						ORDER BY p1.time ASC					-- Match earlier packets first
 						LIMIT 1''',
-						(system_id,
-							src_id, dest_id, proto, full_hash,
-							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
+						(src_id, dest_id, proto, full_hash,
+							packet_time - TIME_SLACK, packet_time + TIME_SLACK,
+							system_id))
 		receives = c.fetchall()
 
 		if src_id is None or dest_id is None:
@@ -1229,7 +1225,7 @@ def trace_packets(db):
 
 		else:
 			# No matches found. We'll figure this one out later
-			#print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
 			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
 			failed_count += 1
 
@@ -1381,7 +1377,7 @@ def locate_trace_terminations(db):
 	count = 0
 	while True:
 		if curr_packet >= len(unterminated_packets):
-			print('\tGrabbing packets that need processing')
+			print('\tGrabbing packets that need processing...', end='')
 			c.execute('''SELECT id, next_hop_id FROM packets
 									WHERE next_hop_id IS NOT NULL
 										AND terminal_hop_id IS NULL
@@ -1389,6 +1385,7 @@ def locate_trace_terminations(db):
 									LIMIT ?''', (ROW_CACHE_SIZE,))
 			unterminated_packets = c.fetchall()
 			curr_packet = 0
+			print('done')
 
 			# If we're all out of packets, terminate
 			if not unterminated_packets:
@@ -1900,9 +1897,13 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('--skip-processing', action='store_true', help='Do not ensure processing is complete')
+	parser.add_argument('--skip-stats', action='store_true', help='Do not generate statistics after processing')
+
 	parser.add_argument('--offset', type=int, default=0, help='How many seconds to ignore at beginning AND end of run. Overriden by --start-offset and --end-offset')
+
 	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
 	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
+
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
 	parser.add_argument('--finish-indicator', help='Empty file to create when processing completes')
 	args = parser.parse_args(argv[1:])
@@ -1945,6 +1946,7 @@ def main(argv):
 
 				# Trace packets
 				# What did each host attempt to do?
+				# TBD add shortcut checks and call as appropriate
 				record_traffic_pcap(db, args.logdir)
 				record_traffic_logs(db, args.logdir)
 
@@ -1974,14 +1976,17 @@ def main(argv):
 		except KeyboardInterrupt:
 			print('Stopping processing')
 
-		# Collect stats
-		if check_complete(db):
-			print('\n----------------------')
-			show_settings(db)
-			print()
-			print_stats(db, args.start_offset, args.end_offset)
+		if not args.skip_stats:
+			# Collect stats
+			if check_complete(db):
+				print('\n----------------------')
+				show_settings(db)
+				print()
+				print_stats(db, args.start_offset, args.end_offset)
+			else:
+				print('Database is still invalid, unable to generate stats. Check run data')
 		else:
-			print('Database is still invalid, unable to generate stats. Check run data')
+			print('Skipping stats generation')
 
 		# All done. Don't commit here. Either the steps before did what they wanted
 		# and committed or they didn't. Don't push bad stuff
