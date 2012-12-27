@@ -129,15 +129,13 @@ def create_schema(db):
 	add_action(db, 'processing')
 
 	# After much experimentation, this combination of indexes proves effective
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_full_hash ON packets (full_hash)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_partial_hash ON packets (partial_hash)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_system_id ON packets (system_id)''')
-	#c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
-	#c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 
 	# System index. IP and mask are used ALL the time
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_mask ON systems (mask)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_ip ON systems (mask, ip, id, name)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_name ON systems (name)''')
 	
 	db.commit()
 	c.close()
@@ -585,6 +583,9 @@ def record_traffic_pcap(db, logdir):
 	else:
 		add_action(db, 'pcap')
 
+	#import time
+	#start_time = time.time()
+
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
 
@@ -595,7 +596,7 @@ def record_traffic_pcap(db, logdir):
 	for log_name in glob(os.path.join(logdir, '*.pcap')):
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
-			print('{} already read in'.format(log_name))
+			print('{} already read in'.format(os.path.basename(log_name)))
 			continue
 		else:
 			add_action(db, action_name)
@@ -645,7 +646,7 @@ def record_traffic_pcap(db, logdir):
 			if packet is None:
 				break
 
-			data, time = packet[1:]
+			data, packet_time = packet[1:]
 			pcap_count += 1
 			packet = scapy.all.Ether(data)
 
@@ -737,7 +738,7 @@ def record_traffic_pcap(db, logdir):
 				raise Exception('Not a gate, ext, or prot system. Bad pcap file present')
 			
 			# Will insert data later
-			packet_data.append((system_id, time, pcap_count,
+			packet_data.append((system_id, packet_time, pcap_count,
 								is_send, ip_layer.proto, syn, ack, len(packet),
 								src_ip, dest_ip, src_id, dest_id,
 								full_hash, partial_hash,))
@@ -761,17 +762,30 @@ def record_traffic_pcap(db, logdir):
 		db.commit()
 
 	# Done!
+	#tot_time = time.time() - start_time
+	#add_setting(db, 'pcap time', tot_time)
+
 	mark_action_done(db, 'pcap')
 	print('\tCommitting packets to database')
 	db.commit()
 	c.close()
 
-def record_traffic_logs(db, logdir):
+def record_traffic_logs(db, logdir, shortcut=False):
 	if is_action_done(db, 'record_logs'):
 		print('Traffic logs already recorded')
 		return
 	else:
 		add_action(db, 'record_logs')
+
+	#start_time = time.time()
+
+	print('Creating traffic log indexes')
+	c = db.cursor()
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_client_log ON packets (system_id, log_line, partial_hash, src_id, dest_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_gate_log ON packets (system_id, log_line, full_hash, src_id, dest_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_time ON packets (time)''')
+	db.commit()
+	c.close()
 
 	# Go through each log files and record what packets each host believes it sent
 	# Use this information to augment what we pulled from the pcap logs earlier
@@ -790,7 +804,7 @@ def record_traffic_logs(db, logdir):
 		# Done already?
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
-			print('{} already read in'.format(log_name))
+			print('{} already read in'.format(os.path.basename(log_name)))
 			return
 		else:
 			add_action(db, action_name)
@@ -800,17 +814,20 @@ def record_traffic_logs(db, logdir):
  			if is_gate:
 				clean_finish = record_gate_traffic_log(db, action_name, name, log)
  			else:
-				clean_finish = record_client_traffic_log(db, action_name, name, log) 
+				clean_finish = record_client_traffic_log(db, action_name, name, log, shortcut)
 
 		# This file is done now, right?
 		if clean_finish:
 			mark_action_done(db, action_name)
 			db.commit()
 
+	#tot_time = time.time() - start_time
+	#add_setting(db, 'Log time', tot_time)
+
 	mark_action_done(db, 'record_logs')
 	db.commit()
 
-def record_client_traffic_log(db, log_name, name, log): 
+def record_client_traffic_log(db, log_name, name, log, shortcut=False): 
 	print('Processing client log file {} for {}'.format(log_name, name))
 
 	system_id, system_ip, name = get_system(db, name=name)
@@ -847,8 +864,8 @@ def record_client_traffic_log(db, log_name, name, log):
 
 			continue
 
-		time, direction, valid, proto, partial_hash, their_ip, port = m.groups()
-		time = float(time)
+		packet_time, direction, valid, proto, partial_hash, their_ip, port = m.groups()
+		packet_time = float(packet_time)
 		is_valid = (valid == 'valid')
 		their_ip = inet_aton_integer(their_ip)
 		their_id = get_system(db, ip=their_ip)[0]
@@ -973,11 +990,11 @@ def record_gate_traffic_log(db, log_name, name, log):
 		if m is None:
 			continue
 
-		time, direction, result, module, reason = m.groups()[:5]
+		packet_time, direction, result, module, reason = m.groups()[:5]
 		in_proto, in_sip, in_sport, in_dip, in_dport, in_full_hash = m.groups()[5:11]
 		out_proto, out_sip, out_sport, out_dip, out_dport, out_full_hash = m.groups()[11:]
 		
-		time = float(time)
+		packet_time = float(packet_time)
 
 		# We'll be recording the reason one way or another
 		reason_id = add_reason(db, '{} {}'.format(direction, reason))
@@ -1134,14 +1151,14 @@ def trace_packets(db):
 		add_action(db, 'trace')
 
 	print('Beginning packet trace')
-
 	start_time = time.time()
-	c = db.cursor()
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace ON packets (src_id, dest_id, system_id, proto, full_hash)''')
-	db.commit()
 
-	# Keep status of work
-	db.set_progress_handler(print_dot, SQLITE_PROG_UPDATE_FREQ)
+	c = db.cursor()
+	print('\tCreating trace indexes')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_needed ON packets (is_send, trace_failed, next_hop_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_match ON packets (is_send, next_hop_id, system_id, src_id, dest_id, proto, full_hash, time, id, next_hop_id, system_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
+	db.commit()
 
 	c.execute('SELECT count(*) FROM packets WHERE is_send=1 AND next_hop_id IS NULL')
 	total_count = c.fetchone()[0]
@@ -1149,13 +1166,11 @@ def trace_packets(db):
 	hopless_packets = list()
 	curr_packet = len(hopless_packets)
 
-	db.set_progress_handler(None, SQLITE_PROG_UPDATE_FREQ)
-
 	# Go one-by-one through packets and match them up
 	c.execute('BEGIN TRANSACTION')
 	count = 0
 	failed_count = 0
-	start_time = time.time()
+	start_chunk_time = time.time()
 	while True:
 		if curr_packet >= len(hopless_packets):
 			print('\tGrabbing packets that need processing')
@@ -1167,6 +1182,8 @@ def trace_packets(db):
 							LIMIT ?''', (ROW_CACHE_SIZE,))
 			hopless_packets = c.fetchall()
 			curr_packet = 0
+
+			start_chunk_time = time.time()
 
 			# If we're all out of packets, terminate
 			if not hopless_packets:
@@ -1188,13 +1205,11 @@ def trace_packets(db):
 							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
 							AND p1.proto=?
 							AND p1.full_hash=?
-							AND NOT p1.id=?						-- Almost certainly can't happen, as it would be on the same system, but just to be safe...
 							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
 						ORDER BY p1.time ASC					-- Match earlier packets first
 						LIMIT 1''',
 						(system_id,
 							src_id, dest_id, proto, full_hash,
-							packet_id,
 							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
 		receives = c.fetchall()
 
@@ -1212,10 +1227,14 @@ def trace_packets(db):
 
 		count += 1
 		if count % 500 == 0:
-			time_per_chunk = time.time() - start_time
-			start_time = time.time()
+			time_per_chunk = time.time() - start_chunk_time
+			start_chunk_time = time.time()
 			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
 				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
+
+		if count % 10000 == 0:
+			db.commit()
+			c.execute('BEGIN TRANSACTION')
 
 	db.commit()
 
@@ -1223,19 +1242,16 @@ def trace_packets(db):
 		print('\t{} traces attempted, {} failed'.format(count, failed_count))
 	else:
 		print('\tEverything appears to be in order here. No traces needed')
-
-	# Add next_hop_id index now that all the data is ready
-	print('Creating index for routing data')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
 	
 	# Done!
+	tot_time = time.time() - start_time
+	print('\tTraced packets in {} seconds'.format(tot_time))
+	add_setting(db, 'Trace time', tot_time)
+
 	mark_action_done(db, 'trace')
 	print('\tCommitting trace')
 	db.commit()
 	c.close()
-
-	tot_time = time.time() - start_time
-	print('\tTraced packets in {} seconds'.format(tot_time))
 
 def complete_packet_intentions(db):
 	# Find any packets that don't know their true source or destination, find
@@ -1903,51 +1919,52 @@ def main(argv):
 				print('Unable to create database: ', e)
 				return 1
 
-		if not args.skip_processing and not check_complete(db):
-			add_action(db, 'processing')
+		try:
+			if not args.skip_processing and not check_complete(db):
+				add_action(db, 'processing')
 
-			configure_sqlite(db)
+				configure_sqlite(db)
 
-			# Time processing
-			start_proc_time = time.time()
+				# Time processing
+				start_proc_time = time.time()
 
-			# Ensure all the systems and settings are in place before we begin
-			read_all_settings(db, args.logdir)
-			add_all_systems(db, args.logdir)
-			if not check_systems(db):
-				print('Problems detected with setup. Correct and re-run the test')
-				return 1
+				# Ensure all the systems and settings are in place before we begin
+				read_all_settings(db, args.logdir)
+				add_all_systems(db, args.logdir)
+				if not check_systems(db):
+					print('Problems detected with setup. Correct and re-run the test')
+					return 1
 
-			# Trace packets
-			# What did each host attempt to do?
-			record_traffic_pcap(db, args.logdir)
-			record_traffic_logs(db, args.logdir)
+				# Trace packets
+				# What did each host attempt to do?
+				record_traffic_pcap(db, args.logdir)
+				record_traffic_logs(db, args.logdir)
 
-			# Follow each packet through the network and figure out where each packet
-			# was meant to go (many were already resolved above, but NAT traffic needs
-			# additional assistance)
-			trace_packets(db)
-			cycles = check_for_trace_cycles(db)
-			if cycles:
-				print('WARNING: Cycles found in trace data. Results may be incorrect')
-				if args.show_cycles:
-					for id in cycles:
-						show_trace(db, id)
-				else:
-					print('To display the cycles, specify --show-cycles on the command line')
+				# Follow each packet through the network and figure out where each packet
+				# was meant to go (many were already resolved above, but NAT traffic needs
+				# additional assistance)
+				trace_packets(db)
+				cycles = check_for_trace_cycles(db)
+				if cycles:
+					print('WARNING: Cycles found in trace data. Results may be incorrect')
+					if args.show_cycles:
+						for id in cycles:
+							show_trace(db, id)
+					else:
+						print('To display the cycles, specify --show-cycles on the command line')
 
-			complete_packet_intentions(db)
-			locate_trace_terminations(db)
+				complete_packet_intentions(db)
+				locate_trace_terminations(db)
 
-			# End time
-			proc_time = time.time() - start_proc_time
-			if get_setting(db, 'Processing Time') is None:
+				# End time
+				proc_time = time.time() - start_proc_time
+				print('Processing completed in {} seconds'.format(proc_time))
 				add_setting(db, 'Processing Time', proc_time)
-				db.commit()
-			print('Processing completed in {} seconds'.format(proc_time))
 
-			mark_action_done(db, 'processing')
-			db.commit()
+				mark_action_done(db, 'processing')
+				db.commit()
+		except KeyboardInterrupt:
+			print('Stopping processing')
 
 		# Collect stats
 		if check_complete(db):
