@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="$HOME/results"
+RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -1515,7 +1515,7 @@ function help {
 		help help
 	else
 		echo Help for $1:
-		grep --before-context=5 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+		grep --before-context=10 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
 }
 

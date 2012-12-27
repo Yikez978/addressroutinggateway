@@ -165,7 +165,7 @@ def check_complete(db):
 		if num > 0:
 			valid_db = False
 
-		if is_action_done(db, 'processing') is None:
+		if not is_action_done(db, 'processing'):
 			valid_db = False
 	except:
 		valid_db = False
@@ -585,12 +585,9 @@ def record_traffic_pcap(db, logdir):
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
 
-	# Cache data here, will insert it later
-	packet_data = list()
-
 	# Go through each log file and record what packets each host sent
 	for log_name in glob(os.path.join(logdir, '*.pcap')):
-		# Don't actually add teh action yet, it may be a pcap file we don't care about
+		# Don't actually add the action yet, it may be a pcap file we don't care about
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(os.path.basename(log_name)))
@@ -639,6 +636,9 @@ def record_traffic_pcap(db, logdir):
 			continue
 
 		system_id, system_ip, name = s
+
+		# Cache data here, will insert it later
+		packet_data = list()
 
 		pcap_count = 0
 		count = 0
