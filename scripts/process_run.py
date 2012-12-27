@@ -780,7 +780,7 @@ def record_traffic_logs(db, logdir, shortcut=False):
 
 	#start_time = time.time()
 
-	print('Creating traffic log indexes')
+	print('Creating traffic log indices')
 	c = db.cursor()
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_client_log ON packets (system_id, log_line, partial_hash, src_id, dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_gate_log ON packets (system_id, log_line, full_hash, src_id, dest_id)''')
@@ -849,8 +849,6 @@ def record_client_traffic_log(db, log_name, name, log, shortcut=False):
 
 	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) (valid|invalid) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
 
-	update_data = list()
-
 	for line in log:
 		log_line_num += 1
 		# Pull out data on each send or receive
@@ -913,47 +911,31 @@ def record_client_traffic_log(db, log_name, name, log, shortcut=False):
 				dest_id, temp, gate_name = get_system(db, ip=their_ip, prefer_gate=True)
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))[0]
 
-		# Do it in a single query with caching
-		update_data.append((is_valid, true_src_id, true_dest_id, log_line_num,
-							system_id, src_id, dest_id, partial_hash,))
 		# Separate, error-reporting version
-		#c.execute('''SELECT id FROM packets 
-		#				WHERE system_id=?
-		#					AND src_id=?
-		#					AND dest_id=?
-		#					AND log_line IS NULL
-		#					AND partial_hash=?
-		#				ORDER BY id
-		#				LIMIT 1''',
-		#				(system_id, src_id, dest_id, partial_hash))
-		#packet_id = c.fetchone()
-		#if packet_id is not None:
-		#	c.execute('''UPDATE packets SET is_valid=?,
-		#						true_src_id=?, true_dest_id=?, log_line=?
-		#					WHERE id=?''',
-		#					(is_valid, true_src_id, true_dest_id, log_line_num,
-		#						packet_id[0]))
-		#else:
-		#	print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
+		c.execute('''SELECT id FROM packets 
+						WHERE system_id=?
+							AND src_id=?
+							AND dest_id=?
+							AND log_line IS NULL
+							AND partial_hash=?
+						ORDER BY id
+						LIMIT 1''',
+						(system_id, src_id, dest_id, partial_hash))
+		packet_id = c.fetchone()
+		if packet_id is not None:
+			c.execute('''UPDATE packets SET is_valid=?,
+								true_src_id=?, true_dest_id=?, log_line=?
+							WHERE id=?''',
+							(is_valid, true_src_id, true_dest_id, log_line_num,
+								packet_id[0]))
+		else:
+			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tProcessed {} packets so far'.format(count))
 
 	print('\t{} total packets processed'.format(count))
-
-	# Update everything
-	print('\tUpdating packets with new information...')
-	c.execute('BEGIN TRANSACTION')
-	c.executemany('''UPDATE packets SET is_valid=?, true_src_id=?, true_dest_id=?, log_line=?
-						WHERE id=(SELECT id FROM packets 
-								WHERE system_id=?
-									AND src_id=?
-									AND dest_id=?
-									AND log_line IS NULL
-									AND partial_hash=?
-								ORDER BY id
-								LIMIT 1)''', update_data)
 
 	# Done!
 	print('\tCommitting processing')
@@ -979,8 +961,14 @@ def record_gate_traffic_log(db, log_name, name, log):
 	
 	gate_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
+	update_sql = '''UPDATE packets
+						SET log_line=?,
+							reason_id=?,
+							true_src_id=?,
+							true_dest_id=?
+						WHERE id=?'''
+
 	# Data caches for updates
-	log_data = list()
 	link_data = list()
 
 	for line in log:
@@ -1050,9 +1038,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
-				log_data.append((log_line_num, reason_id,
-									true_src_id, true_dest_id,
-									in_packet_id))
+				c.execute(update_sql, (log_line_num, reason_id, true_src_id, true_dest_id, in_packet_id))
 			else:
 				print('Unable to find match for inbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
@@ -1102,9 +1088,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
-				log_data.append((log_line_num, reason_id,
-									true_src_id, true_dest_id,
-									out_packet_id))
+				c.execute(update_sql, (log_line_num, reason_id, true_src_id, true_dest_id, out_packet_id))
 			else:
 				print('Unable to find match for outbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
@@ -1129,9 +1113,6 @@ def record_gate_traffic_log(db, log_name, name, log):
 	
 	# Do various updates
 	print('\tUpdating packets with new information...')
-	c.execute('BEGIN TRANSACTION')
-	c.executemany('''UPDATE packets SET log_line=?, reason_id=?,
-						true_src_id=?, true_dest_id=? WHERE id=?''', log_data)
 	c.executemany('''UPDATE packets SET next_hop_id=? WHERE id=?''', link_data)
 
 	# Done!
