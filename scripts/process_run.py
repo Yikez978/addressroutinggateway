@@ -1608,7 +1608,7 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 def get_packet_losses(db, begin, end, valid=True):
 	c = db.cursor()
 
-	c.execute('''CREATE INDEX idx_losses ON packets (is_send, log_line, is_valid, time)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_losses ON packets (is_send, log_line, is_valid, time)''')
 	db.commit()
 
 	# Get every packet that was sent and didn't make it to its destination
@@ -1741,7 +1741,7 @@ def gate_rates_per_second(db, begin, end):
 	# Determines how many packets per second and kilobits per second each gateway handled on average
 	c = db.cursor()
 
-	c.execute('CREATE INDEX idx_gate_rate ON packets (system_id, time, len)')
+	c.execute('CREATE INDEX IF NOT EXISTS idx_gate_rate ON packets (system_id, time, len)')
 	db.commit()
 
 	rates = {}
