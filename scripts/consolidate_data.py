@@ -29,8 +29,10 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 			else:
 				raise Exception('contents are invalid'.format(db_path))
 		
-			# Get stats
+			# Get settings and stats for this run, then combine
+			settings = get_all_settings(db)
 			stats = generate_stats(db, begin_time_buffer, end_time_buffer)
+			stats = (dict(stats[0].items() + settings.items()), stats[1])
 		except Exception as e:
 			print('\nFound database at {}, but unable to use ({})'.format(db_path, str(e)))
 			print('Continuing to get stats...', end='')
@@ -40,12 +42,6 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 				os.unlink(db_path)
 
 			continue
-
-		# We also need to know what test was being run
-		stats[0]['results.dir'] = os.path.dirname(db_path)
-		stats[0]['test.num'] = get_test_number(db)
-		stats[0]['hop.rate'] = get_hop_rate(db)
-		stats[0]['net.latency'] = get_network_latency(db)
 
 		# We only care about the number of times each loss method was used
 		loss_counts = {k.replace(' ', '.').lower(): len(packets) for k, packets in stats[1].iteritems()}
@@ -89,7 +85,7 @@ def create_csv(csv_path, headers, all_stats):
 				if h.endswith('.examples'):
 					continue
 
-				csv.write('"{}",'.format(h))
+				csv.write('"{}",'.format(h.replace(' ', '.').lower()))
 
 		csv.write('\n')
 

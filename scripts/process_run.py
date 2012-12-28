@@ -325,6 +325,17 @@ def get_setting(db, name):
 	else:
 		return None
 
+def get_all_settings(db):
+	c = db.cursor()
+	c.execute('SELECT name, value FROM settings ORDER BY name ASC')
+	
+	sets = {}
+	for s in c.fetchall():
+		sets[s[0]] = s[1]
+
+	c.close()
+	return sets
+
 def show_settings(db):
 	c = db.cursor()
 

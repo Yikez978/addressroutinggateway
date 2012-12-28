@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="results"
+RESULTSDIR="$HOME/results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
