@@ -1,7 +1,7 @@
 #!/bin/bash
 PUSHDIR="pushed"
 PULLDIR="pulled"
-RESULTSDIR="$HOME/results"
+RESULTSDIR="results"
 RUNDB="run.db"
 PROCESSLOG="processing.log"
 TESTLOG="test.log"
@@ -766,7 +766,7 @@ function process-run-remote {
 		echo Completed processing of $2 on $1
 	else
 		rm -f "$1/$FINISHINDICATOR"
-		./process_run.py -l "$1" -db "$1/$RUNDB" --finish-indicator "$1/$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
+		./process_run.py -l "$1" -db "$1/$RUNDB" --skip-stats --finish-indicator "$1/$FINISHINDICATOR" 2>&1 >"$1/$PROCESSLOG" &
 		disown $!
 	fi
 }
@@ -1515,7 +1515,7 @@ function help {
 		help help
 	else
 		echo Help for $1:
-		grep --before-context=5 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
+		grep --before-context=10 "^function $1 {" "$SCRIPT" | grep '^#' | sed -E 's/^#\s*//g' | awk '{print "\t"$0}'
 	fi
 }
 

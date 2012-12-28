@@ -128,12 +128,8 @@ def create_schema(db):
 						done TINYINT)''')
 	add_action(db, 'processing')
 
-	# After much experimentation, this combination of indexes proves effective
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_id ON packets (src_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_dest_id ON packets (dest_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
-
 	# System index. IP and mask are used ALL the time
+	# Other indexes are added as needed by the various processing functions
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_ip ON systems (mask, ip, id, name)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_sys_name ON systems (name)''')
 	
@@ -169,7 +165,7 @@ def check_complete(db):
 		if num > 0:
 			valid_db = False
 
-		if is_action_done(db, 'processing') is None:
+		if not is_action_done(db, 'processing'):
 			valid_db = False
 	except:
 		valid_db = False
@@ -589,17 +585,13 @@ def record_traffic_pcap(db, logdir):
 	# Ensure we don't double up packet data or something silly like that
 	c = db.cursor()
 
-	# Cache data here, will insert it later
-	packet_data = list()
-
 	# Go through each log file and record what packets each host sent
 	for log_name in glob(os.path.join(logdir, '*.pcap')):
+		# Don't actually add the action yet, it may be a pcap file we don't care about
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(os.path.basename(log_name)))
 			continue
-		else:
-			add_action(db, action_name)
 
 		# Determine who this log belongs to
 		name = os.path.basename(log_name)
@@ -616,7 +608,11 @@ def record_traffic_pcap(db, logdir):
 		is_ext = name.startswith('ext')
 
 		if not is_gate and not is_prot and not is_ext:
+			print('\tUnrecognized pcap file, this is a problem')
 			continue
+
+		# Definitely using this file
+		add_action(db, action_name)
 
 		if not is_ext:
 			network = name[4]
@@ -635,9 +631,14 @@ def record_traffic_pcap(db, logdir):
 		s = get_system(db, name=name)
 		if s is None:
 			print('\tSkipping, this system is not in the database. There were likely no log files')
+			mark_action_done(db, action_name)
+			db.commit()
 			continue
 
 		system_id, system_ip, name = s
+
+		# Cache data here, will insert it later
+		packet_data = list()
 
 		pcap_count = 0
 		count = 0
@@ -779,11 +780,12 @@ def record_traffic_logs(db, logdir, shortcut=False):
 
 	#start_time = time.time()
 
-	print('Creating traffic log indexes')
+	print('Creating traffic log indices')
 	c = db.cursor()
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_client_log ON packets (system_id, log_line, partial_hash, src_id, dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_gate_log ON packets (system_id, log_line, full_hash, src_id, dest_id)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_time ON packets (time)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_src_dest ON packets (src_id, dest_id)''')
 	db.commit()
 	c.close()
 
@@ -805,7 +807,7 @@ def record_traffic_logs(db, logdir, shortcut=False):
 		action_name = os.path.basename(log_name)
 		if is_action_done(db, action_name):
 			print('{} already read in'.format(os.path.basename(log_name)))
-			return
+			continue
 		else:
 			add_action(db, action_name)
 
@@ -846,8 +848,6 @@ def record_client_traffic_log(db, log_name, name, log, shortcut=False):
 	log_line_num = 0
 
 	client_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Sent|Received) (valid|invalid) ([0-9]+):([a-z0-9]{{32}}) (?:to|from) ({}):(\d+)$'''.format(IP_REGEX))
-
-	update_data = list()
 
 	for line in log:
 		log_line_num += 1
@@ -911,47 +911,31 @@ def record_client_traffic_log(db, log_name, name, log, shortcut=False):
 				dest_id, temp, gate_name = get_system(db, ip=their_ip, prefer_gate=True)
 				true_dest_id = get_system(db, name='prot{}1'.format(gate_name[4]))[0]
 
-		# Do it in a single query with caching
-		update_data.append((is_valid, true_src_id, true_dest_id, log_line_num,
-							system_id, src_id, dest_id, partial_hash,))
 		# Separate, error-reporting version
-		#c.execute('''SELECT id FROM packets 
-		#				WHERE system_id=?
-		#					AND src_id=?
-		#					AND dest_id=?
-		#					AND log_line IS NULL
-		#					AND partial_hash=?
-		#				ORDER BY id
-		#				LIMIT 1''',
-		#				(system_id, src_id, dest_id, partial_hash))
-		#packet_id = c.fetchone()
-		#if packet_id is not None:
-		#	c.execute('''UPDATE packets SET is_valid=?,
-		#						true_src_id=?, true_dest_id=?, log_line=?
-		#					WHERE id=?''',
-		#					(is_valid, true_src_id, true_dest_id, log_line_num,
-		#						packet_id[0]))
-		#else:
-		#	print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
+		c.execute('''SELECT id FROM packets 
+						WHERE system_id=?
+							AND src_id=?
+							AND dest_id=?
+							AND log_line IS NULL
+							AND partial_hash=?
+						ORDER BY id
+						LIMIT 1''',
+						(system_id, src_id, dest_id, partial_hash))
+		packet_id = c.fetchone()
+		if packet_id is not None:
+			c.execute('''UPDATE packets SET is_valid=?,
+								true_src_id=?, true_dest_id=?, log_line=?
+							WHERE id=?''',
+							(is_valid, true_src_id, true_dest_id, log_line_num,
+								packet_id[0]))
+		else:
+			print('Unable to find matching packet for client log line {}, partial hash {}: {}'.format(log_line_num, partial_hash, line.strip()))
 
 		count += 1
 		if count % 1000 == 0:
 			print('\tProcessed {} packets so far'.format(count))
 
 	print('\t{} total packets processed'.format(count))
-
-	# Update everything
-	print('\tUpdating packets with new information...')
-	c.execute('BEGIN TRANSACTION')
-	c.executemany('''UPDATE packets SET is_valid=?, true_src_id=?, true_dest_id=?, log_line=?
-						WHERE id=(SELECT id FROM packets 
-								WHERE system_id=?
-									AND src_id=?
-									AND dest_id=?
-									AND log_line IS NULL
-									AND partial_hash=?
-								ORDER BY id
-								LIMIT 1)''', update_data)
 
 	# Done!
 	print('\tCommitting processing')
@@ -977,8 +961,14 @@ def record_gate_traffic_log(db, log_name, name, log):
 	
 	gate_re = re.compile('''^(\d+(?:|\.\d+)) LOG[0-9] (Inbound|Outbound): (Accept|Reject): (Admin|NAT|Hopper): ([^:]+): (?:|{0})/(?:|{0})$'''.format(PACKET_ID_REGEX))
 
+	update_sql = '''UPDATE packets
+						SET log_line=?,
+							reason_id=?,
+							true_src_id=?,
+							true_dest_id=?
+						WHERE id=?'''
+
 	# Data caches for updates
-	log_data = list()
 	link_data = list()
 
 	for line in log:
@@ -1048,9 +1038,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 			in_packet_id = c.fetchone()
 			if in_packet_id is not None:
 				in_packet_id = in_packet_id[0]
-				log_data.append((log_line_num, reason_id,
-									true_src_id, true_dest_id,
-									in_packet_id))
+				c.execute(update_sql, (log_line_num, reason_id, true_src_id, true_dest_id, in_packet_id))
 			else:
 				print('Unable to find match for inbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
@@ -1100,9 +1088,7 @@ def record_gate_traffic_log(db, log_name, name, log):
 			out_packet_id = c.fetchone()
 			if out_packet_id is not None:
 				out_packet_id = out_packet_id[0]
-				log_data.append((log_line_num, reason_id,
-									true_src_id, true_dest_id,
-									out_packet_id))
+				c.execute(update_sql, (log_line_num, reason_id, true_src_id, true_dest_id, out_packet_id))
 			else:
 				print('Unable to find match for outbound packet with full hash {}, line num {}: {}'.format(full_hash, log_line_num, line.strip()))
 		else:
@@ -1127,9 +1113,6 @@ def record_gate_traffic_log(db, log_name, name, log):
 	
 	# Do various updates
 	print('\tUpdating packets with new information...')
-	c.execute('BEGIN TRANSACTION')
-	c.executemany('''UPDATE packets SET log_line=?, reason_id=?,
-						true_src_id=?, true_dest_id=? WHERE id=?''', log_data)
 	c.executemany('''UPDATE packets SET next_hop_id=? WHERE id=?''', link_data)
 
 	# Done!
@@ -1154,9 +1137,9 @@ def trace_packets(db):
 	start_time = time.time()
 
 	c = db.cursor()
-	print('\tCreating trace indexes')
+	print('\tCreating trace indices')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_needed ON packets (is_send, trace_failed, next_hop_id)''')
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_match ON packets (is_send, next_hop_id, system_id, src_id, dest_id, proto, full_hash, time, id, next_hop_id, system_id)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_trace_match ON packets (is_send, src_id, dest_id, proto, full_hash, time)''')
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_next_id ON packets (next_hop_id)''')
 	db.commit()
 
@@ -1173,7 +1156,8 @@ def trace_packets(db):
 	start_chunk_time = time.time()
 	while True:
 		if curr_packet >= len(hopless_packets):
-			print('\tGrabbing packets that need processing')
+			print('\tGrabbing packets that need processing...', end='')
+			sys.stdout.flush()
 			c.execute('''SELECT system_id, id, time, full_hash, src_id, dest_id, proto
 							FROM packets
 							WHERE is_send=1
@@ -1182,6 +1166,7 @@ def trace_packets(db):
 							LIMIT ?''', (ROW_CACHE_SIZE,))
 			hopless_packets = c.fetchall()
 			curr_packet = 0
+			print('done')
 
 			start_chunk_time = time.time()
 
@@ -1200,17 +1185,17 @@ def trace_packets(db):
 						FROM packets AS p1
 						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
 						WHERE p1.is_send=0						-- Looking for receives
-							AND p2.next_hop_id IS NULL			-- Can't be matched already
-							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
 							AND p1.src_id=? AND p1.dest_id=?	-- Make sure packet matches
 							AND p1.proto=?
 							AND p1.full_hash=?
 							AND p1.time BETWEEN ? AND ?			-- Time should be similar to send
+							AND p2.next_hop_id IS NULL			-- Can't be matched already
+							AND NOT p1.system_id=?				-- Shouldn't be on the same system as the send
 						ORDER BY p1.time ASC					-- Match earlier packets first
 						LIMIT 1''',
-						(system_id,
-							src_id, dest_id, proto, full_hash,
-							packet_time - TIME_SLACK, packet_time + TIME_SLACK))
+						(src_id, dest_id, proto, full_hash,
+							packet_time - TIME_SLACK, packet_time + TIME_SLACK,
+							system_id))
 		receives = c.fetchall()
 
 		if src_id is None or dest_id is None:
@@ -1221,7 +1206,7 @@ def trace_packets(db):
 
 		else:
 			# No matches found. We'll figure this one out later
-			#print('Unable to locate corresponding receive for packet {}'.format(packet_id))
+			print('Unable to locate corresponding receive for packet {}'.format(packet_id))
 			c.execute('UPDATE packets SET trace_failed=1 WHERE id=?', (packet_id,))
 			failed_count += 1
 
@@ -1229,7 +1214,7 @@ def trace_packets(db):
 		if count % 500 == 0:
 			time_per_chunk = time.time() - start_chunk_time
 			start_chunk_time = time.time()
-			print('\tTracing packet {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
+			print('\tTracing packets {} of {} (~{:.1f} minutes remaining, {:.1f} seconds per 500)'.format(
 				count, total_count, (total_count - count) / 500 * time_per_chunk / 60, time_per_chunk))
 
 		if count % 10000 == 0:
@@ -1373,7 +1358,7 @@ def locate_trace_terminations(db):
 	count = 0
 	while True:
 		if curr_packet >= len(unterminated_packets):
-			print('\tGrabbing packets that need processing')
+			print('\tGrabbing packets that need processing...', end='')
 			c.execute('''SELECT id, next_hop_id FROM packets
 									WHERE next_hop_id IS NOT NULL
 										AND terminal_hop_id IS NULL
@@ -1381,6 +1366,7 @@ def locate_trace_terminations(db):
 									LIMIT ?''', (ROW_CACHE_SIZE,))
 			unterminated_packets = c.fetchall()
 			curr_packet = 0
+			print('done')
 
 			# If we're all out of packets, terminate
 			if not unterminated_packets:
@@ -1892,9 +1878,13 @@ def main(argv):
 			we assume it contains trace data. If not given, will be done in memory.')
 	parser.add_argument('--empty-database', action='store_true', help='Empties the database if it already exists')
 	parser.add_argument('--skip-processing', action='store_true', help='Do not ensure processing is complete')
+	parser.add_argument('--skip-stats', action='store_true', help='Do not generate statistics after processing')
+
 	parser.add_argument('--offset', type=int, default=0, help='How many seconds to ignore at beginning AND end of run. Overriden by --start-offset and --end-offset')
+
 	parser.add_argument('--start-offset', type=int, default=None, help='How many seconds to ignore at the beginning of a run')
 	parser.add_argument('--end-offset', type=int, default=None, help='How many seconds to ignore at the end of a run')
+
 	parser.add_argument('--show-cycles', action='store_true', help='If packet trace cycles around found, display the actual packets involved')
 	parser.add_argument('--finish-indicator', help='Empty file to create when processing completes')
 	args = parser.parse_args(argv[1:])
@@ -1937,6 +1927,7 @@ def main(argv):
 
 				# Trace packets
 				# What did each host attempt to do?
+				# TBD add shortcut checks and call as appropriate
 				record_traffic_pcap(db, args.logdir)
 				record_traffic_logs(db, args.logdir)
 
@@ -1966,14 +1957,17 @@ def main(argv):
 		except KeyboardInterrupt:
 			print('Stopping processing')
 
-		# Collect stats
-		if check_complete(db):
-			print('\n----------------------')
-			show_settings(db)
-			print()
-			print_stats(db, args.start_offset, args.end_offset)
+		if not args.skip_stats:
+			# Collect stats
+			if check_complete(db):
+				print('\n----------------------')
+				show_settings(db)
+				print()
+				print_stats(db, args.start_offset, args.end_offset)
+			else:
+				print('Database is still invalid, unable to generate stats. Check run data')
 		else:
-			print('Database is still invalid, unable to generate stats. Check run data')
+			print('Skipping stats generation')
 
 		# All done. Don't commit here. Either the steps before did what they wanted
 		# and committed or they didn't. Don't push bad stuff
