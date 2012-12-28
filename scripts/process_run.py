@@ -1526,9 +1526,10 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['total.packets'] = c.fetchone()[0]
 
 	# Packet rate gates were handling
-	rates = gate_packets_per_second(db, abs_begin_time, abs_end_time)
+	rates = gate_rates_per_second(db, abs_begin_time, abs_end_time)
 	for name, rate in rates.iteritems():
-		stats['{}.pps'.format(name).lower()] = rate
+		stats['{}.pps'.format(name).lower()] = rate[0]
+		stats['{}.kbps'.format(name).lower()] = rate[1]
 
 	# Trace problems
 	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
@@ -1555,10 +1556,10 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	losses = loss_methods(db, abs_begin_time, abs_end_time)
 	
 	# Latency introduced by ARG
-	avgs = avg_latency(db, abs_begin_time, abs_end_time)
-	stats['latency.overall'] = avgs[0]
-	stats['latency.nat'] = avgs[1]
-	stats['latency.wrapped'] = avgs[2]
+	#avgs = avg_latency(db, abs_begin_time, abs_end_time)
+	#stats['latency.overall'] = avgs[0]
+	#stats['latency.nat'] = avgs[1]
+	#stats['latency.wrapped'] = avgs[2]
 
 	c.close()
 
@@ -1571,9 +1572,12 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('Generating statistics for time {:.1f} to {:.1f} ({:.2f} seconds total)'.format(
 		stats['time.begin'], stats['time.end'], stats['time.total']))
 	print('Total packets: {} packets'.format(stats['total.packets']))
-	for k, v in stats.iteritems():
-		if k.endswith('.pps'):
-			print('{}: {} packets per seconds'.format(k, v))
+
+	for gate in get_gates(db):
+		gate_name = get_system(db, id=gate)[2]
+		print('{} rate average: {} pps, {} kbps'.format(gate_name,
+			stats['{}.pps'.format(gate_name).lower()],
+			stats['{}.kbps'.format(gate_name).lower()]))
 
 	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
 	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
@@ -1595,13 +1599,17 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	else:
 		print('  None!')
 
-	print('\nAverage packet latency: (take with a grain of salt)')
-	print('  Overall average: {:.1f} ms'.format(stats['latency.overall']))
-	print('  NATed average: {:.1f} ms'.format(stats['latency.nat']))
-	print('  Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
+	# Removed for now because the numbers are meaningless unless clocks are sub-millisecond synced
+	#print('\nAverage packet latency: (take with a grain of salt)')
+	#print('  Overall average: {:.1f} ms'.format(stats['latency.overall']))
+	#print('  NATed average: {:.1f} ms'.format(stats['latency.nat']))
+	#print('  Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
 
 def get_packet_losses(db, begin, end, valid=True):
 	c = db.cursor()
+
+	c.execute('''CREATE INDEX idx_losses ON packets (is_send, log_line, is_valid, time)''')
+	db.commit()
 
 	# Get every packet that was sent and didn't make it to its destination
 	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name, p2.is_send
@@ -1631,7 +1639,6 @@ def get_packet_losses(db, begin, end, valid=True):
 		return (len(losses)/send_count, send_count, recv_count, losses)
 	else:
 		return (0.0 if valid else 1.0, 0, 0, [])
-	
 
 def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
@@ -1730,19 +1737,25 @@ def avg_latency(db, begin, end):
 
 	return [x*1000 for x in (overall, nat, hopper)]
 
-def gate_packets_per_second(db, begin, end):
-	# Determines how many packets per second each gateway handled on average
+def gate_rates_per_second(db, begin, end):
+	# Determines how many packets per second and kilobits per second each gateway handled on average
 	c = db.cursor()
+
+	c.execute('CREATE INDEX idx_gate_rate ON packets (system_id, time, len)')
+	db.commit()
+
 	rates = {}
 	for gate in get_gates(db):
-		c.execute('''SELECT count(*)/(max(time)-min(time)), name
+		c.execute('''SELECT count(*)/(max(time)-min(time)) AS pps,
+							sum(len)/(max(time)-min(time))*8 AS kbps,
+							name
 						FROM packets
 						JOIN systems ON systems.id=system_id
 						WHERE system_id=? 
 							AND time BETWEEN ? AND ?''', (gate, begin, end))
 
-		rate, name = c.fetchone()
-		rates[name] = rate
+		pps, kbps, name = c.fetchone()
+		rates[name] = (pps, kbps)
 
 	c.close()
 
