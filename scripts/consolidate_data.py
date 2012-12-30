@@ -31,6 +31,7 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 		
 			# Get settings and stats for this run, then combine
 			settings = get_all_settings(db)
+			settings['results.database'] = db_path
 			stats = generate_stats(db, begin_time_buffer, end_time_buffer)
 			stats = (dict(stats[0].items() + settings.items()), stats[1])
 		except Exception as e:

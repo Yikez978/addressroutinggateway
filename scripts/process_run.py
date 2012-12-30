@@ -1758,7 +1758,7 @@ def gate_rates_per_second(db, begin, end):
 	rates = {}
 	for gate in get_gates(db):
 		c.execute('''SELECT count(*)/(max(time)-min(time)) AS pps,
-							sum(len)/(max(time)-min(time))*8 AS kbps,
+							sum(len)*8/(max(time)-min(time))/1024 AS kbps,
 							name
 						FROM packets
 						JOIN systems ON systems.id=system_id

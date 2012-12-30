@@ -81,7 +81,7 @@ function start-tests {
 	# Max hop rate with various latencies
 	for latency in 0 30 100 500
 	do
-		for hr in 1000 100 50 30 15 10 5 
+		for hr in 1000 500 300 200 100 75 60 50 40 30 15 10 5 
 		do
 			echo Testing max hop rate
 			start-silent-test "hoprate" $defaulttest $runtime $latency $hr $defaultrate
@@ -569,8 +569,8 @@ function process-runs {
 		# Don't handle if it has already been processed
 		if [ -f "$results/$RUNDB" ]
 		then
-			echo $RUNDB already exists, sending it off for processing anyway
-			#continue
+			#echo $RUNDB already exists, sending it off for processing anyway
+			continue
 		fi
 
 		echo Finding a host to process $results	
