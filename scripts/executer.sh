@@ -27,8 +27,6 @@ export EC2_CERT="conf/cert-2PLQCAXY4Y7WLEHXSROIQQUTG4Z27TWJ.pem"
 
 PROCESSING_NODES="$GATES $EXT $PROT"
 
-HOSTKEYS=""
-
 eraseline="\r                                      \r"
 
 # Starts the given test number 
