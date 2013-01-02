@@ -1023,7 +1023,7 @@ function shutdown {
 	if [[ $IS_LOCAL ]]
 	then
 		push-to $ALL $LATENCY -
-		run-on $ALL $LATENCY - shutdown/
+		run-on $ALL $LATENCY - shutdown
 	else
 		sudo shutdown -h 0
 	fi
