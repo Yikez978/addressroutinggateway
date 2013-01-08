@@ -411,6 +411,9 @@ def add_all_systems(db, logdir):
 		name = os.path.basename(log_name)
 		name = name[:name.find('-')]
 
+		if log_name.find('malicious') != -1:
+			continue
+
 		is_gate = name.startswith('gate')
 		is_prot = name.startswith('prot')
 		is_ext = name.startswith('ext')
