@@ -537,7 +537,6 @@ def check_systems(db):
 	return True
 
 def get_system(db, name=None, ip=None, id=None, prefer_gate=False):
-
 	# Gets a system ID based on the given name or ip
 	# If prefer_gate is True, gates are returned, even if there is an exact IP match
 	if name is not None:
@@ -579,6 +578,14 @@ def get_gates(db):
 	# Returns the IDs of all the gates in the database
 	c = db.cursor()
 	c.execute('SELECT id FROM systems WHERE name LIKE "gate%"')
+	ids = c.fetchall()
+	c.close()
+	return [x[0] for x in ids]
+
+def get_protected_clients(db):
+	# Returns the IDs of all the protected clients in the database
+	c = db.cursor()
+	c.execute('SELECT id FROM systems WHERE name LIKE "prot%"')
 	ids = c.fetchall()
 	c.close()
 	return [x[0] for x in ids]
@@ -1552,7 +1559,7 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['failed.traces'] = failed_trace_count
 	stats['failed.truth'] = failed_truth_count
 
-	# Valid sends vs receives (loss rate)
+	# Sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count, lost_packets = valid_loss_rate(db, abs_begin_time, abs_end_time)
 	stats['valid.sent'] = sent_count
 	stats['valid.recv'] = receive_count
@@ -1565,9 +1572,22 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['invalid.loss.rate'] = loss_rate
 	stats['invalid.recvd.examples'] = [x[0] for x in not_lost_packets] 
 
+	# Effect on TCP and inter-arg traffic only?
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=6)
+	stats['valid.sent.tcp'] = sent_count
+	stats['valid.recv.tcp'] = receive_count
+	stats['valid.loss.rate.tcp'] = loss_rate
+	stats['valid.loss.examples.tcp'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, inter_arg_filter=True)
+	stats['valid.sent.interarg'] = sent_count
+	stats['valid.recv.interarg'] = receive_count
+	stats['valid.loss.rate.interarg'] = loss_rate
+	stats['valid.loss.examples.interarg'] = [x[0] for x in lost_packets]
+
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
-	losses = loss_methods(db, abs_begin_time, abs_end_time)
+	losses = loss_methods(db, abs_begin_time, abs_end_time, all_losses=lost_packets + not_lost_packets)
 	
 	# Latency introduced by ARG
 	#avgs = avg_latency(db, abs_begin_time, abs_end_time)
@@ -1600,6 +1620,8 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	print('Valid packets received: {}'.format(stats['valid.recv']))
 	print('Valid packets lost: {} ({})'.format(stats['valid.sent'] - stats['valid.recv'], stats['valid.loss.examples'][:10]))
 	print('Valid packet loss rate: {}'.format(stats['valid.loss.rate']))
+	print('Valid TCP loss rate: {}'.format(stats['valid.loss.rate.tcp']))
+	print('Valid Inter-ARG loss rate: {}'.format(stats['valid.loss.rate.interarg']))
 
 	print('\nInvalid packets sent: {}'.format(stats['invalid.sent']))
 	print('Invalid packets received: {} ({})'.format(stats['invalid.recv'], stats['invalid.recvd.examples'][:10]))
@@ -1619,40 +1641,76 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	#print('  NATed average: {:.1f} ms'.format(stats['latency.nat']))
 	#print('  Wrapped average: {:.1f} ms'.format(stats['latency.wrapped']))
 
-def get_packet_losses(db, begin, end, valid=True):
+def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inter_arg_filter=None):
+	# A numerical protocol can be given to get losses only for that one
+	# Inter_arg may be specified to either get just packets between gates (True),
+	# to external hosts (False), or both (None)
 	c = db.cursor()
 
-	c.execute('''CREATE INDEX IF NOT EXISTS idx_losses ON packets (is_send, log_line, is_valid, time)''')
+	c.execute('''CREATE INDEX IF NOT EXISTS idx_losses_new ON packets (is_send, log_line, true_dest_id, time)''')
 	db.commit()
 
-	# Get every packet that was sent and didn't make it to its destination
-	c.execute('''SELECT p1.id, msg, p2.next_hop_id, systems.name, p2.is_send
-					FROM packets AS p1
-						JOIN packets AS p2 ON p1.terminal_hop_id=p2.id
-						LEFT OUTER JOIN reasons ON reasons.id=p2.reason_id
-						JOIN systems ON p2.system_id=systems.id
-					WHERE p1.is_send=1
-						AND p1.log_line IS NOT NULL
-						AND p1.is_valid=?
-						AND (p1.true_dest_id IS NULL OR NOT p1.true_dest_id=p2.system_id)
-						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))
-	losses = c.fetchall()
+	# Get all the gate and protected client IDs. If an inter-arg filter is on,
+	# then we know if a packet was inter-arg because the source and true_dest_id
+	# is in the gate/prot list 
+	arg_nodes = get_gates(db) + get_protected_clients(db)
 
-	# How many packets were sent total?
-	c.execute('''SELECT count(*) FROM packets AS p1 
-					WHERE p1.is_send=1
+	# Get every packet that was an initial send (nobody points to them),
+	# then determine individual if they made it to their intended destination and
+	# if they match any filtering criteria in place
+	c.execute('''SELECT p1.id, p1.is_valid, p1.next_hop_id, p1.proto,
+						p1.system_id, p1.true_dest_id, p1.terminal_hop_id, pt.system_id, pt.reason_id, pt.is_send
+					FROM packets AS p1
+						JOIN packets AS pt ON p1.terminal_hop_id=pt.id
+						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
+					WHERE p2.id IS NULL
+						AND p1.is_send=1
 						AND p1.log_line IS NOT NULL
-						AND p1.is_valid=?
-						AND p1.time BETWEEN ? AND ?''', (valid, begin, end))	
-	send_count = c.fetchone()[0]
-	recv_count = send_count - len(losses)
+						AND p1.true_dest_id IS NOT NULL
+						AND p1.time BETWEEN ? AND ?''', (begin, end))
+	initial_send_packets = c.fetchall()
+
+	send_count = 0
+	recv_count = 0
+	losses = list()
+	for send in initial_send_packets:
+		packet_id, is_valid, next_hop_id, proto, system_id, true_dest_id, terminal_id, terminal_system, terminal_reason, terminal_is_send = send
+
+		if valid_filter != is_valid:
+			continue
+
+		if proto_filter is not None and proto_filter != proto:
+			continue
+
+		if inter_arg_filter is not None:
+			# Filter for only inter-arg packets
+			if inter_arg_filter and (system_id not in arg_nodes or true_dest_id not in arg_nodes):
+				print('not inter arg')
+				continue
+
+			# Filter for only extra-arg packets
+			if not inter_arg_filter and (system_id in arg_nodes and true_dest_id in arg_nodes):
+				print('not extra arg')
+				continue
+
+		# If this packet didn't make it to its intended destination, then figure out why
+		send_count += 1
+		#print(terminal_system, true_dest_id)
+		if terminal_system != true_dest_id:
+			c.execute('''SELECT msg FROM reasons WHERE id=?''', (terminal_reason,))
+			msg = c.fetchone()
+			if msg is not None:
+				msg = msg[0]
+			losses.append((packet_id, msg, None, None, terminal_is_send))
+		else:
+			recv_count += 1
 
 	c.close()
 
 	if send_count > 0:
 		return (len(losses)/send_count, send_count, recv_count, losses)
 	else:
-		return (0.0 if valid else 1.0, 0, 0, [])
+		return (0.0 if valid_filter else 1.0, 0, 0, [])
 
 def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
@@ -1664,21 +1722,21 @@ def invalid_loss_rate(db, begin, end):
 	# that actually reached their intended destination (ideally 100%)
 	return get_packet_losses(db, begin, end, False)
 
-def loss_methods(db, begin, end, valid=None):
+def loss_methods(db, begin, end, valid=None, all_losses=None):
 	# Get sent packets that didn't make it to their destination
 	# If valid is None, get loss methods for both valid and invalid packets
-	if valid is None:
-		losses = get_packet_losses(db, begin, end, True)[3]
-		losses.extend(get_packet_losses(db, begin, end, False)[3])
+	if all_losses is None:
+		if valid is None:
+			losses = get_packet_losses(db, begin, end, True)[3]
+			losses.extend(get_packet_losses(db, begin, end, False)[3])
+		else:
+			losses = get_packet_losses(db, begin, end, valid)[3]
 	else:
-		losses = get_packet_losses(db, begin, end, valid)[3]
+		losses = all_losses
 
 	packet_cats = {'Unknown': list(), 'Lost on wire': list()}
 	for loss in losses:
 		packet_id, reason_msg, next_hop_id, name, terminated_in_send = loss
-		is_gate = name.startswith('gate')
-		is_prot = name.startswith('prot')
-		is_ext = name.startswith('ext')
 
 		# If the final packet we traced to is a send (ie, the gateway forwarded it on but
 		# the recipient never saw it), then pcap never even saw it, ethernet must have lost it
