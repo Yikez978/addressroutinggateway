@@ -1685,12 +1685,10 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 		if inter_arg_filter is not None:
 			# Filter for only inter-arg packets
 			if inter_arg_filter and (system_id not in arg_nodes or true_dest_id not in arg_nodes):
-				print('not inter arg')
 				continue
 
 			# Filter for only extra-arg packets
 			if not inter_arg_filter and (system_id in arg_nodes and true_dest_id in arg_nodes):
-				print('not extra arg')
 				continue
 
 		# If this packet didn't make it to its intended destination, then figure out why
