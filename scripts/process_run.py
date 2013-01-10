@@ -1577,13 +1577,13 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['valid.sent.tcp'] = sent_count
 	stats['valid.recv.tcp'] = receive_count
 	stats['valid.loss.rate.tcp'] = loss_rate
-	stats['valid.loss.examples.tcp'] = [x[0] for x in lost_packets]
+	stats['valid.loss.tcp.examples'] = [x[0] for x in lost_packets]
 
 	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, inter_arg_filter=True)
 	stats['valid.sent.interarg'] = sent_count
 	stats['valid.recv.interarg'] = receive_count
 	stats['valid.loss.rate.interarg'] = loss_rate
-	stats['valid.loss.examples.interarg'] = [x[0] for x in lost_packets]
+	stats['valid.loss.interarg.examples'] = [x[0] for x in lost_packets]
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
