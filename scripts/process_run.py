@@ -1623,7 +1623,7 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
-	losses = loss_methods(db, abs_begin_time, abs_end_time, all_losses=lost_packets + not_lost_packets)
+	losses = loss_methods(db, abs_begin_time, abs_end_time)
 	
 	# Latency introduced by ARG
 	#avgs = avg_latency(db, abs_begin_time, abs_end_time)
