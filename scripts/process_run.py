@@ -1553,11 +1553,11 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 		stats['{}.kbps'.format(name).lower()] = rate[1]
 
 	# Trace problems
-	c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
-					WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
-	failed_trace_count, failed_truth_count = c.fetchone()
-	stats['failed.traces'] = failed_trace_count
-	stats['failed.truth'] = failed_truth_count
+	#c.execute('''SELECT sum(trace_failed), sum(truth_failed) FROM packets
+	#				WHERE time BETWEEN ? AND ?''', (abs_begin_time, abs_end_time))
+	#failed_trace_count, failed_truth_count = c.fetchone()
+	#stats['failed.traces'] = failed_trace_count
+	#stats['failed.truth'] = failed_truth_count
 
 	# Sends vs receives (loss rate)
 	loss_rate, sent_count, receive_count, lost_packets = valid_loss_rate(db, abs_begin_time, abs_end_time)
@@ -1572,18 +1572,54 @@ def generate_stats(db, begin_time_buffer=None, end_time_buffer=None):
 	stats['invalid.loss.rate'] = loss_rate
 	stats['invalid.recvd.examples'] = [x[0] for x in not_lost_packets] 
 
-	# Effect on TCP and inter-arg traffic only?
+	# Effect on TCP, inter-arg, extra-arg traffic broken up
 	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=6)
 	stats['valid.sent.tcp'] = sent_count
 	stats['valid.recv.tcp'] = receive_count
 	stats['valid.loss.rate.tcp'] = loss_rate
 	stats['valid.loss.tcp.examples'] = [x[0] for x in lost_packets]
 
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=17)
+	stats['valid.sent.udp'] = sent_count
+	stats['valid.recv.udp'] = receive_count
+	stats['valid.loss.rate.udp'] = loss_rate
+	stats['valid.loss.udp.examples'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=253)
+	stats['valid.sent.arg'] = sent_count
+	stats['valid.recv.arg'] = receive_count
+	stats['valid.loss.rate.arg'] = loss_rate
+	stats['valid.loss.arg.examples'] = [x[0] for x in lost_packets]
+
 	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, inter_arg_filter=True)
 	stats['valid.sent.interarg'] = sent_count
 	stats['valid.recv.interarg'] = receive_count
 	stats['valid.loss.rate.interarg'] = loss_rate
 	stats['valid.loss.interarg.examples'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=6, inter_arg_filter=True)
+	stats['valid.sent.tcp.interarg'] = sent_count
+	stats['valid.recv.tcp.interarg'] = receive_count
+	stats['valid.loss.rate.tcp.interarg'] = loss_rate
+	stats['valid.loss.tcp.interarg.examples'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=17, inter_arg_filter=True)
+	stats['valid.sent.udp.interarg'] = sent_count
+	stats['valid.recv.udp.interarg'] = receive_count
+	stats['valid.loss.rate.udp.interarg'] = loss_rate
+	stats['valid.loss.udp.interarg.examples'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, proto_filter=(6, 17), inter_arg_filter=True)
+	stats['valid.sent.udptcp.interarg'] = sent_count
+	stats['valid.recv.udptcp.interarg'] = receive_count
+	stats['valid.loss.rate.udptcp.interarg'] = loss_rate
+	stats['valid.loss.udptcp.interarg.examples'] = [x[0] for x in lost_packets]
+
+	loss_rate, sent_count, receive_count, not_lost_packets = get_packet_losses(db, abs_begin_time, abs_end_time, inter_arg_filter=False)
+	stats['valid.sent.extraarg'] = sent_count
+	stats['valid.recv.extraarg'] = receive_count
+	stats['valid.loss.rate.extraarg'] = loss_rate
+	stats['valid.loss.extraarg.examples'] = [x[0] for x in lost_packets]
 
 	# Rejection methods (for every packet that didn't make it to its destination, why
 	# did it fail?)
@@ -1613,15 +1649,21 @@ def print_stats(db, begin_time_buffer=None, end_time_buffer=None):
 			stats['{}.pps'.format(gate_name).lower()],
 			stats['{}.kbps'.format(gate_name).lower()]))
 
-	print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
-	print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
+	#print('Failed traces (unable to find a corresponding receive): {} packets'.format(stats['failed.traces']))
+	#print('Failed truth determinations (unable to find intended source or destination): {} packets'.format(stats['failed.truth']))
 
 	print('\nValid packets sent: {}'.format(stats['valid.sent']))
 	print('Valid packets received: {}'.format(stats['valid.recv']))
 	print('Valid packets lost: {} ({})'.format(stats['valid.sent'] - stats['valid.recv'], stats['valid.loss.examples'][:10]))
 	print('Valid packet loss rate: {}'.format(stats['valid.loss.rate']))
 	print('Valid TCP loss rate: {}'.format(stats['valid.loss.rate.tcp']))
+	print('Valid UDP loss rate: {}'.format(stats['valid.loss.rate.udp']))
 	print('Valid Inter-ARG loss rate: {}'.format(stats['valid.loss.rate.interarg']))
+	print('Valid Inter-ARG, UDP/TCP loss rate: {}'.format(stats['valid.loss.rate.udptcp.interarg']))
+	print('Valid Inter-ARG/TCP loss rate: {}'.format(stats['valid.loss.rate.tcp.interarg']))
+	print('Valid Inter-ARG/UDP loss rate: {}'.format(stats['valid.loss.rate.udp.interarg']))
+	print('Valid ARG admin traffic loss rate: {}'.format(stats['valid.loss.rate.arg']))
+	print('Valid Extra-ARG loss rate: {}'.format(stats['valid.loss.rate.extraarg']))
 
 	print('\nInvalid packets sent: {}'.format(stats['invalid.sent']))
 	print('Invalid packets received: {} ({})'.format(stats['invalid.recv'], stats['invalid.recvd.examples'][:10]))
@@ -1650,6 +1692,9 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 	c.execute('''CREATE INDEX IF NOT EXISTS idx_losses_new ON packets (is_send, log_line, true_dest_id, time)''')
 	db.commit()
 
+	if type(proto_filter) == int:
+		proto_filter = (proto_filter,)
+
 	# Get all the gate and protected client IDs. If an inter-arg filter is on,
 	# then we know if a packet was inter-arg because the source and true_dest_id
 	# is in the gate/prot list 
@@ -1658,17 +1703,20 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 	# Get every packet that was an initial send (nobody points to them),
 	# then determine individual if they made it to their intended destination and
 	# if they match any filtering criteria in place
-	c.execute('''SELECT p1.id, p1.is_valid, p1.next_hop_id, p1.proto,
-						p1.system_id, p1.true_dest_id, p1.terminal_hop_id, pt.system_id, pt.reason_id, pt.is_send
-					FROM packets AS p1
-						JOIN packets AS pt ON p1.terminal_hop_id=pt.id
-						LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
-					WHERE p2.id IS NULL
-						AND p1.is_send=1
-						AND p1.log_line IS NOT NULL
-						AND p1.true_dest_id IS NOT NULL
-						AND p1.time BETWEEN ? AND ?''', (begin, end))
-	initial_send_packets = c.fetchall()
+	if not hasattr(get_packet_losses, 'cache'): 
+		c.execute('''SELECT p1.id, p1.is_valid, p1.next_hop_id, p1.proto,
+							p1.system_id, p1.true_dest_id, p1.terminal_hop_id, pt.system_id, pt.reason_id, pt.is_send
+						FROM packets AS p1
+							JOIN packets AS pt ON p1.terminal_hop_id=pt.id
+							LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
+						WHERE p2.id IS NULL
+							AND p1.is_send=1
+							AND p1.log_line IS NOT NULL
+							AND p1.true_dest_id IS NOT NULL
+							AND p1.time BETWEEN ? AND ?''', (begin, end))
+		get_packet_losses.cache = c.fetchall()
+	
+	initial_send_packets = get_packet_losses.cache
 
 	send_count = 0
 	recv_count = 0
@@ -1679,7 +1727,7 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 		if valid_filter != is_valid:
 			continue
 
-		if proto_filter is not None and proto_filter != proto:
+		if proto_filter is not None and proto not in proto_filter:
 			continue
 
 		if inter_arg_filter is not None:

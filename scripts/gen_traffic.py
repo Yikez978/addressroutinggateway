@@ -16,7 +16,7 @@ import hashlib
 import signal
 
 # Max packet size should allow for the MTU of EthII, including 40 bytes for IP/UDP/TCP and ARG header
-MAX_PACKET_SIZE = 1500 - 40 - 30 - 136 - 1
+MAX_PACKET_SIZE = 1100
 
 # Support functions
 def log(msg):
