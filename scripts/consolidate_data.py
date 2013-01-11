@@ -16,10 +16,16 @@ from glob import glob
 from process_run import *
 
 def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_bad=False):
-	print('Getting stats...', end='')
+	databases = glob(os.path.join(result_dir, '*', '*.db'))
+	databases.extend(glob(os.path.join(result_dir, '*.db')))
+	total_dbs = len(databases)
 
+	curr_db = 0
+	time_avg = 0
 	all_stats = list()
-	for db_path in glob(os.path.join(result_dir, '*', '*.db')):
+	for db_path in databases:
+		start = time.time()
+
 		# Open database
 		db = None
 		try:
@@ -30,6 +36,7 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 				raise Exception('contents are invalid'.format(db_path))
 		
 			# Get settings and stats for this run, then combine
+			clear_stats_cache()
 			settings = get_all_settings(db)
 			settings['results.database'] = db_path
 			stats = generate_stats(db, begin_time_buffer, end_time_buffer)
@@ -51,16 +58,22 @@ def get_stats(result_dir, begin_time_buffer=None, end_time_buffer=None, remove_b
 
 		db.close()
 
-		print('.', end='')
+		curr_db += 1
+		time_tot = time.time() - start
+		time_avg = (time_avg * (curr_db - 1) + time_tot) / curr_db
+		time_left = (total_dbs - curr_db) * time_avg / 60
+
+		print('\r{}\rGetting stats... {} of {} databases complete, {} minutes left'.format(' '*30, curr_db, total_dbs, time_left), end='')
 		sys.stdout.flush()
 
-	print('done')
+	print(' (done)')
 	return all_stats
 
 def get_headers(all_stats):
 	# Grab the headers for each database. Most are the same, but the loss ones may not be
 	# represented fully in all of the results
-	print('Getting unique headers...', end='')
+	print('Getting unique headers... ', end='')
+	sys.stdout.flush()
 
 	stat_headers = set()
 	loss_headers = set()
@@ -69,15 +82,13 @@ def get_headers(all_stats):
 		stat_headers |= set(stats.keys())
 		loss_headers |= set(losses.keys())
 
-		print('.', end='')
-		sys.stdout.flush()
-
 	print('done')
 	return (list(stat_headers), list(loss_headers))
 
 def create_csv(csv_path, headers, all_stats):
 	# Creates and outputs a CSV file containing the stats
-	print('Creating CSV at {}...'.format(csv_path), end='')
+	print('Creating CSV at {}... '.format(csv_path), end='')
+	sys.stdout.flush()
 
 	with open(csv_path, 'w') as csv:
 		# Header (settings, normal, and loss causes)
@@ -103,9 +114,6 @@ def create_csv(csv_path, headers, all_stats):
 						csv.write(',')
 
 			csv.write('\n')
-
-			print('.', end='')
-			sys.stdout.flush()
 
 	print('done')
 

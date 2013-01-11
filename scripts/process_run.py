@@ -1711,7 +1711,7 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 							LEFT OUTER JOIN packets AS p2 ON p1.id=p2.next_hop_id
 						WHERE p2.id IS NULL
 							AND p1.is_send=1
-							AND p1.log_line IS NOT NULL
+							-- AND p1.log_line IS NOT NULL
 							AND p1.true_dest_id IS NOT NULL
 							AND p1.time BETWEEN ? AND ?''', (begin, end))
 		get_packet_losses.cache = c.fetchall()
@@ -1757,6 +1757,10 @@ def get_packet_losses(db, begin, end, valid_filter=True, proto_filter=None, inte
 		return (len(losses)/send_count, send_count, recv_count, losses)
 	else:
 		return (0.0 if valid_filter else 1.0, 0, 0, [])
+
+def clear_stats_cache():
+	if hasattr(get_packet_losses, 'cache'):
+		del get_packet_losses.cache
 
 def valid_loss_rate(db, begin, end):
 	# Compare the number of sent valid packets to the number of sent valid packets
@@ -1859,7 +1863,7 @@ def gate_rates_per_second(db, begin, end):
 	# Determines how many packets per second and kilobits per second each gateway handled on average
 	c = db.cursor()
 
-	c.execute('CREATE INDEX IF NOT EXISTS idx_gate_rate ON packets (system_id, time, len)')
+	c.execute('CREATE INDEX IF NOT EXISTS idx_gate_rate_new ON packets (system_id, is_send, time)')
 	db.commit()
 
 	rates = {}
@@ -1870,6 +1874,7 @@ def gate_rates_per_second(db, begin, end):
 						FROM packets
 						JOIN systems ON systems.id=system_id
 						WHERE system_id=? 
+							AND is_send=0
 							AND time BETWEEN ? AND ?''', (gate, begin, end))
 
 		pps, kbps, name = c.fetchone()
