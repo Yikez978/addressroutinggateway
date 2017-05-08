@@ -28,7 +28,7 @@ From ARG source directory:
 
 Usage
 =====
-Please see thesis appendices for full description of usage and
+Please see [thesis appendices](https://github.com/traherom/arg_thesis) for full description of usage and
 configuration. The covers ARG itself, traffic generators,
 and results processor.
 
